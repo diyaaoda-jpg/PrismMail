@@ -259,8 +259,12 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const handleArchive = useCallback((email: EmailMessage) => {
     // todo: remove mock functionality
     setEmails(prev => prev.filter(e => e.id !== email.id));
+    // Clear selection if we archived the currently selected email
+    if (selectedEmail?.id === email.id) {
+      setSelectedEmail(null);
+    }
     console.log('Archived:', email.subject);
-  }, []);
+  }, [selectedEmail]);
 
   const handleDelete = useCallback((email: EmailMessage) => {
     // todo: remove mock functionality

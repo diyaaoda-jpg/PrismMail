@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -98,6 +99,9 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
           <DialogTitle className="text-lg font-semibold">
             Settings
           </DialogTitle>
+          <DialogDescription className="hidden">
+            Manage your account settings, email preferences, and application configuration.
+          </DialogDescription>
           <Button
             variant="ghost"
             size="icon"

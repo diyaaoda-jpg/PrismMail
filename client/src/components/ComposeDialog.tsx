@@ -77,9 +77,9 @@ export function ComposeDialog({ isOpen, onClose, replyTo }: ComposeDialogProps) 
           <DialogDescription className="hidden">
             Create and send a new email message.
           </DialogDescription>
-          <DialogTitle className="text-lg font-semibold sr-only">
+          <div className="text-lg font-semibold sr-only">
             {replyTo ? "Reply" : "Compose"}
-          </DialogTitle>
+          </div>
           <Button
             variant="ghost"
             size="icon"

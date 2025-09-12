@@ -38,6 +38,13 @@ export function ReadingMode({
   const currentIndex = email && emails.length > 0 ? emails.findIndex(e => e.id === email.id) : 0;
   
   if (!isOpen || !email) return null;
+  
+  // Guard against invalid index
+  if (currentIndex === -1) {
+    console.warn('Email not found in emails list, closing reading mode');
+    onClose();
+    return null;
+  }
 
   const handlePrevious = () => {
     if (currentIndex > 0) {
