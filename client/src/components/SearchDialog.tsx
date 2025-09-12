@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -112,6 +113,9 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
           <DialogTitle className="text-lg font-semibold">
             Search Mail
           </DialogTitle>
+          <DialogDescription className="hidden">
+            Search through your emails by keywords, sender, or subject.
+          </DialogDescription>
           <Button
             variant="ghost"
             size="icon"

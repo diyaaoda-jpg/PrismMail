@@ -15,6 +15,9 @@ interface ReadingModeProps {
   onNavigate?: (direction: 'prev' | 'next') => void;
   onReply?: (email: EmailMessage) => void;
   onForward?: (email: EmailMessage) => void;
+  onArchive?: (email: EmailMessage) => void;
+  onDelete?: (email: EmailMessage) => void;
+  onToggleFlagged?: (email: EmailMessage) => void;
   backgroundImage?: string;
 }
 
@@ -26,22 +29,18 @@ export function ReadingMode({
   onNavigate,
   onReply,
   onForward,
+  onArchive,
+  onDelete,
+  onToggleFlagged,
   backgroundImage,
 }: ReadingModeProps) {
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  useEffect(() => {
-    if (email && emails.length > 0) {
-      const index = emails.findIndex(e => e.id === email.id);
-      if (index >= 0) setCurrentIndex(index);
-    }
-  }, [email, emails]);
-
+  // Calculate current index from the passed email prop to avoid sync issues
+  const currentIndex = email && emails.length > 0 ? emails.findIndex(e => e.id === email.id) : 0;
+  
   if (!isOpen || !email) return null;
 
   const handlePrevious = () => {
     if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
       onNavigate?.('prev');
       console.log('Navigate to previous email');
     }
@@ -49,7 +48,6 @@ export function ReadingMode({
 
   const handleNext = () => {
     if (currentIndex < emails.length - 1) {
-      setCurrentIndex(currentIndex + 1);
       onNavigate?.('next');
       console.log('Navigate to next email');
     }
@@ -75,20 +73,26 @@ export function ReadingMode({
   };
 
   const handleToggleFlagged = () => {
-    if (email) {
-      // This would be handled by parent component
+    if (email && onToggleFlagged) {
+      onToggleFlagged(email);
       console.log('Toggle flagged from reading mode:', email.subject);
     }
   };
 
   const handleArchive = () => {
-    if (email) {
+    if (email && onArchive) {
+      onArchive(email);
+      // Close reading mode after archiving
+      onClose();
       console.log('Archive email from reading mode:', email.subject);
     }
   };
 
   const handleDelete = () => {
-    if (email) {
+    if (email && onDelete) {
+      onDelete(email);
+      // Close reading mode after deleting
+      onClose();
       console.log('Delete email from reading mode:', email.subject);
     }
   };
@@ -181,9 +185,9 @@ export function ReadingMode({
               onReply={onReply || handleReply}
               onReplyAll={onReply || handleReply}
               onForward={onForward || handleForward}
-              onArchive={handleArchive}
-              onDelete={handleDelete}
-              onToggleFlagged={handleToggleFlagged}
+              onArchive={onArchive || handleArchive}
+              onDelete={onDelete || handleDelete}
+              onToggleFlagged={onToggleFlagged || handleToggleFlagged}
             />
           </div>
         </div>

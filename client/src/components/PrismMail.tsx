@@ -256,6 +256,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [emails, handleEmailSelect]);
 
+  const handleArchive = useCallback((email: EmailMessage) => {
+    // todo: remove mock functionality
+    setEmails(prev => prev.filter(e => e.id !== email.id));
+    console.log('Archived:', email.subject);
+  }, []);
+
+  const handleDelete = useCallback((email: EmailMessage) => {
+    // todo: remove mock functionality
+    setEmails(prev => prev.filter(e => e.id !== email.id));
+    // If we deleted the selected email, clear selection
+    if (selectedEmail?.id === email.id) {
+      setSelectedEmail(null);
+    }
+    console.log('Deleted:', email.subject);
+  }, [selectedEmail]);
+
   const getUserDisplayName = () => {
     if (user?.firstName || user?.lastName) {
       return `${user.firstName || ''} ${user.lastName || ''}`.trim();
@@ -373,8 +389,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
             onReply={handleReply}
             onReplyAll={handleReplyAll}
             onForward={handleForward}
-            onArchive={(email) => console.log('Archive:', email.subject)}
-            onDelete={(email) => console.log('Delete:', email.subject)}
+            onArchive={handleArchive}
+            onDelete={handleDelete}
             onToggleFlagged={(email) => handleToggleFlagged(email.id)}
           />
         </div>
@@ -389,6 +405,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
         onNavigate={handleReadingModeNavigation}
         onReply={handleReply}
         onForward={handleForward}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        onToggleFlagged={(email) => handleToggleFlagged(email.id)}
         backgroundImage="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&h=1080&fit=crop"
       />
 

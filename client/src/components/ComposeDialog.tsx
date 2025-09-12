@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -72,7 +73,11 @@ export function ComposeDialog({ isOpen, onClose, replyTo }: ComposeDialogProps) 
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
         <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <DialogTitle className="text-lg font-semibold">
+          <DialogTitle className="text-lg font-semibold">Compose Email</DialogTitle>
+          <DialogDescription className="hidden">
+            Create and send a new email message.
+          </DialogDescription>
+          <DialogTitle className="text-lg font-semibold sr-only">
             {replyTo ? "Reply" : "Compose"}
           </DialogTitle>
           <Button
