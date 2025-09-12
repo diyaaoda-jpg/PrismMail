@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, ChevronLeft, ChevronRight, ArrowLeft, Settings } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, ArrowLeft, Reply, Forward, Archive, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,6 +13,8 @@ interface ReadingModeProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigate?: (direction: 'prev' | 'next') => void;
+  onReply?: (email: EmailMessage) => void;
+  onForward?: (email: EmailMessage) => void;
   backgroundImage?: string;
 }
 
@@ -22,6 +24,8 @@ export function ReadingMode({
   isOpen,
   onClose,
   onNavigate,
+  onReply,
+  onForward,
   backgroundImage,
 }: ReadingModeProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -54,6 +58,39 @@ export function ReadingMode({
   const handleClose = () => {
     onClose();
     console.log('Close reading mode');
+  };
+
+  const handleReply = () => {
+    if (email && onReply) {
+      onReply(email);
+      console.log('Reply to email from reading mode:', email.subject);
+    }
+  };
+
+  const handleForward = () => {
+    if (email && onForward) {
+      onForward(email);
+      console.log('Forward email from reading mode:', email.subject);
+    }
+  };
+
+  const handleToggleFlagged = () => {
+    if (email) {
+      // This would be handled by parent component
+      console.log('Toggle flagged from reading mode:', email.subject);
+    }
+  };
+
+  const handleArchive = () => {
+    if (email) {
+      console.log('Archive email from reading mode:', email.subject);
+    }
+  };
+
+  const handleDelete = () => {
+    if (email) {
+      console.log('Delete email from reading mode:', email.subject);
+    }
   };
 
   return (
@@ -141,12 +178,12 @@ export function ReadingMode({
           <div className="h-full rounded-lg backdrop-blur-lg bg-background/90 border shadow-2xl overflow-hidden">
             <EmailViewer
               email={email}
-              onReply={(email) => console.log('Reply from reading mode:', email.subject)}
-              onReplyAll={(email) => console.log('Reply all from reading mode:', email.subject)}
-              onForward={(email) => console.log('Forward from reading mode:', email.subject)}
-              onArchive={(email) => console.log('Archive from reading mode:', email.subject)}
-              onDelete={(email) => console.log('Delete from reading mode:', email.subject)}
-              onToggleFlagged={(email) => console.log('Toggle flagged from reading mode:', email.subject)}
+              onReply={onReply || handleReply}
+              onReplyAll={onReply || handleReply}
+              onForward={onForward || handleForward}
+              onArchive={handleArchive}
+              onDelete={handleDelete}
+              onToggleFlagged={handleToggleFlagged}
             />
           </div>
         </div>
@@ -180,6 +217,68 @@ export function ReadingMode({
       >
         <ChevronRight className="h-6 w-6" />
       </Button>
+
+      {/* Floating action bar */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10">
+        <div className="flex items-center gap-2 p-2 rounded-lg backdrop-blur-lg bg-background/90 border shadow-lg">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleReply}
+            disabled={!onReply}
+            data-testid="button-quick-reply"
+            className="hover-elevate active-elevate-2"
+          >
+            <Reply className="h-4 w-4 mr-2" />
+            Reply
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleForward}
+            disabled={!onForward}
+            data-testid="button-quick-forward"
+            className="hover-elevate active-elevate-2"
+          >
+            <Forward className="h-4 w-4 mr-2" />
+            Forward
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleArchive}
+            data-testid="button-quick-archive"
+            className="hover-elevate active-elevate-2"
+          >
+            <Archive className="h-4 w-4 mr-2" />
+            Archive
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleFlagged}
+            data-testid="button-quick-star"
+            className="hover-elevate active-elevate-2"
+          >
+            <Star className={`h-4 w-4 mr-2 ${email?.isFlagged ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+            {email?.isFlagged ? 'Unstar' : 'Star'}
+          </Button>
+          
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleDelete}
+            data-testid="button-quick-delete"
+            className="hover-elevate active-elevate-2 text-destructive hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

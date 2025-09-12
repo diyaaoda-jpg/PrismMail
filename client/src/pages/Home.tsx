@@ -39,12 +39,18 @@ export default function Home() {
   }
 
   const handleLogout = () => {
-    console.log('Logging out user:', user?.email || user?.id);
+    console.log('Logging out user:', (user as any)?.email || (user as any)?.id);
   };
 
   return (
     <PrismMail 
-      user={user as any} // todo: fix type compatibility with auth user
+      user={{
+        id: (user as any)?.id || 'demo-user',
+        firstName: (user as any)?.firstName || 'Demo',
+        lastName: (user as any)?.lastName || 'User',
+        email: (user as any)?.email || 'demo@example.com',
+        profileImageUrl: (user as any)?.profileImageUrl
+      }}
       onLogout={handleLogout}
     />
   );

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { BookOpen, User } from "lucide-react";
+import { BookOpen, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +10,9 @@ import { MailSidebar } from "./MailSidebar";
 import { EmailListItem, type EmailMessage } from "./EmailListItem";
 import { EmailViewer } from "./EmailViewer";
 import { ReadingMode } from "./ReadingMode";
+import { ComposeDialog } from "./ComposeDialog";
+import { SearchDialog } from "./SearchDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import { cn } from "@/lib/utils";
 
 interface PrismMailProps {
@@ -101,6 +104,12 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [emails, setEmails] = useState<EmailMessage[]>(mockEmails);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Dialog states
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [composeReplyTo, setComposeReplyTo] = useState<{to: string; subject: string; body?: string} | undefined>();
 
   // Filter emails based on selected folder and search
   const filteredEmails = emails.filter(email => {
@@ -192,6 +201,61 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Logging out');
   };
 
+  // Dialog handlers
+  const handleCompose = useCallback(() => {
+    setComposeReplyTo(undefined);
+    setIsComposeOpen(true);
+    console.log('Compose clicked');
+  }, []);
+
+  const handleSearch = useCallback(() => {
+    setIsSearchOpen(true);
+    console.log('Search clicked');
+  }, []);
+
+  const handleSettings = useCallback(() => {
+    setIsSettingsOpen(true);
+    console.log('Settings clicked');
+  }, []);
+
+  const handleReply = useCallback((email: EmailMessage) => {
+    setComposeReplyTo({
+      to: email.from,
+      subject: email.subject.startsWith('Re: ') ? email.subject : `Re: ${email.subject}`,
+      body: `\n\n--- Original Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+    });
+    setIsComposeOpen(true);
+    console.log('Reply to:', email.subject);
+  }, []);
+
+  const handleReplyAll = useCallback((email: EmailMessage) => {
+    setComposeReplyTo({
+      to: email.from,
+      subject: email.subject.startsWith('Re: ') ? email.subject : `Re: ${email.subject}`,
+      body: `\n\n--- Original Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+    });
+    setIsComposeOpen(true);
+    console.log('Reply all to:', email.subject);
+  }, []);
+
+  const handleForward = useCallback((email: EmailMessage) => {
+    setComposeReplyTo({
+      to: '',
+      subject: email.subject.startsWith('Fwd: ') ? email.subject : `Fwd: ${email.subject}`,
+      body: `\n\n--- Forwarded Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+    });
+    setIsComposeOpen(true);
+    console.log('Forward:', email.subject);
+  }, []);
+
+  const handleSelectEmailFromSearch = useCallback((emailId: string) => {
+    const email = emails.find(e => e.id === emailId);
+    if (email) {
+      setSelectedEmail(email);
+      handleEmailSelect(email);
+    }
+  }, [emails, handleEmailSelect]);
+
   const getUserDisplayName = () => {
     if (user?.firstName || user?.lastName) {
       return `${user.firstName || ''} ${user.lastName || ''}`.trim();
@@ -210,8 +274,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       <MailSidebar
         selectedFolder={selectedFolder}
         onFolderSelect={setSelectedFolder}
-        onCompose={() => console.log('Compose email')}
-        onSearch={setSearchQuery}
+        onCompose={handleCompose}
+        onSearch={handleSearch}
         unreadCounts={mockUnreadCounts}
       />
 
@@ -256,6 +320,10 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                   </div>
                 </div>
                 <Separator />
+                <DropdownMenuItem onClick={handleSettings} data-testid="button-settings">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
                   Logout
                 </DropdownMenuItem>
@@ -302,9 +370,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           {/* Email viewer */}
           <EmailViewer
             email={selectedEmail}
-            onReply={(email) => console.log('Reply to:', email.subject)}
-            onReplyAll={(email) => console.log('Reply all to:', email.subject)}
-            onForward={(email) => console.log('Forward:', email.subject)}
+            onReply={handleReply}
+            onReplyAll={handleReplyAll}
+            onForward={handleForward}
             onArchive={(email) => console.log('Archive:', email.subject)}
             onDelete={(email) => console.log('Delete:', email.subject)}
             onToggleFlagged={(email) => handleToggleFlagged(email.id)}
@@ -319,8 +387,31 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
         isOpen={isReadingMode}
         onClose={handleCloseReadingMode}
         onNavigate={handleReadingModeNavigation}
+        onReply={handleReply}
+        onForward={handleForward}
         backgroundImage="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&h=1080&fit=crop"
       />
+
+      {/* Dialogs */}
+      <ComposeDialog
+        isOpen={isComposeOpen}
+        onClose={() => setIsComposeOpen(false)}
+        replyTo={composeReplyTo}
+      />
+      
+      <SearchDialog
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onSelectEmail={handleSelectEmailFromSearch}
+      />
+      
+      {user && (
+        <SettingsDialog
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          user={user}
+        />
+      )}
     </div>
   );
 }
