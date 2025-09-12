@@ -1,0 +1,206 @@
+
+Project: PrismMail — Priority Web Mail (IMAP/EWS)
+
+1) One-line vision
+
+A sleek, dual-pane web app that connects to a private mailbox via Exchange EWS or IMAP, lets me sort and prioritize emails, compose/send/forward, and switch to a beautiful “Reading Mode” with bold visual cues for read vs unread.
+
+2) Core user flows (must have)
+	1.	Connect account
+
+	•	Enter server type: Exchange (EWS) or IMAP.
+	•	Inputs:
+	•	EWS: EWS endpoint URL, email, username (if different), password (or OAuth), optional domain.
+	•	IMAP/SMTP: host, port, SSL/TLS, username, password (or OAuth), SMTP host/port.
+	•	Save as an encrypted connection profile.
+
+	2.	Inbox view (dual-pane)
+
+	•	Left pane: folders + message list.
+	•	Right pane: message viewer.
+	•	Sort options: Date, From, Subject, Size, Unread first, Starred first, “My Priority” (custom weight).
+	•	Filters: unread, flagged, with attachments, from VIPs, date ranges.
+	•	Quick actions: mark read/unread, star, move, delete, archive.
+
+	3.	Priorities
+
+	•	Star level (0–3).
+	•	Rule builder (no-code): e.g., “If From contains @client.com → set Priority=3 and color tag ‘Client’.”
+	•	VIP list (contacts → auto-highlight).
+	•	“Focus” filter = Priority ≥2 OR unread from VIPs.
+
+	4.	Compose / Send / Forward / Reply
+
+	•	Rich text, attachments (drag & drop), signature.
+	•	SMTP send (or EWS send).
+	•	Forward with/without attachments.
+	•	Quick templates + default signature per account.
+
+	5.	Reading Mode (immersive)
+
+	•	Full-bleed background image (user-chosen) behind a glass-blur card for the content.
+	•	Single-column reader with Next / Previous controls (like a book).
+	•	Strong color contrast between read vs unread items in the top navigation ribbon and next/prev HUD.
+	•	Toggle back to dual-pane any time.
+
+	6.	Read vs Unread styling (distinct!)
+
+	•	Unread in list: larger weight, accent color pill, subtle glow on hover.
+	•	Read: dimmed subject, neutral tag.
+	•	Global theme options: “Sunrise / Neon / Deep Space” (clearly different palettes).
+
+3) Nice-to-have (phase 2)
+	•	Snooze to later, send later.
+	•	Keyboard shortcuts (j/k navigate, r reply, f forward).
+	•	Offline cache (IndexedDB) for last 30 days.
+	•	Attachment quick preview (PDF/images).
+	•	Threaded view toggle.
+
+4) UX layout (quick wireframe notes)
+	•	Header: account switcher · global search · “Reading Mode” toggle.
+	•	Left rail: folders, saved filters, “Focus”.
+	•	Center: message list with chips (priority, unread, attachments).
+	•	Right: message viewer with actions (reply/forward/more).
+	•	Reading Mode: hides left rail, expands viewer; top HUD shows thread position (e.g., 12/248), bold color bar shows unread status; background image selectable; next/prev arrows on sides.
+
+5) Visual language
+	•	Typography: Inter or SF; 16px base, 600 for subjects, 700 for unread.
+	•	Corners: 14–16px radius, soft shadow.
+	•	Colors (example):
+	•	Unread pill: Neon theme primary.
+	•	Priority 3: red tag; Priority 2: orange; Priority 1: yellow.
+	•	Read: 60% opacity body text; Unread: 100% subject + accent underline.
+	•	Animations: 150–200ms ease for hover/expand; crossfade when entering Reading Mode.
+
+6) Tech stack
+	•	Frontend: React + Vite, TypeScript, TailwindCSS. State via Zustand or Redux Toolkit. Rich editor: TipTap or Quill.
+	•	Backend: Node.js (NestJS or Fastify).
+	•	Mail connectors:
+	•	IMAP: imapflow (Node) for fetch + nodemailer for SMTP send.
+	•	EWS: ews-javascript-api or server-side SOAP calls; sending via EWS or SMTP.
+	•	Auth to mailbox: Basic creds or OAuth 2.0 (recommended for Exchange/Office365 & modern IMAP).
+	•	Storage: PostgreSQL (users, rules, priorities), Redis (caching).
+	•	Security: Secrets in KMS, server-side encryption (AES-256), TLS everywhere, CSRF & same-site cookies.
+
+7) Data model (minimal)
+
+User
+	•	id, email, password_hash (or SSO), created_at
+
+AccountConnection
+	•	id, user_id (FK)
+	•	protocol: IMAP | EWS
+	•	settings_json (encrypted): host/port, SSL, username, OAuth tokens, EWS URL, SMTP settings
+
+MailIndex
+	•	id, account_id (FK), folder, message_id (server UID), subject, from, to, date, size, has_attachments (bool), is_read (bool), is_flagged (bool), thread_id, snippet (text)
+	•	(Fetched/synced; body stored only if user enables local cache)
+
+PriorityRule
+	•	id, account_id (FK)
+	•	conditions_json (e.g., fromContains, subjectContains, hasAttachment, domainIs)
+	•	action: setPriority (0–3), addTag (string), markImportant (bool)
+
+UserPrefs
+	•	id, user_id (FK)
+	•	theme, background_image_url, default_sort, list_density, signature_html
+
+8) API endpoints (suggested)
+
+POST /api/auth/signup|login|logout
+POST /api/connections (create) / GET /api/connections
+POST /api/mail/sync body: { accountId, folder? } → triggers incremental sync
+GET /api/mail/list query: { accountId, folder, sort, filter, page }
+GET /api/mail/:id → headers + body (streamed/HTML + text rendering)
+POST /api/mail/:id/flags body: { read?, flagged?, priority? }
+POST /api/mail/send body: { accountId, to[], cc[], bcc[], subject, html, attachments[] }
+POST /api/mail/forward body: { messageId, to[], includeAttachments? }
+GET /api/rules / POST /api/rules / DELETE /api/rules/:id
+GET /api/prefs / PATCH /api/prefs
+
+9) IMAP/EWS sync logic (high level)
+	•	Initial sync: fetch folder list; for each selected folder (Inbox, Sent, Archive), fetch headers in batches (UID ranges), index into MailIndex.
+	•	Incremental:
+	•	IMAP IDLE or periodic poll (e.g., 60s); fetch by UID since last seen.
+	•	EWS: SyncFolderItems with watermarks for delta changes.
+	•	Body loading: lazy-load full body/attachments when opening a message.
+	•	Flags:
+	•	IMAP: map \Seen, \Flagged ↔ read/starred; custom keyword prism/priority:3.
+	•	EWS: IsRead, Importance, Categories for priority tags.
+
+10) Priority scoring (deterministic + rules)
+	•	Base = 0.
+	•	+3 if sender in VIP list.
+	•	+1 if has attachments and from approved domains.
+	•	+rule actions (override): if rule sets Priority=3, it wins.
+	•	Store final score on MailIndex.priority for fast sort; recompute on new mail or rules update.
+
+11) Security & privacy
+	•	Do not store raw passwords if OAuth is available.
+	•	Encrypt connection settings at rest; rotate crypto keys.
+	•	Sanitize HTML email (DOMPurify server-side) and display in a sandboxed iframe to prevent script execution.
+	•	Rate limit SMTP send; DKIM/SPF/DMARC compatibility guidance for users.
+
+12) Accessibility
+	•	High-contrast mode for Reading Mode.
+	•	WCAG-compliant focus states.
+	•	Keyboard navigation everywhere (document shortcuts list in app).
+
+13) Theming & backgrounds
+	•	User uploads/selects background image (stored S3/GCS).
+	•	Apply blur + brightness mask behind the reader card.
+	•	Three preset palettes with dramatic differences for “read vs unread” (e.g., unread = bright accent bar on card edge; read = neutral grayscale).
+
+14) Acceptance criteria (demo ready)
+	•	Connects successfully to either a real IMAP or EWS test mailbox and lists last 200 emails.
+	•	Sorts by all fields; “Unread first” and “My Priority” work.
+	•	Can mark read/unread, star, and move between folders.
+	•	Compose/send and forward work via SMTP/EWS.
+	•	Reading Mode toggles; background image visible; next/prev works.
+	•	Unread styling clearly distinct (visual QA: pass/fail screenshot).
+	•	Rule builder can create at least 1 rule that auto-sets Priority on new mail.
+
+15) example Sample code stubs (Node/TypeScript) but not tested 
+
+// IMAP (imapflow)
+
+import { ImapFlow } from 'imapflow';
+
+export async function fetchHeaders(cfg) {
+  const client = new ImapFlow({
+    host: cfg.host, port: cfg.port, secure: cfg.secure,
+    auth: { user: cfg.username, pass: cfg.password }
+  });
+  await client.connect();
+  await client.mailboxOpen('INBOX');
+  const lock = await client.getMailboxLock('INBOX');
+  try {
+    for await (let msg of client.fetch({ seen: false }, { envelope: true, flags: true, uid: true, internalDate: true, size: true })) {
+      // map to MailIndex rows…
+    }
+  } finally {
+    lock.release();
+    await client.logout();
+  }
+}
+
+// Send (nodemailer)
+
+import nodemailer from 'nodemailer';
+export async function sendMail(cfg, m) {
+  const transporter = nodemailer.createTransport({
+    host: cfg.smtpHost, port: cfg.smtpPort, secure: cfg.smtpSecure,
+    auth: { user: cfg.username, pass: cfg.password }
+  });
+  await transporter.sendMail({
+    from: cfg.from, to: m.to, cc: m.cc, bcc: m.bcc,
+    subject: m.subject, html: m.html, attachments: m.attachments
+  });
+}
+
+// EWS delta sync outline
+
+// Use SyncFolderItems with a stored watermark to get changes since last sync.
+// For each Change, upsert MailIndex and update flags/read state.
+
+
