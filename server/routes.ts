@@ -2,6 +2,9 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { insertAccountConnectionSchema } from "@shared/schema";
+import { testConnection } from "./connectionTest";
+import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -34,11 +37,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/accounts', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const account = await storage.createAccountConnection({ ...req.body, userId });
+      
+      // Validate request body using Zod schema
+      const validationResult = insertAccountConnectionSchema.safeParse({
+        ...req.body,
+        userId
+      });
+      
+      if (!validationResult.success) {
+        return res.status(400).json({ 
+          message: "Validation failed", 
+          errors: validationResult.error.issues 
+        });
+      }
+      
+      const accountData = validationResult.data;
+      
+      // Create the account first
+      const account = await storage.createAccountConnection(accountData);
+      
+      // Test the connection in the background
+      testConnection(accountData.protocol as 'IMAP' | 'EWS', account.settingsJson)
+        .then(async (result) => {
+          // Update the account with connection test results
+          await storage.updateAccountConnection(account.id, {
+            isActive: result.success,
+            lastChecked: result.lastChecked,
+            lastError: result.error || null,
+          });
+        })
+        .catch((error) => {
+          console.error('Background connection test failed:', error);
+          // Update with failure status
+          storage.updateAccountConnection(account.id, {
+            isActive: false,
+            lastChecked: new Date(),
+            lastError: 'Connection test failed: ' + error.message,
+          });
+        });
+      
       res.json(account);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating account:", error);
-      res.status(500).json({ message: "Failed to create account" });
+      res.status(500).json({ message: error.message || "Failed to create account" });
+    }
+  });
+
+  app.delete('/api/accounts/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.claims.sub;
+      
+      // Validate the ID is a proper string
+      if (!id || typeof id !== 'string') {
+        return res.status(400).json({ message: "Invalid account ID" });
+      }
+      
+      // Verify the account belongs to the user before deleting
+      const accounts = await storage.getUserAccountConnections(userId);
+      const accountToDelete = accounts.find(account => account.id === id);
+      
+      if (!accountToDelete) {
+        return res.status(404).json({ message: "Account not found or does not belong to user" });
+      }
+      
+      await storage.deleteAccountConnection(id);
+      res.json({ message: "Account deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting account:", error);
+      res.status(500).json({ message: error.message || "Failed to delete account" });
     }
   });
 

@@ -32,7 +32,9 @@ export const accountConnections = pgTable("account_connections", {
   name: varchar("name").notNull(), // Display name
   protocol: varchar("protocol", { enum: ["IMAP", "EWS"] }).notNull(),
   settingsJson: text("settings_json").notNull(), // Encrypted connection settings
-  isActive: boolean("is_active").default(true),
+  isActive: boolean("is_active").default(false), // Set to false until connection is verified
+  lastChecked: timestamp("last_checked"),
+  lastError: text("last_error"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -20,6 +20,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
+import { encryptAccountSettings, decryptAccountSettings } from "./crypto";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -76,21 +77,80 @@ export class DatabaseStorage implements IStorage {
 
   // Account connections
   async getUserAccountConnections(userId: string): Promise<AccountConnection[]> {
-    return await db.select().from(accountConnections).where(eq(accountConnections.userId, userId));
+    const accounts = await db.select().from(accountConnections).where(eq(accountConnections.userId, userId));
+    
+    // Decrypt settings but remove password from response for security
+    return accounts.map(account => ({
+      ...account,
+      settingsJson: JSON.stringify(decryptAccountSettings(account.settingsJson))
+    }));
   }
 
   async createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection> {
-    const [result] = await db.insert(accountConnections).values(connection).returning();
-    return result;
+    // Parse settings from JSON if it's a string, otherwise use as-is
+    let settings: any;
+    if (typeof connection.settingsJson === 'string') {
+      try {
+        settings = JSON.parse(connection.settingsJson);
+      } catch (error) {
+        throw new Error('Invalid settings JSON format');
+      }
+    } else {
+      settings = connection.settingsJson;
+    }
+    
+    // Encrypt the settings before storing
+    const encryptedSettings = encryptAccountSettings(settings);
+    
+    // Create the connection with encrypted settings
+    const connectionData = {
+      ...connection,
+      settingsJson: encryptedSettings,
+      isActive: false, // Will be set to true after successful connection test
+      lastChecked: null,
+      lastError: null,
+    };
+    
+    const [result] = await db.insert(accountConnections).values(connectionData).returning();
+    
+    // Return result without decrypting - frontend doesn't need password
+    return {
+      ...result,
+      settingsJson: JSON.stringify(decryptAccountSettings(result.settingsJson))
+    };
   }
 
   async updateAccountConnection(id: string, updates: Partial<AccountConnection>): Promise<AccountConnection | undefined> {
+    const updateData = { ...updates, updatedAt: new Date() };
+    
+    // If settingsJson is being updated, encrypt it
+    if (updates.settingsJson) {
+      let settings: any;
+      if (typeof updates.settingsJson === 'string') {
+        try {
+          settings = JSON.parse(updates.settingsJson);
+        } catch (error) {
+          throw new Error('Invalid settings JSON format');
+        }
+      } else {
+        settings = updates.settingsJson;
+      }
+      updateData.settingsJson = encryptAccountSettings(settings);
+    }
+    
     const [result] = await db
       .update(accountConnections)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updateData)
       .where(eq(accountConnections.id, id))
       .returning();
-    return result;
+    
+    if (!result) return undefined;
+    
+    // Return result without password for security
+    return {
+      ...result,
+      settingsJson: JSON.stringify(decryptAccountSettings(result.settingsJson))
+    };
   }
 
   async deleteAccountConnection(id: string): Promise<void> {
