@@ -438,14 +438,13 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   const handleForward = useCallback((email: EmailMessage) => {
     const forwardData = makeForward(email);
-    setComposeReplyTo({
+    setInlineComposeDraft({
       to: forwardData.to,
       cc: forwardData.cc,
       bcc: forwardData.bcc,
       subject: forwardData.subject,
       body: forwardData.body
     });
-    setIsComposeOpen(true);
     console.log('Forward:', email.subject);
   }, []);
 
