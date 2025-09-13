@@ -27,7 +27,88 @@ async function messageExists(
 ): Promise<boolean> {
   // Get a reasonable number of recent messages to check against
   const existingMessages = await storage.getMailMessages(accountId, folder, 1000, 0);
-  return existingMessages.some(msg => msg.messageId === messageId);
+  console.log(`Checking if message ${messageId} exists in ${folder}: found ${existingMessages.length} existing messages`);
+  const exists = existingMessages.some(msg => msg.messageId === messageId);
+  console.log(`Message ${messageId} exists: ${exists}`);
+  return exists;
+}
+
+/**
+ * Convert readable stream to buffer
+ */
+async function streamToBuffer(readable: any): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    readable.on('data', (chunk: Buffer) => chunks.push(chunk));
+    readable.on('end', () => resolve(Buffer.concat(chunks)));
+    readable.on('error', reject);
+  });
+}
+
+/**
+ * Decode email body based on encoding
+ */
+function decodeBody(buffer: Buffer, encoding?: string, charset?: string): string {
+  let decoded = buffer;
+  
+  // Handle common encodings
+  if (encoding === 'base64') {
+    try {
+      decoded = Buffer.from(buffer.toString(), 'base64');
+    } catch (e) {
+      console.log('Failed to decode base64:', e);
+    }
+  } else if (encoding === 'quoted-printable') {
+    try {
+      // Simple quoted-printable decoder
+      let str = buffer.toString();
+      str = str.replace(/=([0-9A-F]{2})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+      str = str.replace(/=\r?\n/g, '');
+      decoded = Buffer.from(str, 'binary');
+    } catch (e) {
+      console.log('Failed to decode quoted-printable:', e);
+    }
+  }
+  
+  // Convert to string with proper charset
+  const charsetEncoding = (charset && Buffer.isEncoding(charset)) ? charset : 'utf8';
+  return decoded.toString(charsetEncoding as BufferEncoding);
+}
+
+/**
+ * Recursively visit body structure to find text parts
+ */
+async function visitBodyStructure(
+  client: ImapFlow,
+  uid: number,
+  node: any,
+  result: { bodyText: string; bodyHtml: string }
+): Promise<void> {
+  if (!node) return;
+  
+  if (node.childNodes && Array.isArray(node.childNodes)) {
+    // Multipart - visit all children
+    for (const child of node.childNodes) {
+      await visitBodyStructure(client, uid, child, result);
+    }
+  } else if (node.type === 'text' && node.part) {
+    // Text part - try to download content
+    try {
+      const { content } = await client.download(uid, node.part, { uid: true });
+      const buffer = await streamToBuffer(content);
+      const text = decodeBody(buffer, node.encoding, node.parameters?.charset);
+      
+      if (node.subtype === 'plain' && !result.bodyText) {
+        result.bodyText = text.substring(0, 10000);
+        console.log(`Downloaded text/plain part ${node.part} for UID ${uid}: ${text.length} chars`);
+      } else if (node.subtype === 'html' && !result.bodyHtml) {
+        result.bodyHtml = text.substring(0, 20000);
+        console.log(`Downloaded text/html part ${node.part} for UID ${uid}: ${text.length} chars`);
+      }
+    } catch (e) {
+      console.error(`Failed to download part ${node.part} for UID ${uid}:`, e);
+    }
+  }
 }
 
 /**
@@ -38,59 +119,26 @@ async function extractMessageContent(
   uid: number, 
   bodyStructure: any
 ): Promise<{ bodyText: string; bodyHtml: string }> {
-  let bodyText = '';
-  let bodyHtml = '';
+  const result = { bodyText: '', bodyHtml: '' };
 
   try {
-    // Try to find text/plain part
-    if (bodyStructure.childNodes) {
-      // Multipart message
-      for (const part of bodyStructure.childNodes) {
-        if (part.type === 'text' && part.subtype === 'plain') {
-          try {
-            const content = await client.download(uid, part.part, { uid: true });
-            bodyText = content.toString().substring(0, 10000);
-            break;
-          } catch (e) {
-            console.log('Could not fetch text/plain part:', e);
-          }
-        }
-      }
-      
-      // Try to find text/html part
-      for (const part of bodyStructure.childNodes) {
-        if (part.type === 'text' && part.subtype === 'html') {
-          try {
-            const content = await client.download(uid, part.part, { uid: true });
-            bodyHtml = content.toString().substring(0, 20000);
-            break;
-          } catch (e) {
-            console.log('Could not fetch text/html part:', e);
-          }
-        }
-      }
-    } else {
-      // Single part message
-      if (bodyStructure.type === 'text') {
-        try {
-          const content = await client.download(uid, '1', { uid: true });
-          const contentStr = content.toString();
-          
-          if (bodyStructure.subtype === 'html') {
-            bodyHtml = contentStr.substring(0, 20000);
-          } else {
-            bodyText = contentStr.substring(0, 10000);
-          }
-        } catch (e) {
-          console.log('Could not fetch single part content:', e);
-        }
-      }
+    await visitBodyStructure(client, uid, bodyStructure, result);
+    
+    // Fallback: if we have text but no HTML, create simple HTML
+    if (result.bodyText && !result.bodyHtml) {
+      result.bodyHtml = `<pre>${result.bodyText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
     }
+    
+    // Log if we couldn't find any content
+    if (!result.bodyText && !result.bodyHtml) {
+      console.warn(`No text content found for UID ${uid}, bodyStructure:`, JSON.stringify(bodyStructure, null, 2));
+    }
+    
   } catch (error) {
-    console.error('Error extracting message content:', error);
+    console.error(`Error extracting message content for UID ${uid}:`, error);
   }
 
-  return { bodyText, bodyHtml };
+  return result;
 }
 
 /**
