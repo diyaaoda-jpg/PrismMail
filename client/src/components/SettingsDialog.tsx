@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Plus, Trash2, Server, RefreshCw } from "lucide-react";
+import { AlertCircle, Plus, Trash2, Server, RefreshCw, Edit } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
@@ -77,6 +77,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState("account");
   const [isSaving, setIsSaving] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
+  const [editAccountId, setEditAccountId] = useState<string | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
   const [syncingAccounts, setSyncingAccounts] = useState<Set<string>>(new Set());
 
@@ -280,6 +281,43 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     }
   });
 
+  const updateAccountMutation = useMutation({
+    mutationFn: async ({ accountId, accountData }: { accountId: string; accountData: AccountFormData }) => {
+      // Prepare settings for update
+      const settingsJson = JSON.stringify({
+        host: accountData.host,
+        port: accountData.protocol === 'IMAP' ? 993 : undefined,
+        username: accountData.username,
+        password: accountData.password,
+        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
+      });
+      
+      const response = await apiRequest('PUT', `/api/accounts/${accountId}`, {
+        name: accountData.name,
+        protocol: accountData.protocol,
+        settingsJson
+      });
+      
+      return await response.json() as AccountConnection;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/accounts'] });
+      toast({
+        title: "Account Updated Successfully", 
+        description: "Connection test passed. Your email account has been updated."
+      });
+      setEditAccountId(null);
+      accountForm.reset();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Update Failed",
+        description: error.message || "Failed to update your email account. Please check your settings.",
+        variant: "destructive"
+      });
+    }
+  });
+
   const deleteAccountMutation = useMutation({
     mutationFn: async (accountId: string) => {
       const response = await apiRequest('DELETE', `/api/accounts/${accountId}`);
@@ -301,6 +339,38 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       });
     }
   });
+
+  const handleEditAccount = (account: AccountConnection) => {
+    try {
+      // Parse current settings to pre-fill the form
+      const settings = JSON.parse(account.settingsJson);
+      
+      // Pre-fill the form with current account data
+      accountForm.setValue('name', account.name);
+      accountForm.setValue('protocol', account.protocol as 'IMAP' | 'EWS');
+      accountForm.setValue('host', settings.host || '');
+      accountForm.setValue('port', settings.port?.toString() || (account.protocol === 'IMAP' ? '993' : ''));
+      accountForm.setValue('username', settings.username || '');
+      accountForm.setValue('password', ''); // Don't pre-fill password for security
+      accountForm.setValue('useSSL', settings.useSSL ?? true);
+      
+      // Enter edit mode
+      setEditAccountId(account.id);
+      setShowAddAccount(false); // Close add account form if open
+    } catch (error) {
+      console.error('Failed to parse account settings:', error);
+      toast({
+        title: "Edit Failed",
+        description: "Failed to load account settings for editing.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditAccountId(null);
+    accountForm.reset();
+  };
 
   const handleDeleteAccount = (accountId: string) => {
     setDeleteAccountId(accountId);
@@ -356,7 +426,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   };
 
   const onSubmitAccount = (data: AccountFormData) => {
-    createAccountMutation.mutate(data);
+    if (editAccountId) {
+      // We're editing an existing account
+      updateAccountMutation.mutate({ accountId: editAccountId, accountData: data });
+    } else {
+      // We're adding a new account
+      createAccountMutation.mutate(data);
+    }
   };
 
   const handleSave = async () => {
@@ -548,6 +624,14 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 
+                                  onClick={() => handleEditAccount(account)}
+                                  data-testid={`button-edit-account-${account.id}`}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
                                   onClick={() => handleDeleteAccount(account.id)}
                                   data-testid={`button-delete-account-${account.id}`}
                                 >
@@ -565,10 +649,12 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                         </div>
                       )}
 
-                      {/* Add Account Form */}
-                      {showAddAccount && (
+                      {/* Add/Edit Account Form */}
+                      {(showAddAccount || editAccountId) && (
                         <div className="border-t pt-4 mt-4">
-                          <h4 className="font-medium mb-4">Add New Email Account</h4>
+                          <h4 className="font-medium mb-4">
+                            {editAccountId ? 'Edit Email Account' : 'Add New Email Account'}
+                          </h4>
                           <Form {...accountForm}>
                             <form onSubmit={accountForm.handleSubmit(onSubmitAccount)} className="space-y-4">
                               <div className="grid grid-cols-2 gap-4">
@@ -732,17 +818,21 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                               <div className="flex gap-2 pt-2">
                                 <Button 
                                   type="submit"
-                                  disabled={createAccountMutation.isPending}
+                                  disabled={createAccountMutation.isPending || updateAccountMutation.isPending}
                                   className="hover-elevate active-elevate-2"
-                                  data-testid="button-connect-account"
+                                  data-testid={editAccountId ? "button-update-account" : "button-connect-account"}
                                 >
-                                  {createAccountMutation.isPending ? "Testing Connection..." : "Test & Connect Account"}
+                                  {editAccountId ? (
+                                    updateAccountMutation.isPending ? "Updating Account..." : "Test & Update Account"
+                                  ) : (
+                                    createAccountMutation.isPending ? "Testing Connection..." : "Test & Connect Account"
+                                  )}
                                 </Button>
                                 <Button 
                                   type="button"
                                   variant="outline" 
-                                  onClick={() => setShowAddAccount(false)}
-                                  data-testid="button-cancel-add-account"
+                                  onClick={editAccountId ? handleCancelEdit : () => setShowAddAccount(false)}
+                                  data-testid={editAccountId ? "button-cancel-edit-account" : "button-cancel-add-account"}
                                 >
                                   Cancel
                                 </Button>
