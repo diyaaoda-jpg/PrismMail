@@ -34,6 +34,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test connection endpoint - validates credentials before creating account
+  app.post('/api/accounts/test-connection', isAuthenticated, async (req: any, res) => {
+    try {
+      const { protocol, host, port, username, password, useSSL } = req.body;
+
+      // Validate required fields
+      if (!protocol || !host || !username || !password) {
+        return res.status(400).json({ 
+          message: "Missing required fields: protocol, host, username, password" 
+        });
+      }
+
+      // Create temporary settings JSON for testing
+      let settingsJson: string;
+      
+      if (protocol === 'IMAP') {
+        // For IMAP: enforce port 993 and SSL
+        settingsJson = JSON.stringify({
+          host,
+          port: 993, // Always use 993 for IMAP
+          username,
+          password,
+          useSSL: true // Always use SSL for IMAP
+        });
+      } else if (protocol === 'EWS') {
+        // For EWS: no port or SSL settings needed
+        settingsJson = JSON.stringify({
+          host, // Should be full EWS URL like https://mail.example.com/ews
+          username,
+          password
+        });
+      } else {
+        return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
+      }
+
+      // Test the connection
+      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson);
+
+      if (testResult.success) {
+        res.json({ 
+          success: true, 
+          message: `${protocol} connection test successful`,
+          details: testResult
+        });
+      } else {
+        res.status(400).json({ 
+          success: false, 
+          message: testResult.error || `${protocol} connection test failed`
+        });
+      }
+
+    } catch (error: any) {
+      console.error("Connection test error:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message || "Connection test failed" 
+      });
+    }
+  });
+
   app.post('/api/accounts', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;

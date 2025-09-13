@@ -49,9 +49,14 @@ interface SettingsDialogProps {
 }
 
 // Account form validation schema
-const accountFormSchema = insertAccountConnectionSchema.omit({ userId: true }).extend({
-  port: z.string().min(1, "Port is required").transform(Number),
+const accountFormSchema = z.object({
+  name: z.string().min(1, "Account name is required"),
+  protocol: z.enum(["IMAP", "EWS"]),
+  host: z.string().min(1, "Mail server is required"),
+  port: z.string().min(1, "Port is required"),
+  username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
+  useSSL: z.boolean(),
 });
 
 type AccountFormData = z.infer<typeof accountFormSchema>;
@@ -76,9 +81,23 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       username: "",
       password: "",
       useSSL: true,
-      settingsJson: "", // Will be populated by form handler
     },
   });
+  
+  // Watch protocol changes to adjust form defaults
+  const watchedProtocol = accountForm.watch("protocol");
+  
+  // Update form defaults when protocol changes
+  useEffect(() => {
+    if (watchedProtocol === 'IMAP') {
+      accountForm.setValue('port', '993');
+      accountForm.setValue('useSSL', true);
+    } else if (watchedProtocol === 'EWS') {
+      // EWS doesn't use port or SSL settings - uses default secure HTTPS API
+      accountForm.setValue('port', '');
+      accountForm.setValue('useSSL', true);
+    }
+  }, [watchedProtocol, accountForm]);
   
   // Account settings
   const [accountData, setAccountData] = useState({
@@ -120,12 +139,35 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
 
   const createAccountMutation = useMutation({
     mutationFn: async (accountData: AccountFormData) => {
+      // First test the connection before adding to database
+      const testResponse = await fetch('/api/accounts/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          protocol: accountData.protocol,
+          host: accountData.host,
+          port: accountData.protocol === 'IMAP' ? 993 : undefined, // IMAP uses 993, EWS doesn't use port
+          username: accountData.username,
+          password: accountData.password,
+          useSSL: accountData.protocol === 'IMAP' ? true : undefined, // Only IMAP uses SSL flag
+        })
+      });
+      
+      if (!testResponse.ok) {
+        const error = await testResponse.json();
+        throw new Error(error.message || 'Connection test failed');
+      }
+      
+      // If test successful, create account
       const settingsJson = JSON.stringify({
         host: accountData.host,
-        port: accountData.port,
+        port: accountData.protocol === 'IMAP' ? 993 : undefined,
         username: accountData.username,
         password: accountData.password,
-        useSSL: accountData.useSSL
+        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
       });
       
       const response = await apiRequest('POST', '/api/accounts', {
@@ -139,8 +181,8 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/accounts'] });
       toast({
-        title: "Account Added",
-        description: "Your email account is being tested and will be activated once the connection is verified."
+        title: "Account Added Successfully", 
+        description: "Connection test passed. Your email account has been added and is ready to sync."
       });
       setShowAddAccount(false);
       accountForm.reset();
@@ -148,7 +190,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     onError: (error: any) => {
       toast({
         title: "Connection Failed",
-        description: error.message || "Failed to connect to your email account.",
+        description: error.message || "Failed to connect to your email account. Please check your settings.",
         variant: "destructive"
       });
     }
@@ -487,16 +529,22 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                               </div>
                               
                               <div className="grid grid-cols-3 gap-4">
-                                <div className="col-span-2">
+                                <div className={watchedProtocol === 'EWS' ? 'col-span-3' : 'col-span-2'}>
                                   <FormField
                                     control={accountForm.control}
                                     name="host"
                                     render={({ field }) => (
                                       <FormItem>
-                                        <FormLabel>Mail Server</FormLabel>
+                                        <FormLabel>
+                                          {watchedProtocol === 'EWS' ? 'Exchange Server URL' : 'Mail Server'}
+                                        </FormLabel>
                                         <FormControl>
                                           <Input
-                                            placeholder="imap.gmail.com"
+                                            placeholder={
+                                              watchedProtocol === 'EWS' 
+                                                ? "https://mail.example.com/ews" 
+                                                : "imap.gmail.com"
+                                            }
                                             data-testid="input-host"
                                             {...field}
                                           />
@@ -506,23 +554,27 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                     )}
                                   />
                                 </div>
-                                <FormField
-                                  control={accountForm.control}
-                                  name="port"
-                                  render={({ field }) => (
-                                    <FormItem>
-                                      <FormLabel>Port</FormLabel>
-                                      <FormControl>
-                                        <Input
-                                          placeholder="993"
-                                          data-testid="input-port"
-                                          {...field}
-                                        />
-                                      </FormControl>
-                                      <FormMessage />
-                                    </FormItem>
-                                  )}
-                                />
+                                {watchedProtocol === 'IMAP' && (
+                                  <FormField
+                                    control={accountForm.control}
+                                    name="port"
+                                    render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Port</FormLabel>
+                                        <FormControl>
+                                          <Input
+                                            placeholder="993"
+                                            data-testid="input-port"
+                                            value="993"
+                                            disabled
+                                            {...field}
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}
+                                  />
+                                )}
                               </div>
                               
                               <div className="grid grid-cols-2 gap-4">
@@ -563,26 +615,36 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                 />
                               </div>
                               
-                              <FormField
-                                control={accountForm.control}
-                                name="useSSL"
-                                render={({ field }) => (
-                                  <FormItem className="flex flex-row items-center space-x-3 space-y-0">
-                                    <FormControl>
-                                      <input
-                                        type="checkbox"
-                                        checked={field.value}
-                                        onChange={field.onChange}
-                                        className="rounded border-gray-300"
-                                        data-testid="checkbox-use-ssl"
-                                      />
-                                    </FormControl>
-                                    <div className="space-y-1 leading-none">
-                                      <FormLabel>Use SSL/TLS encryption</FormLabel>
-                                    </div>
-                                  </FormItem>
-                                )}
-                              />
+                              {watchedProtocol === 'IMAP' && (
+                                <FormField
+                                  control={accountForm.control}
+                                  name="useSSL"
+                                  render={({ field }) => (
+                                    <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                                      <FormControl>
+                                        <input
+                                          type="checkbox"
+                                          checked={true}
+                                          disabled
+                                          onChange={field.onChange}
+                                          className="rounded border-gray-300"
+                                          data-testid="checkbox-use-ssl"
+                                        />
+                                      </FormControl>
+                                      <div className="space-y-1 leading-none">
+                                        <FormLabel>Use SSL/TLS encryption (Required for IMAP)</FormLabel>
+                                      </div>
+                                    </FormItem>
+                                  )}
+                                />
+                              )}
+                              
+                              {watchedProtocol === 'EWS' && (
+                                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+                                  <strong>Exchange Web Services (EWS)</strong> uses secure HTTPS connections by default. 
+                                  No additional port or SSL configuration required.
+                                </div>
+                              )}
                               
                               <div className="flex gap-2 pt-2">
                                 <Button 
@@ -591,7 +653,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                   className="hover-elevate active-elevate-2"
                                   data-testid="button-connect-account"
                                 >
-                                  {createAccountMutation.isPending ? "Connecting..." : "Connect Account"}
+                                  {createAccountMutation.isPending ? "Testing Connection..." : "Test & Connect Account"}
                                 </Button>
                                 <Button 
                                   type="button"
