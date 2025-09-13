@@ -572,6 +572,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sync all folders for a specific account
+  app.post('/api/accounts/:accountId/sync-all', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const { limit = 25 } = req.body;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      if (!account.isActive) {
+        return res.status(400).json({ message: 'Account is not active' });
+      }
+      
+      // Get all active folders for this account
+      const folders = await storage.getAccountFolders(accountId);
+      const activeFolders = folders.filter(folder => folder.isActive);
+      
+      if (activeFolders.length === 0) {
+        return res.status(400).json({ message: 'No active folders found for this account' });
+      }
+      
+      console.log(`Starting sync-all for account ${accountId} with ${activeFolders.length} folders`);
+      
+      const results = [];
+      let totalMessageCount = 0;
+      
+      // Get encrypted account settings
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        return res.status(404).json({ message: 'Account settings not found' });
+      }
+      
+      // Sync each folder
+      for (const folder of activeFolders) {
+        try {
+          console.log(`Syncing folder: ${folder.displayName} (${folder.folderType})`);
+          
+          let result;
+          
+          if (account.protocol === 'IMAP') {
+            // Import IMAP sync function
+            const { syncImapEmails } = await import('./emailSync');
+            
+            result = await syncImapEmails(
+              accountId,
+              encryptedAccount.settingsJson,
+              storage,
+              { folder: folder.folderId, limit }
+            );
+          } else if (account.protocol === 'EWS') {
+            // Import EWS sync function
+            const { syncEwsEmails } = await import('./ewsSync');
+            
+            result = await syncEwsEmails(storage, accountId, folder.folderId, limit);
+          } else {
+            throw new Error(`Unsupported protocol: ${account.protocol}`);
+          }
+          
+          // Update folder sync timestamp
+          await storage.updateAccountFolder(folder.id, {
+            lastSynced: new Date()
+          });
+          
+          const folderResult = {
+            folderId: folder.folderId,
+            folderType: folder.folderType,
+            displayName: folder.displayName,
+            success: result.success !== false,
+            messageCount: result.messageCount || 0,
+            error: result.error
+          };
+          
+          results.push(folderResult);
+          totalMessageCount += folderResult.messageCount;
+          
+          console.log(`Folder ${folder.displayName}: ${folderResult.messageCount} messages synced`);
+          
+        } catch (error) {
+          console.error(`Error syncing folder ${folder.displayName}:`, error);
+          results.push({
+            folderId: folder.folderId,
+            folderType: folder.folderType,
+            displayName: folder.displayName,
+            success: false,
+            messageCount: 0,
+            error: (error as Error).message
+          });
+        }
+      }
+      
+      // Update account sync status
+      const hasErrors = results.some(r => !r.success);
+      await storage.updateAccountConnection(accountId, {
+        lastChecked: new Date(),
+        lastError: hasErrors ? 'Some folders failed to sync' : null
+      });
+      
+      console.log(`Sync-all completed for account ${accountId}: ${totalMessageCount} total messages`);
+      
+      res.json({
+        success: !hasErrors,
+        accountId,
+        foldersProcessed: results.length,
+        totalMessageCount,
+        results
+      });
+      
+    } catch (error) {
+      console.error("Error syncing all folders:", error);
+      res.status(500).json({ message: "Failed to sync all folders" });
+    }
+  });
+
   // Sync all accounts for the authenticated user
   app.post('/api/sync/all', isAuthenticated, async (req: any, res) => {
     try {

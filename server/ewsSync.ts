@@ -52,6 +52,32 @@ function mapEwsFolderType(folderName: string): string {
 }
 
 /**
+ * Map folder type to EWS WellKnownFolderName
+ */
+function getEwsWellKnownFolderName(folderType: string, WellKnownFolderName: any): any {
+  switch (folderType.toLowerCase()) {
+    case 'inbox':
+      return WellKnownFolderName.Inbox;
+    case 'sent':
+    case 'sentitems':
+      return WellKnownFolderName.SentItems;
+    case 'drafts':
+      return WellKnownFolderName.Drafts;
+    case 'deleted':
+    case 'deleteditems':
+      return WellKnownFolderName.DeletedItems;
+    case 'archive':
+      return WellKnownFolderName.Archive;
+    case 'spam':
+    case 'junkemail':
+      return WellKnownFolderName.JunkEmail;
+    default:
+      // Default to inbox for unknown folder types
+      return WellKnownFolderName.Inbox;
+  }
+}
+
+/**
  * Discover and synchronize EWS folders to database
  * @param accountId - The account connection ID
  * @param settingsJson - Encrypted settings JSON from database
@@ -202,18 +228,41 @@ export async function syncEwsEmails(
     service.UserAgent = 'PrismMail/1.0';
 
     try {
-      // Get the inbox folder
-      const inboxFolder = await Folder.Bind(service, WellKnownFolderName.Inbox);
+      // Get the correct folder based on folder parameter
+      let targetFolder;
+      
+      if (folder === 'INBOX' || folder.toLowerCase() === 'inbox') {
+        // Handle the default case and common variations
+        targetFolder = await Folder.Bind(service, WellKnownFolderName.Inbox);
+      } else {
+        // Try to get folder from database first to determine correct folder type
+        const accountFolders = await storage.getAccountFolders(accountId);
+        const folderInfo = accountFolders.find(f => 
+          f.folderId === folder || 
+          f.folderType === folder.toLowerCase() ||
+          f.displayName.toLowerCase() === folder.toLowerCase()
+        );
+        
+        if (folderInfo) {
+          // Use the folder type to get the correct WellKnownFolderName
+          const wellKnownFolderName = getEwsWellKnownFolderName(folderInfo.folderType, WellKnownFolderName);
+          targetFolder = await Folder.Bind(service, wellKnownFolderName);
+        } else {
+          // Fallback: try common folder mappings
+          const wellKnownFolderName = getEwsWellKnownFolderName(folder, WellKnownFolderName);
+          targetFolder = await Folder.Bind(service, wellKnownFolderName);
+        }
+      }
       
       // Create item view to limit results
       const itemView = new ItemView(limit);
       itemView.PropertySet = new PropertySet(BasePropertySet.FirstClassProperties);
       
-      // Find emails in inbox
-      const findItemsResults = await service.FindItems(inboxFolder.Id, itemView);
+      // Find emails in the target folder
+      const findItemsResults = await service.FindItems(targetFolder.Id, itemView);
       const items = findItemsResults.Items;
 
-      console.log(`Found ${items.length} emails in EWS inbox`);
+      console.log(`Found ${items.length} emails in EWS folder: ${targetFolder.DisplayName || folder}`);
 
       let messageCount = 0;
 
@@ -271,6 +320,21 @@ export async function syncEwsEmails(
       });
 
       console.log(`EWS sync completed: ${messageCount} messages synced`);
+      
+      // Update folder counts after sync
+      try {
+        // Count total and unread messages in this folder
+        const allMessages = await storage.getMailMessages(accountId, folder);
+        const totalCount = allMessages.length;
+        const unreadCount = allMessages.filter(msg => !msg.isRead).length;
+        
+        // Update folder counts
+        await storage.updateFolderCounts(accountId, folder, unreadCount, totalCount);
+        console.log(`Updated folder counts for ${folder}: ${unreadCount} unread, ${totalCount} total`);
+      } catch (countError) {
+        console.error(`Error updating folder counts for ${folder}:`, countError);
+        // Don't fail the sync if folder count update fails
+      }
       
       return { messageCount };
 

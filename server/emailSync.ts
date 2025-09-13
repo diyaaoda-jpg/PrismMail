@@ -400,6 +400,21 @@ export async function syncImapEmails(
         }
       }
       
+      // Update folder counts after sync
+      try {
+        // Count total and unread messages in this folder
+        const allMessages = await storage.getMailMessages(accountId, folder);
+        const totalCount = allMessages.length;
+        const unreadCount = allMessages.filter(msg => !msg.isRead).length;
+        
+        // Update folder counts
+        await storage.updateFolderCounts(accountId, folder, unreadCount, totalCount);
+        console.log(`Updated folder counts for ${folder}: ${unreadCount} unread, ${totalCount} total`);
+      } catch (countError) {
+        console.error(`Error updating folder counts for ${folder}:`, countError);
+        // Don't fail the sync if folder count update fails
+      }
+
       return {
         success: true,
         messageCount: syncedCount,
