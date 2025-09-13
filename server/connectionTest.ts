@@ -1,4 +1,5 @@
 import { ImapFlow } from 'imapflow';
+import * as nodemailer from 'nodemailer';
 import { decryptAccountSettingsWithPassword } from './crypto';
 
 export interface ConnectionTestResult {
@@ -215,17 +216,123 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
 }
 
 /**
+ * Test SMTP connection with the provided settings
+ * @param settingsJson - Settings JSON (plain text for testing, encrypted for saved accounts)
+ * @returns Connection test result
+ */
+export async function testSmtpConnection(settingsJson: string): Promise<ConnectionTestResult> {
+  try {
+    // For connection testing, the settingsJson is plain text
+    // For saved accounts, it's encrypted and needs decryption
+    let settings: any;
+    try {
+      // First try to parse as plain JSON (for connection testing)
+      settings = JSON.parse(settingsJson);
+    } catch {
+      // If that fails, try to decrypt (for saved accounts)
+      settings = decryptAccountSettingsWithPassword(settingsJson);
+    }
+
+    // Extract SMTP settings
+    const smtpSettings = settings.smtp || {};
+    const smtpHost = smtpSettings.host || settings.host?.replace('imap.', 'smtp.');
+    const smtpPort = parseInt(smtpSettings.port) || 587;
+    const smtpSecure = smtpSettings.secure ?? (smtpPort === 465);
+    const smtpUsername = smtpSettings.username || settings.username;
+    const smtpPassword = smtpSettings.password || settings.password;
+
+    if (!smtpHost) {
+      throw new Error('SMTP host not configured');
+    }
+
+    // Create nodemailer transporter
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: {
+        user: smtpUsername,
+        pass: smtpPassword,
+      },
+      // Connection timeout
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
+    });
+
+    // Test the connection
+    await transporter.verify();
+
+    // Close the connection
+    transporter.close();
+
+    return {
+      success: true,
+      lastChecked: new Date(),
+    };
+  } catch (error: any) {
+    console.error('SMTP connection test failed:', error);
+    
+    // Extract meaningful error message
+    let errorMessage = 'SMTP connection failed';
+    if (error.message) {
+      if (error.message.includes('ENOTFOUND')) {
+        errorMessage = 'SMTP server not found - check host address';
+      } else if (error.message.includes('ECONNREFUSED')) {
+        errorMessage = 'SMTP connection refused - check port and security settings';
+      } else if (error.message.includes('Invalid login')) {
+        errorMessage = 'SMTP authentication failed - check username and password';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'SMTP connection timeout - server may be unreachable';
+      } else if (error.message.includes('SMTP host not configured')) {
+        errorMessage = 'SMTP host not configured';
+      } else {
+        errorMessage = error.message.substring(0, 200); // Truncate long error messages
+      }
+    }
+
+    return {
+      success: false,
+      error: errorMessage,
+      lastChecked: new Date(),
+    };
+  }
+}
+
+/**
  * Test connection based on protocol type
  * @param protocol - Either 'IMAP' or 'EWS'
  * @param settingsJson - Encrypted settings JSON from database
+ * @param testSmtp - Whether to also test SMTP (for IMAP accounts only)
  * @returns Connection test result
  */
 export async function testConnection(
   protocol: 'IMAP' | 'EWS',
-  settingsJson: string
+  settingsJson: string,
+  testSmtp: boolean = false
 ): Promise<ConnectionTestResult> {
   if (protocol === 'IMAP') {
-    return await testImapConnection(settingsJson);
+    const imapResult = await testImapConnection(settingsJson);
+    
+    // If IMAP test passed and SMTP testing is requested
+    if (imapResult.success && testSmtp) {
+      const smtpResult = await testSmtpConnection(settingsJson);
+      
+      if (!smtpResult.success) {
+        return {
+          success: false,
+          error: `IMAP connection successful, but SMTP failed: ${smtpResult.error}`,
+          lastChecked: new Date(),
+        };
+      }
+      
+      return {
+        success: true,
+        lastChecked: new Date(),
+      };
+    }
+    
+    return imapResult;
   } else if (protocol === 'EWS') {
     return await testEwsConnection(settingsJson);
   } else {

@@ -39,7 +39,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Test connection endpoint - validates credentials before creating account
   app.post('/api/accounts/test-connection', isAuthenticated, async (req: any, res) => {
     try {
-      const { protocol, host, port, username, password, useSSL } = req.body;
+      const { 
+        protocol, host, port, username, password, useSSL,
+        // SMTP settings for IMAP accounts
+        enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
+      } = req.body;
 
       // Validate required fields
       if (!protocol || !host || !username || !password) {
@@ -52,16 +56,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let settingsJson: string;
       
       if (protocol === 'IMAP') {
-        // For IMAP: enforce port 993 and SSL
-        settingsJson = JSON.stringify({
+        // For IMAP: enforce port 993 and SSL, and include SMTP settings
+        const settings: any = {
           host,
           port: 993, // Always use 993 for IMAP
           username,
           password,
           useSSL: true // Always use SSL for IMAP
-        });
+        };
+
+        // Add SMTP configuration if provided
+        if (enableCustomSmtp) {
+          if (!smtpHost || !smtpPort) {
+            return res.status(400).json({ 
+              message: "SMTP host and port are required when custom SMTP is enabled" 
+            });
+          }
+          settings.smtp = {
+            host: smtpHost,
+            port: parseInt(smtpPort),
+            secure: smtpSecure ?? (parseInt(smtpPort) === 465),
+            username: smtpUsername || username, // Default to IMAP username
+            password: smtpPassword || password  // Default to IMAP password
+          };
+        } else {
+          // Auto-configure SMTP based on IMAP settings
+          const autoSmtpHost = host.replace(/^imap\./, 'smtp.');
+          settings.smtp = {
+            host: autoSmtpHost,
+            port: 587,
+            secure: false, // STARTTLS on port 587
+            username: username,
+            password: password
+          };
+        }
+
+        settingsJson = JSON.stringify(settings);
       } else if (protocol === 'EWS') {
-        // For EWS: no port or SSL settings needed
+        // For EWS: no port or SSL settings needed, and no separate SMTP
         settingsJson = JSON.stringify({
           host, // Should be full EWS URL like https://mail.example.com/ews
           username,
@@ -71,13 +103,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
       }
 
-      // Test the connection
-      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson);
+      // Test the connection (include SMTP test for IMAP accounts)
+      const testSmtp = protocol === 'IMAP';
+      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson, testSmtp);
 
       if (testResult.success) {
         res.json({ 
           success: true, 
-          message: `${protocol} connection test successful`,
+          message: `${protocol} connection test successful${testSmtp ? ' (including SMTP)' : ''}`,
           details: testResult
         });
       } else {
@@ -99,21 +132,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/accounts', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      const { 
+        name, protocol, host, port, username, password, useSSL,
+        // SMTP settings for IMAP accounts
+        enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
+      } = req.body;
       
-      // Validate request body using Zod schema
-      const validationResult = insertAccountConnectionSchema.safeParse({
-        ...req.body,
-        userId
-      });
-      
-      if (!validationResult.success) {
+      // Validate required fields
+      if (!name || !protocol || !host || !username || !password) {
         return res.status(400).json({ 
-          message: "Validation failed", 
-          errors: validationResult.error.issues 
+          message: "Missing required fields" 
         });
       }
+
+      // Create settingsJson based on protocol
+      let settingsJson: string;
       
-      const accountData = validationResult.data;
+      if (protocol === 'IMAP') {
+        // For IMAP: enforce port 993 and SSL, and include SMTP settings
+        const settings: any = {
+          host,
+          port: 993, // Always use 993 for IMAP
+          username,
+          password,
+          useSSL: true // Always use SSL for IMAP
+        };
+
+        // Add SMTP configuration
+        if (enableCustomSmtp) {
+          if (!smtpHost || !smtpPort) {
+            return res.status(400).json({ 
+              message: "SMTP host and port are required when custom SMTP is enabled" 
+            });
+          }
+          settings.smtp = {
+            host: smtpHost,
+            port: parseInt(smtpPort),
+            secure: smtpSecure ?? (parseInt(smtpPort) === 465),
+            username: smtpUsername || username, // Default to IMAP username
+            password: smtpPassword || password  // Default to IMAP password
+          };
+        } else {
+          // Auto-configure SMTP based on IMAP settings
+          const autoSmtpHost = host.replace(/^imap\./, 'smtp.');
+          settings.smtp = {
+            host: autoSmtpHost,
+            port: 587,
+            secure: false, // STARTTLS on port 587
+            username: username,
+            password: password
+          };
+        }
+
+        settingsJson = JSON.stringify(settings);
+      } else if (protocol === 'EWS') {
+        // For EWS: no port or SSL settings needed, and no separate SMTP
+        settingsJson = JSON.stringify({
+          host, // Should be full EWS URL like https://mail.example.com/ews
+          username,
+          password
+        });
+      } else {
+        return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
+      }
+
+      // Prepare account data for storage
+      const accountData = {
+        userId,
+        name,
+        protocol,
+        settingsJson
+      };
       
       // Create the account first
       const account = await storage.createAccountConnection(accountData);
@@ -124,8 +213,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error('Failed to retrieve account for connection testing');
       }
       
-      // Test the connection in the background
-      testConnection(accountData.protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson)
+      // Test the connection in the background (include SMTP test for IMAP)
+      const testSmtp = protocol === 'IMAP';
+      testConnection(protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson, testSmtp)
         .then(async (result) => {
           // Update the account with connection test results
           await storage.updateAccountConnection(account.id, {
@@ -155,6 +245,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const userId = req.user.claims.sub;
+      const { 
+        name, protocol, host, username, password, useSSL,
+        // SMTP settings for IMAP accounts
+        enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
+      } = req.body;
       
       // Validate the ID is a proper string
       if (!id || typeof id !== 'string') {
@@ -169,56 +264,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Account not found or does not belong to user" });
       }
       
-      // Validate request body using Zod schema (excluding userId and id)
-      const updateSchema = insertAccountConnectionSchema.omit({ userId: true });
-      const validationResult = updateSchema.safeParse(req.body);
-      
-      if (!validationResult.success) {
+      // Validate required fields
+      if (!name || !protocol || !host || !username || !password) {
         return res.status(400).json({ 
-          message: "Validation failed", 
-          errors: validationResult.error.issues 
+          message: "Missing required fields" 
         });
       }
-      
-      const updateData = validationResult.data;
-      
-      // Test the connection before updating
+
+      // Create settingsJson based on protocol with SMTP support
       let settingsJson: string;
       
-      if (updateData.protocol === 'IMAP') {
-        // For IMAP: enforce port 993 and SSL
+      if (protocol === 'IMAP') {
+        // For IMAP: enforce port 993 and SSL, and include SMTP settings
+        const settings: any = {
+          host,
+          port: 993, // Always use 993 for IMAP
+          username,
+          password,
+          useSSL: true // Always use SSL for IMAP
+        };
+
+        // Add SMTP configuration
+        if (enableCustomSmtp) {
+          if (!smtpHost || !smtpPort) {
+            return res.status(400).json({ 
+              message: "SMTP host and port are required when custom SMTP is enabled" 
+            });
+          }
+          settings.smtp = {
+            host: smtpHost,
+            port: parseInt(smtpPort),
+            secure: smtpSecure ?? (parseInt(smtpPort) === 465),
+            username: smtpUsername || username, // Default to IMAP username
+            password: smtpPassword || password  // Default to IMAP password
+          };
+        } else {
+          // Auto-configure SMTP based on IMAP settings
+          const autoSmtpHost = host.replace(/^imap\./, 'smtp.');
+          settings.smtp = {
+            host: autoSmtpHost,
+            port: 587,
+            secure: false, // STARTTLS on port 587
+            username: username,
+            password: password
+          };
+        }
+
+        settingsJson = JSON.stringify(settings);
+      } else if (protocol === 'EWS') {
+        // For EWS: no port or SSL settings needed, and no separate SMTP
         settingsJson = JSON.stringify({
-          host: JSON.parse(updateData.settingsJson).host,
-          port: 993,
-          username: JSON.parse(updateData.settingsJson).username,
-          password: JSON.parse(updateData.settingsJson).password,
-          useSSL: true
-        });
-      } else if (updateData.protocol === 'EWS') {
-        // For EWS: no port or SSL settings needed
-        settingsJson = JSON.stringify({
-          host: JSON.parse(updateData.settingsJson).host,
-          username: JSON.parse(updateData.settingsJson).username,
-          password: JSON.parse(updateData.settingsJson).password
+          host, // Should be full EWS URL like https://mail.example.com/ews
+          username,
+          password
         });
       } else {
         return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
       }
       
-      // Test the connection with new settings
-      const testResult = await testConnection(updateData.protocol as 'IMAP' | 'EWS', settingsJson);
+      // Test the connection with new settings (include SMTP test for IMAP)
+      const testSmtp = protocol === 'IMAP';
+      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson, testSmtp);
       
       if (!testResult.success) {
         return res.status(400).json({ 
           success: false, 
-          message: testResult.error || `${updateData.protocol} connection test failed`
+          message: testResult.error || `${protocol} connection test failed`
         });
       }
       
       // Update the account with new settings
       const updatedAccount = await storage.updateAccountConnection(id, {
-        name: updateData.name,
-        protocol: updateData.protocol,
+        name,
+        protocol,
         settingsJson: settingsJson,
         isActive: true,
         lastChecked: new Date(),

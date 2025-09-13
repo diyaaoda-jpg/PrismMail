@@ -151,3 +151,35 @@ export type UserPrefs = typeof userPrefs.$inferSelect;
 export type InsertUserPrefs = z.infer<typeof insertUserPrefsSchema>;
 export type AccountFolder = typeof accountFolders.$inferSelect;
 export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
+
+// Settings JSON type definitions for account connections
+export interface SmtpSettings {
+  host: string;
+  port: number;
+  secure: boolean; // true for 465, false for other ports like 587
+  username: string; // Can default to IMAP username
+  password: string; // Can default to IMAP password
+}
+
+export interface ImapSettings {
+  host: string;
+  port: number; // Always 993 for IMAP
+  username: string;
+  password: string;
+  useSSL: boolean; // Always true for IMAP
+  smtp?: SmtpSettings; // Optional SMTP configuration - if not provided, auto-configured
+}
+
+export interface EwsSettings {
+  host: string; // Full EWS URL like https://mail.server.com/ews
+  username: string;
+  password: string;
+  // No SMTP needed for EWS - it handles sending directly
+}
+
+// Union type for all account settings
+export type AccountSettings = ImapSettings | EwsSettings;
+
+// Helper type to determine settings type based on protocol
+export type AccountSettingsForProtocol<T extends 'IMAP' | 'EWS'> = 
+  T extends 'IMAP' ? ImapSettings : EwsSettings;

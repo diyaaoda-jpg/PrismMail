@@ -58,6 +58,13 @@ const accountFormSchema = z.object({
   username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
   useSSL: z.boolean(),
+  // SMTP configuration fields (only for IMAP)
+  smtpHost: z.string().optional(),
+  smtpPort: z.string().optional(),
+  smtpSecure: z.boolean().optional(),
+  smtpUsername: z.string().optional(),
+  smtpPassword: z.string().optional(),
+  enableCustomSmtp: z.boolean().optional(),
 }).refine((data) => {
   // Port is required for IMAP but optional for EWS
   if (data.protocol === 'IMAP' && (!data.port || data.port.length === 0)) {
@@ -67,6 +74,20 @@ const accountFormSchema = z.object({
 }, {
   message: "Port is required for IMAP connections",
   path: ["port"]
+}).refine((data) => {
+  // SMTP validation for IMAP accounts when custom SMTP is enabled
+  if (data.protocol === 'IMAP' && data.enableCustomSmtp) {
+    if (!data.smtpHost || data.smtpHost.length === 0) {
+      return false;
+    }
+    if (!data.smtpPort || data.smtpPort.length === 0) {
+      return false;
+    }
+  }
+  return true;
+}, {
+  message: "SMTP host and port are required when custom SMTP is enabled",
+  path: ["smtpHost"]
 });
 
 type AccountFormData = z.infer<typeof accountFormSchema>;
@@ -148,6 +169,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       username: "",
       password: "",
       useSSL: true,
+      // SMTP defaults for IMAP accounts
+      enableCustomSmtp: false,
+      smtpHost: "",
+      smtpPort: "587", // Default SMTP submission port
+      smtpSecure: true,
+      smtpUsername: "",
+      smtpPassword: "",
     },
   });
   
@@ -238,6 +266,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
           username: accountData.username,
           password: accountData.password,
           useSSL: accountData.protocol === 'IMAP' ? true : undefined, // Only IMAP uses SSL flag
+          // Include SMTP settings for IMAP accounts
+          enableCustomSmtp: accountData.enableCustomSmtp,
+          smtpHost: accountData.smtpHost,
+          smtpPort: accountData.smtpPort,
+          smtpSecure: accountData.smtpSecure,
+          smtpUsername: accountData.smtpUsername,
+          smtpPassword: accountData.smtpPassword,
         })
       });
       
@@ -246,19 +281,21 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
         throw new Error(error.message || 'Connection test failed');
       }
       
-      // If test successful, create account
-      const settingsJson = JSON.stringify({
-        host: accountData.host,
-        port: accountData.protocol === 'IMAP' ? 993 : undefined,
-        username: accountData.username,
-        password: accountData.password,
-        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
-      });
-      
+      // If test successful, create account - backend now handles settingsJson construction
       const response = await apiRequest('POST', '/api/accounts', {
         name: accountData.name,
         protocol: accountData.protocol,
-        settingsJson
+        host: accountData.host,
+        username: accountData.username,
+        password: accountData.password,
+        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
+        // Include SMTP settings for IMAP accounts
+        enableCustomSmtp: accountData.enableCustomSmtp,
+        smtpHost: accountData.smtpHost,
+        smtpPort: accountData.smtpPort,
+        smtpSecure: accountData.smtpSecure,
+        smtpUsername: accountData.smtpUsername,
+        smtpPassword: accountData.smtpPassword,
       });
       
       return await response.json() as AccountConnection;
@@ -804,6 +841,143 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                     </FormItem>
                                   )}
                                 />
+                              )}
+                              
+                              {/* SMTP Configuration for IMAP accounts */}
+                              {watchedProtocol === 'IMAP' && (
+                                <>
+                                  <div className="space-y-4 pt-4 border-t">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <h5 className="font-medium">SMTP Configuration</h5>
+                                        <p className="text-sm text-muted-foreground">Configure outgoing mail server settings</p>
+                                      </div>
+                                      <FormField
+                                        control={accountForm.control}
+                                        name="enableCustomSmtp"
+                                        render={({ field }) => (
+                                          <FormItem>
+                                            <FormControl>
+                                              <Switch
+                                                checked={field.value || false}
+                                                onCheckedChange={field.onChange}
+                                                data-testid="switch-enable-custom-smtp"
+                                              />
+                                            </FormControl>
+                                          </FormItem>
+                                        )}
+                                      />
+                                    </div>
+                                    
+                                    {!accountForm.watch("enableCustomSmtp") && (
+                                      <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+                                        <strong>Auto-configured SMTP</strong> - We'll automatically configure SMTP using your IMAP credentials with common settings (port 587, STARTTLS).
+                                      </div>
+                                    )}
+                                    
+                                    {accountForm.watch("enableCustomSmtp") && (
+                                      <>
+                                        <div className="grid grid-cols-3 gap-4">
+                                          <div className="col-span-2">
+                                            <FormField
+                                              control={accountForm.control}
+                                              name="smtpHost"
+                                              render={({ field }) => (
+                                                <FormItem>
+                                                  <FormLabel>SMTP Server</FormLabel>
+                                                  <FormControl>
+                                                    <Input
+                                                      placeholder="smtp.gmail.com"
+                                                      data-testid="input-smtp-host"
+                                                      {...field}
+                                                    />
+                                                  </FormControl>
+                                                  <FormMessage />
+                                                </FormItem>
+                                              )}
+                                            />
+                                          </div>
+                                          <FormField
+                                            control={accountForm.control}
+                                            name="smtpPort"
+                                            render={({ field }) => (
+                                              <FormItem>
+                                                <FormLabel>Port</FormLabel>
+                                                <FormControl>
+                                                  <Input
+                                                    placeholder="587"
+                                                    data-testid="input-smtp-port"
+                                                    {...field}
+                                                  />
+                                                </FormControl>
+                                                <FormMessage />
+                                              </FormItem>
+                                            )}
+                                          />
+                                        </div>
+                                        
+                                        <FormField
+                                          control={accountForm.control}
+                                          name="smtpSecure"
+                                          render={({ field }) => (
+                                            <FormItem className="flex flex-row items-center space-x-3 space-y-0">
+                                              <FormControl>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={field.value || false}
+                                                  onChange={field.onChange}
+                                                  className="rounded border-gray-300"
+                                                  data-testid="checkbox-smtp-secure"
+                                                />
+                                              </FormControl>
+                                              <div className="space-y-1 leading-none">
+                                                <FormLabel>Use SSL/TLS for SMTP (Enable for port 465)</FormLabel>
+                                              </div>
+                                            </FormItem>
+                                          )}
+                                        />
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                          <FormField
+                                            control={accountForm.control}
+                                            name="smtpUsername"
+                                            render={({ field }) => (
+                                              <FormItem>
+                                                <FormLabel>SMTP Username (optional)</FormLabel>
+                                                <FormControl>
+                                                  <Input
+                                                    placeholder="Leave empty to use IMAP username"
+                                                    data-testid="input-smtp-username"
+                                                    {...field}
+                                                  />
+                                                </FormControl>
+                                                <FormMessage />
+                                              </FormItem>
+                                            )}
+                                          />
+                                          <FormField
+                                            control={accountForm.control}
+                                            name="smtpPassword"
+                                            render={({ field }) => (
+                                              <FormItem>
+                                                <FormLabel>SMTP Password (optional)</FormLabel>
+                                                <FormControl>
+                                                  <Input
+                                                    type="password"
+                                                    placeholder="Leave empty to use IMAP password"
+                                                    data-testid="input-smtp-password"
+                                                    {...field}
+                                                  />
+                                                </FormControl>
+                                                <FormMessage />
+                                              </FormItem>
+                                            )}
+                                          />
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                </>
                               )}
                               
                               {watchedProtocol === 'EWS' && (
