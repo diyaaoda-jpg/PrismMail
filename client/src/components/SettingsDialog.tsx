@@ -292,13 +292,11 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
         useSSL: accountData.protocol === 'IMAP' ? true : undefined,
       });
       
-      const response = await apiRequest('PUT', `/api/accounts/${accountId}`, {
+      return await apiRequest('PUT', `/api/accounts/${accountId}`, {
         name: accountData.name,
         protocol: accountData.protocol,
         settingsJson
       });
-      
-      return await response.json() as AccountConnection;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/accounts'] });
