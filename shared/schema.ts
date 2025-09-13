@@ -183,3 +183,36 @@ export type AccountSettings = ImapSettings | EwsSettings;
 // Helper type to determine settings type based on protocol
 export type AccountSettingsForProtocol<T extends 'IMAP' | 'EWS'> = 
   T extends 'IMAP' ? ImapSettings : EwsSettings;
+
+// Email composition schemas and types
+export const sendEmailRequestSchema = z.object({
+  to: z.string().email("Please enter a valid email address"),
+  cc: z.string().optional(),
+  bcc: z.string().optional(),
+  subject: z.string().min(1, "Subject is required"),
+  body: z.string().min(1, "Email body is required"),
+  bodyHtml: z.string().optional(), // Rich HTML content
+  attachments: z.array(z.object({
+    filename: z.string(),
+    content: z.string(), // Base64 encoded content
+    contentType: z.string(),
+    size: z.number()
+  })).optional().default([])
+});
+
+export const sendEmailResponseSchema = z.object({
+  success: z.boolean(),
+  messageId: z.string().optional(), // SMTP message ID
+  error: z.string().optional(),
+  sentAt: z.date()
+});
+
+export type SendEmailRequest = z.infer<typeof sendEmailRequestSchema>;
+export type SendEmailResponse = z.infer<typeof sendEmailResponseSchema>;
+
+export interface EmailAttachment {
+  filename: string;
+  content: string; // Base64 encoded
+  contentType: string;
+  size: number;
+}

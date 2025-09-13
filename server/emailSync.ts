@@ -16,6 +16,22 @@ export interface EmailSyncOptions {
   since?: Date;
 }
 
+export interface AppendEmailOptions {
+  to: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  bodyText: string;
+  bodyHtml?: string;
+  attachments?: Array<{
+    filename: string;
+    content: string; // Base64 encoded
+    contentType: string;
+  }>;
+  from: string;
+  messageId?: string;
+}
+
 /**
  * Check if message already exists in database
  */
@@ -257,6 +273,139 @@ export async function discoverImapFolders(
       success: false,
       folderCount: 0,
       error: error.message || 'IMAP folder discovery failed'
+    };
+  } finally {
+    if (client) {
+      try {
+        await client.logout();
+        console.log('IMAP client disconnected cleanly');
+      } catch (error) {
+        console.error('Error disconnecting IMAP client:', error);
+      }
+    }
+  }
+}
+
+/**
+ * Append a sent email to the Sent folder via IMAP APPEND command
+ * @param accountId - The account connection ID
+ * @param settingsJson - Encrypted settings JSON from database
+ * @param emailOptions - Email content and metadata
+ * @returns Success status and any error messages
+ */
+export async function appendSentEmailToFolder(
+  accountId: string,
+  settingsJson: string,
+  emailOptions: AppendEmailOptions
+): Promise<{ success: boolean; error?: string }> {
+  let client: ImapFlow | undefined;
+
+  try {
+    const settings = decryptAccountSettingsWithPassword(settingsJson);
+
+    client = new ImapFlow({
+      host: settings.host,
+      port: settings.port,
+      secure: settings.useSSL,
+      auth: {
+        user: settings.username,
+        pass: settings.password,
+      },
+      socketTimeout: 30000,
+      greetingTimeout: 30000,
+    });
+
+    console.log(`Appending sent email to Sent folder for account ${accountId}`);
+
+    // Connect to IMAP server
+    await client.connect();
+
+    // Construct the email message in RFC2822 format for APPEND
+    const { to, cc, bcc, subject, bodyText, bodyHtml, attachments, from, messageId } = emailOptions;
+    
+    // Build email headers
+    const headers: string[] = [
+      `Message-ID: ${messageId || `<${Date.now()}.${Math.random()}@prismmail>`}`,
+      `Date: ${new Date().toUTCString()}`,
+      `From: ${from}`,
+      `To: ${to}`,
+    ];
+
+    if (cc) headers.push(`Cc: ${cc}`);
+    if (bcc) headers.push(`Bcc: ${bcc}`);
+    
+    headers.push(`Subject: ${subject}`);
+    headers.push('MIME-Version: 1.0');
+
+    // Determine content type based on whether we have HTML
+    const boundary = `boundary-${Date.now()}-${Math.random()}`;
+    let emailContent = headers.join('\r\n');
+
+    if (bodyHtml && bodyHtml !== bodyText.replace(/\n/g, '<br>')) {
+      // Multipart message with both text and HTML
+      emailContent += `\r\nContent-Type: multipart/alternative; boundary="${boundary}"\r\n\r\n`;
+      
+      // Plain text part
+      emailContent += `--${boundary}\r\n`;
+      emailContent += 'Content-Type: text/plain; charset=utf-8\r\n';
+      emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
+      emailContent += bodyText + '\r\n\r\n';
+      
+      // HTML part
+      emailContent += `--${boundary}\r\n`;
+      emailContent += 'Content-Type: text/html; charset=utf-8\r\n';
+      emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
+      emailContent += bodyHtml + '\r\n\r\n';
+      
+      emailContent += `--${boundary}--\r\n`;
+    } else {
+      // Simple text message
+      emailContent += '\r\nContent-Type: text/plain; charset=utf-8\r\n';
+      emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
+      emailContent += bodyText + '\r\n';
+    }
+
+    // Try to find the Sent folder - common names
+    const sentFolderNames = ['Sent', 'SENT', 'Sent Messages', 'Sent Items', 'Outbox'];
+    let sentFolder: string | null = null;
+
+    // List folders to find the correct Sent folder
+    const folders = await client.list();
+    for (const folder of folders) {
+      // Check for SPECIAL-USE flags first
+      if (folder.flags && Array.from(folder.flags).includes('\\Sent')) {
+        sentFolder = folder.path;
+        break;
+      }
+      // Fall back to checking common folder names
+      if (sentFolderNames.some(name => 
+        folder.path.toLowerCase() === name.toLowerCase() || 
+        folder.name?.toLowerCase() === name.toLowerCase()
+      )) {
+        sentFolder = folder.path;
+        break;
+      }
+    }
+
+    if (!sentFolder) {
+      console.warn('Sent folder not found, defaulting to "Sent"');
+      sentFolder = 'Sent';
+    }
+
+    console.log(`Using Sent folder: ${sentFolder}`);
+
+    // Append the email to the Sent folder with the \Seen flag (since it's a sent message)
+    await client.append(sentFolder, emailContent, ['\\Seen']);
+
+    console.log(`Successfully appended sent email to ${sentFolder}`);
+
+    return { success: true };
+
+  } catch (error: any) {
+    console.error('Failed to append sent email to folder:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to append sent email to Sent folder'
     };
   } finally {
     if (client) {

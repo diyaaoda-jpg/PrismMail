@@ -2,11 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse } from "@shared/schema";
 import { testConnection } from "./connectionTest";
-import { discoverImapFolders } from "./emailSync";
+import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
 import { discoverEwsFolders } from "./ewsSync";
 import { z } from "zod";
+import nodemailer from "nodemailer";
+import { decryptAccountSettingsWithPassword } from "./crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -775,6 +777,193 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating preferences:", error);
       res.status(500).json({ message: "Failed to update preferences" });
+    }
+  });
+
+  // Email sending endpoint - only for IMAP accounts with SMTP configuration
+  app.post('/api/accounts/:accountId/send', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+
+      // Validate request body against schema
+      const validationResult = sendEmailRequestSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid email data: " + validationResult.error.issues.map(i => i.message).join(", ")
+        });
+      }
+
+      const emailData: SendEmailRequest = validationResult.data;
+
+      // Verify account belongs to user and get encrypted settings
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          error: "Account not found or does not belong to user"
+        });
+      }
+
+      // Only IMAP accounts support SMTP sending
+      if (account.protocol !== 'IMAP') {
+        return res.status(400).json({
+          success: false,
+          error: "Email sending is only supported for IMAP accounts. EWS accounts handle sending internally."
+        });
+      }
+
+      if (!account.isActive) {
+        return res.status(400).json({
+          success: false,
+          error: "Account is not active. Please check account connection."
+        });
+      }
+
+      // Get encrypted settings for SMTP configuration
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        return res.status(500).json({
+          success: false,
+          error: "Failed to retrieve account settings"
+        });
+      }
+
+      // Decrypt settings to get SMTP configuration
+      const settings = decryptAccountSettingsWithPassword(encryptedAccount.settingsJson);
+      
+      if (!settings.smtp) {
+        return res.status(500).json({
+          success: false,
+          error: "SMTP configuration not found for this account"
+        });
+      }
+
+      // Create nodemailer transporter with SMTP settings
+      const transporter = nodemailer.createTransporter({
+        host: settings.smtp.host,
+        port: settings.smtp.port,
+        secure: settings.smtp.secure,
+        auth: {
+          user: settings.smtp.username,
+          pass: settings.smtp.password
+        },
+        timeout: 30000,
+        connectionTimeout: 30000
+      });
+
+      // Verify SMTP connection
+      try {
+        await transporter.verify();
+      } catch (error: any) {
+        console.error('SMTP verification failed:', error);
+        return res.status(500).json({
+          success: false,
+          error: "SMTP connection failed: " + error.message
+        });
+      }
+
+      // Prepare email message
+      const mailOptions = {
+        from: settings.smtp.username, // Use SMTP username as sender
+        to: emailData.to,
+        cc: emailData.cc || undefined,
+        bcc: emailData.bcc || undefined,
+        subject: emailData.subject,
+        text: emailData.body,
+        html: emailData.bodyHtml || emailData.body.replace(/\n/g, '<br>'), // Convert newlines to HTML if no HTML provided
+        attachments: emailData.attachments?.map(att => ({
+          filename: att.filename,
+          content: att.content,
+          encoding: 'base64',
+          contentType: att.contentType
+        }))
+      };
+
+      // Send the email
+      let sendResult;
+      try {
+        sendResult = await transporter.sendMail(mailOptions);
+        console.log('Email sent successfully:', sendResult.messageId);
+      } catch (error: any) {
+        console.error('Failed to send email:', error);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to send email: " + error.message
+        });
+      }
+
+      // Append sent email to Sent folder via IMAP APPEND
+      try {
+        const appendResult = await appendSentEmailToFolder(accountId, encryptedAccount.settingsJson, {
+          to: emailData.to,
+          cc: emailData.cc,
+          bcc: emailData.bcc,
+          subject: emailData.subject,
+          bodyText: emailData.body,
+          bodyHtml: emailData.bodyHtml,
+          from: settings.smtp.username,
+          messageId: sendResult.messageId,
+          attachments: emailData.attachments
+        });
+
+        if (!appendResult.success) {
+          console.error('Failed to append to Sent folder:', appendResult.error);
+          // Don't fail the entire request - email was sent successfully
+        } else {
+          console.log('Successfully appended sent email to Sent folder');
+        }
+      } catch (error) {
+        console.error('Error appending to Sent folder:', error);
+        // Don't fail the entire request - email was sent successfully
+      }
+      
+      // Store sent email in database for immediate UI display
+      try {
+        const sentEmailData = {
+          accountId,
+          folder: 'SENT',
+          messageId: sendResult.messageId || `sent-${Date.now()}`,
+          threadId: null,
+          subject: emailData.subject,
+          from: settings.smtp.username,
+          to: emailData.to + (emailData.cc ? `, ${emailData.cc}` : '') + (emailData.bcc ? `, ${emailData.bcc}` : ''),
+          date: new Date(),
+          size: emailData.body.length + (emailData.bodyHtml?.length || 0),
+          hasAttachments: (emailData.attachments?.length || 0) > 0,
+          isRead: true, // Sent emails are always "read"
+          isFlagged: false,
+          priority: 0,
+          snippet: emailData.body.substring(0, 200),
+          bodyHtml: emailData.bodyHtml || emailData.body.replace(/\n/g, '<br>'),
+          bodyText: emailData.body
+        };
+
+        await storage.createMailMessage(sentEmailData);
+        console.log('Sent email stored in database');
+      } catch (error) {
+        console.error('Failed to store sent email in database:', error);
+        // Don't fail the entire request if database storage fails
+      }
+
+      // Return success response
+      const response: SendEmailResponse = {
+        success: true,
+        messageId: sendResult.messageId,
+        sentAt: new Date()
+      };
+
+      res.json(response);
+
+    } catch (error: any) {
+      console.error("Email sending error:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to send email"
+      });
     }
   });
 

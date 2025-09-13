@@ -711,6 +711,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                   <ComposeDialog
                     isOpen={true}
                     onClose={() => setInlineComposeDraft(null)}
+                    accountId={primaryAccount?.id}
                     replyTo={inlineComposeDraft}
                   />
                 </div>
@@ -739,6 +740,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       <ComposeDialog
         isOpen={isComposeOpen}
         onClose={() => setIsComposeOpen(false)}
+        accountId={primaryAccount?.id}
         replyTo={composeReplyTo}
       />
       
