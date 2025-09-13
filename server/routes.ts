@@ -312,7 +312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const userId = req.user.claims.sub;
       const { 
-        name, protocol, host, username, password, useSSL,
+        name, protocol, host, port, username, password, useSSL,
         // SMTP settings for IMAP accounts
         enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
       } = req.body;
