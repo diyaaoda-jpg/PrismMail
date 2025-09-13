@@ -29,7 +29,7 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="light" storageKey="prism-ui-theme">
+      <ThemeProvider defaultMode="light" defaultPalette="default">
         <TooltipProvider>
           <Router />
           <Toaster />

@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal } from "lucide-react";
+import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -152,7 +153,10 @@ export function EmailViewer({
               <span data-testid="text-email-from">{email.from}</span>
             </div>
             <span className="text-muted-foreground" data-testid="text-email-date">
-              {email.date.toLocaleString()}
+              {(() => {
+                const date = email.date instanceof Date ? email.date : new Date(email.date);
+                return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleString();
+              })()}
             </span>
           </div>
         </div>
@@ -163,26 +167,15 @@ export function EmailViewer({
         <ScrollArea className="flex-1">
           <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
             <div data-testid="text-email-content">
-              {/* Mock email content - in real app this would be HTML rendered safely */}
-              <p>Dear Team,</p>
-              <p>{email.snippet}</p>
-              <p>
-                I wanted to provide you with an update on our current progress and outline the next steps we need to take.
-                The project has been moving forward successfully, and we're on track to meet our upcoming deadlines.
-              </p>
-              <p>
-                Key highlights from this week:
-              </p>
-              <ul>
-                <li>Completed initial design mockups</li>
-                <li>Set up development environment</li>
-                <li>Conducted stakeholder interviews</li>
-                <li>Finalized project timeline</li>
-              </ul>
-              <p>
-                Please let me know if you have any questions or concerns. I'm available for a quick call to discuss any of these items in more detail.
-              </p>
-              <p>Best regards,<br />Team Lead</p>
+              {email.bodyHtml ? (
+                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }} />
+              ) : email.bodyText ? (
+                <div style={{ whiteSpace: 'pre-wrap' }}>{email.bodyText}</div>
+              ) : (
+                <div>
+                  <p>{email.snippet}</p>
+                </div>
+              )}
             </div>
           </div>
         </ScrollArea>

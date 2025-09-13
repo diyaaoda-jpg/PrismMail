@@ -14,6 +14,8 @@ export interface EmailMessage {
   priority: number;
   hasAttachments: boolean;
   snippet: string;
+  bodyHtml?: string;
+  bodyText?: string;
   folder: string;
 }
 
