@@ -1,7 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { IStorage } from './storage';
-import { InsertMailMessage } from '../shared/schema';
+import { InsertMailMessage, InsertAccountFolder } from '../shared/schema';
 
 export interface SyncResult {
   success: boolean;
@@ -159,6 +159,115 @@ function hasAttachments(bodyStructure: any): boolean {
   }
 
   return false;
+}
+
+/**
+ * Map IMAP SPECIAL-USE flags to standardized folder types
+ */
+function mapImapFolderType(flags: string[]): string {
+  if (flags.includes('\\Inbox')) return 'inbox';
+  if (flags.includes('\\Sent')) return 'sent';
+  if (flags.includes('\\Drafts')) return 'drafts';
+  if (flags.includes('\\Trash')) return 'deleted';
+  if (flags.includes('\\Archive')) return 'archive';
+  if (flags.includes('\\Junk')) return 'spam';
+  return 'custom';
+}
+
+/**
+ * Discover and synchronize IMAP folders to database
+ * @param accountId - The account connection ID
+ * @param settingsJson - Encrypted settings JSON from database
+ * @param storage - Storage instance for database operations
+ * @returns Success status and folder count
+ */
+export async function discoverImapFolders(
+  accountId: string,
+  settingsJson: string,
+  storage: IStorage
+): Promise<{ success: boolean; folderCount: number; error?: string }> {
+  let client: ImapFlow | undefined;
+  
+  try {
+    const settings = decryptAccountSettingsWithPassword(settingsJson);
+    
+    client = new ImapFlow({
+      host: settings.host,
+      port: settings.port,
+      secure: settings.useSSL,
+      auth: {
+        user: settings.username,
+        pass: settings.password,
+      },
+      socketTimeout: 30000,
+      greetingTimeout: 30000,
+    });
+
+    console.log(`Discovering IMAP folders for account ${accountId}`);
+    
+    // Connect to IMAP server
+    await client.connect();
+    
+    // List all folders with their attributes
+    const folders = await client.list();
+    
+    let folderCount = 0;
+    
+    for (const folder of folders) {
+      try {
+        // Skip non-selectable folders
+        if (folder.flags && Array.from(folder.flags).includes('\\Noselect')) {
+          continue;
+        }
+        
+        // Map folder type using SPECIAL-USE flags
+        const folderType = mapImapFolderType(Array.from(folder.flags || [])) as "inbox" | "sent" | "drafts" | "deleted" | "archive" | "spam" | "custom";
+        
+        // Create folder object
+        const folderData: InsertAccountFolder = {
+          accountId,
+          folderId: folder.path,
+          folderType,
+          displayName: folder.name || folder.path,
+          unreadCount: 0,
+          totalCount: 0,
+          isActive: true,
+          lastSynced: null,
+        };
+        
+        // Upsert folder to database
+        await storage.upsertAccountFolder(folderData);
+        folderCount++;
+        
+        console.log(`Discovered IMAP folder: ${folder.path} (${folderType})`);
+        
+      } catch (error) {
+        console.error(`Error processing folder ${folder.path}:`, error);
+      }
+    }
+    
+    console.log(`IMAP folder discovery completed: ${folderCount} folders found`);
+    
+    return { success: true, folderCount };
+    
+  } catch (error: any) {
+    console.error('IMAP folder discovery failed:', error);
+    
+    return {
+      success: false,
+      folderCount: 0,
+      error: error.message || 'IMAP folder discovery failed'
+    };
+  } finally {
+    if (client) {
+      try {
+        await client.logout();
+        console.log('IMAP client disconnected cleanly');
+      } catch (error) {
+        console.error('Error disconnecting IMAP client:', error);
+      }
+    }
+  }
 }
 
 /**

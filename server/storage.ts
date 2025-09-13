@@ -1,6 +1,7 @@
 import {
   users,
   accountConnections,
+  accountFolders,
   mailIndex,
   priorityRules,
   vipContacts,
@@ -9,6 +10,8 @@ import {
   type UpsertUser,
   type AccountConnection,
   type InsertAccountConnection,
+  type AccountFolder,
+  type InsertAccountFolder,
   type MailMessage,
   type InsertMailMessage,
   type PriorityRule,
@@ -52,6 +55,13 @@ export interface IStorage {
   // User preferences
   getUserPrefs(userId: string): Promise<UserPrefs | undefined>;
   upsertUserPrefs(prefs: InsertUserPrefs): Promise<UserPrefs>;
+  // Account folders
+  getAccountFolders(accountId: string): Promise<AccountFolder[]>;
+  createAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
+  updateAccountFolder(id: string, updates: Partial<AccountFolder>): Promise<AccountFolder | undefined>;
+  upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
+  deleteAccountFolder(id: string): Promise<void>;
+  updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -250,6 +260,60 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result;
+  }
+
+  // Account folders
+  async getAccountFolders(accountId: string): Promise<AccountFolder[]> {
+    return await db.select().from(accountFolders).where(eq(accountFolders.accountId, accountId))
+      .orderBy(accountFolders.folderType, accountFolders.displayName);
+  }
+
+  async createAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder> {
+    const [result] = await db.insert(accountFolders).values(folder).returning();
+    return result;
+  }
+
+  async updateAccountFolder(id: string, updates: Partial<AccountFolder>): Promise<AccountFolder | undefined> {
+    const [result] = await db
+      .update(accountFolders)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(accountFolders.id, id))
+      .returning();
+    return result;
+  }
+
+  async upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder> {
+    const [result] = await db
+      .insert(accountFolders)
+      .values(folder)
+      .onConflictDoUpdate({
+        target: [accountFolders.accountId, accountFolders.folderId],
+        set: {
+          ...folder,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteAccountFolder(id: string): Promise<void> {
+    await db.delete(accountFolders).where(eq(accountFolders.id, id));
+  }
+
+  async updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void> {
+    await db
+      .update(accountFolders)
+      .set({ 
+        unreadCount, 
+        totalCount, 
+        lastSynced: new Date(),
+        updatedAt: new Date() 
+      })
+      .where(and(
+        eq(accountFolders.accountId, accountId),
+        eq(accountFolders.folderId, folderId)
+      ));
   }
 }
 

@@ -106,6 +106,26 @@ export const userPrefs = pgTable("user_prefs", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Account folders catalog
+export const accountFolders = pgTable("account_folders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
+  folderId: varchar("folder_id").notNull(), // Server-side folder identifier (IMAP path or EWS ID)
+  folderType: varchar("folder_type", { 
+    enum: ["inbox", "sent", "drafts", "deleted", "archive", "spam", "custom"] 
+  }).notNull(),
+  displayName: varchar("display_name").notNull(), // Human-readable folder name
+  unreadCount: integer("unread_count").default(0),
+  totalCount: integer("total_count").default(0),
+  isActive: boolean("is_active").default(true), // Whether this folder should be synced
+  lastSynced: timestamp("last_synced"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Unique constraint to prevent duplicate folders per account
+  unique("unique_folder_per_account").on(table.accountId, table.folderId),
+]);
+
 // Insert and select schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
@@ -113,6 +133,7 @@ export const insertMailIndexSchema = createInsertSchema(mailIndex).omit({ id: tr
 export const insertPriorityRuleSchema = createInsertSchema(priorityRules).omit({ id: true, createdAt: true });
 export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id: true, createdAt: true });
 export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -128,3 +149,5 @@ export type VipContact = typeof vipContacts.$inferSelect;
 export type InsertVipContact = z.infer<typeof insertVipContactSchema>;
 export type UserPrefs = typeof userPrefs.$inferSelect;
 export type InsertUserPrefs = z.infer<typeof insertUserPrefsSchema>;
+export type AccountFolder = typeof accountFolders.$inferSelect;
+export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;

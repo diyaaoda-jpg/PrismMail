@@ -1,5 +1,6 @@
 import { IStorage } from './storage';
 import { decryptAccountSettingsWithPassword } from './crypto';
+import { InsertAccountFolder } from '../shared/schema';
 
 export interface EwsSyncResult {
   messageCount: number;
@@ -23,6 +24,131 @@ function normalizeEwsUrl(hostUrl: string): string {
   
   // Always use the canonical Exchange EWS endpoint (force HTTPS)
   return url.origin + '/EWS/Exchange.asmx';
+}
+
+/**
+ * Map EWS WellKnownFolderName to standardized folder types
+ */
+function mapEwsFolderType(folderName: string): string {
+  switch (folderName.toLowerCase()) {
+    case 'inbox':
+      return 'inbox';
+    case 'sentitems':
+    case 'sent':
+      return 'sent';
+    case 'drafts':
+      return 'drafts';
+    case 'deleteditems':
+    case 'deleted':
+      return 'deleted';
+    case 'archive':
+      return 'archive';
+    case 'junkemail':
+    case 'spam':
+      return 'spam';
+    default:
+      return 'custom';
+  }
+}
+
+/**
+ * Discover and synchronize EWS folders to database
+ * @param accountId - The account connection ID
+ * @param settingsJson - Encrypted settings JSON from database
+ * @param storage - Storage instance for database operations
+ * @returns Success status and folder count
+ */
+export async function discoverEwsFolders(
+  accountId: string,
+  settingsJson: string,
+  storage: IStorage
+): Promise<{ success: boolean; folderCount: number; error?: string }> {
+  try {
+    // Get encrypted account settings
+    const settings = decryptAccountSettingsWithPassword(settingsJson);
+    
+    // Dynamic import to avoid require() issues
+    const ewsApi = await import('ews-javascript-api');
+    const { 
+      ExchangeService, 
+      ExchangeVersion, 
+      WebCredentials, 
+      Uri, 
+      WellKnownFolderName, 
+      Folder
+    } = ewsApi;
+
+    // Create Exchange service
+    const service = new ExchangeService(ExchangeVersion.Exchange2013);
+    service.Credentials = new WebCredentials(settings.username, settings.password);
+    
+    // Use canonical EWS URL normalization
+    const ewsUrl = normalizeEwsUrl(settings.host);
+    service.Url = new Uri(ewsUrl);
+    
+    // Enable pre-authentication for better compatibility
+    service.PreAuthenticate = true;
+    service.UserAgent = 'PrismMail/1.0';
+
+    console.log(`Discovering EWS folders for account ${accountId}`);
+
+    // Standard EWS well-known folders to discover
+    const wellKnownFolders = [
+      { name: 'Inbox', wellKnownName: WellKnownFolderName.Inbox },
+      { name: 'SentItems', wellKnownName: WellKnownFolderName.SentItems },
+      { name: 'Drafts', wellKnownName: WellKnownFolderName.Drafts },
+      { name: 'DeletedItems', wellKnownName: WellKnownFolderName.DeletedItems },
+      { name: 'Archive', wellKnownName: WellKnownFolderName.Archive },
+      { name: 'JunkEmail', wellKnownName: WellKnownFolderName.JunkEmail },
+    ];
+
+    let folderCount = 0;
+
+    for (const folderInfo of wellKnownFolders) {
+      try {
+        // Try to bind to the well-known folder
+        const folder = await Folder.Bind(service, folderInfo.wellKnownName);
+        
+        // Map folder type
+        const folderType = mapEwsFolderType(folderInfo.name) as "inbox" | "sent" | "drafts" | "deleted" | "archive" | "spam" | "custom";
+        
+        // Create folder object
+        const folderData: InsertAccountFolder = {
+          accountId,
+          folderId: folder.Id.UniqueId,
+          folderType,
+          displayName: folder.DisplayName || folderInfo.name,
+          unreadCount: folder.UnreadCount || 0,
+          totalCount: folder.TotalCount || 0,
+          isActive: true,
+          lastSynced: null,
+        };
+        
+        // Upsert folder to database
+        await storage.upsertAccountFolder(folderData);
+        folderCount++;
+        
+        console.log(`Discovered EWS folder: ${folder.DisplayName || folderInfo.name} (${folderType})`);
+        
+      } catch (error) {
+        // Some folders might not exist (like Archive), so log but continue
+        console.log(`EWS folder ${folderInfo.name} not available:`, (error as Error).message);
+      }
+    }
+    
+    console.log(`EWS folder discovery completed: ${folderCount} folders found`);
+    
+    return { success: true, folderCount };
+    
+  } catch (error: any) {
+    console.error('EWS folder discovery failed:', error);
+    
+    return {
+      success: false,
+      folderCount: 0,
+      error: error.message || 'EWS folder discovery failed'
+    };
+  }
 }
 
 /**

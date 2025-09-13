@@ -4,6 +4,8 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertAccountConnectionSchema } from "@shared/schema";
 import { testConnection } from "./connectionTest";
+import { discoverImapFolders } from "./emailSync";
+import { discoverEwsFolders } from "./ewsSync";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -258,6 +260,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error deleting account:", error);
       res.status(500).json({ message: error.message || "Failed to delete account" });
+    }
+  });
+
+  // Account folder routes
+  app.get('/api/accounts/:accountId/folders', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      // Get folders for this account
+      const folders = await storage.getAccountFolders(accountId);
+      
+      res.json(folders);
+    } catch (error) {
+      console.error("Error fetching account folders:", error);
+      res.status(500).json({ message: "Failed to fetch folders" });
+    }
+  });
+
+  // Discover folders for an account
+  app.post('/api/accounts/:accountId/discover-folders', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      if (!account.isActive) {
+        return res.status(400).json({ message: 'Account is not active' });
+      }
+      
+      // Get encrypted account settings
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        return res.status(404).json({ message: 'Account settings not found' });
+      }
+      
+      let result;
+      
+      if (account.protocol === 'IMAP') {
+        result = await discoverImapFolders(
+          accountId,
+          encryptedAccount.settingsJson,
+          storage
+        );
+      } else if (account.protocol === 'EWS') {
+        result = await discoverEwsFolders(
+          accountId,
+          encryptedAccount.settingsJson,
+          storage
+        );
+      } else {
+        return res.status(400).json({ message: `Unsupported protocol: ${account.protocol}` });
+      }
+      
+      res.json({
+        success: result.success,
+        folderCount: result.folderCount,
+        error: result.error
+      });
+      
+    } catch (error) {
+      console.error("Error discovering account folders:", error);
+      res.status(500).json({ message: "Failed to discover folders" });
     }
   });
 
