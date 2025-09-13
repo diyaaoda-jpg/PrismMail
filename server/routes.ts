@@ -6,6 +6,7 @@ import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRe
 import { testConnection } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
 import { discoverEwsFolders } from "./ewsSync";
+import { getEwsPushService } from "./ewsPushNotifications";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
@@ -225,15 +226,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
             lastChecked: result.lastChecked,
             lastError: result.error || null,
           });
+          
+          // If EWS account and successfully connected, start push notifications
+          if (result.success && protocol === 'EWS') {
+            try {
+              const pushService = getEwsPushService(storage);
+              const subscriptionResult = await pushService.startSubscription(account.id);
+              console.log(`Push subscription result for account ${account.id}:`, subscriptionResult);
+            } catch (error) {
+              console.error(`Failed to start push subscription for account ${account.id}:`, error);
+            }
+          }
         })
-        .catch((error) => {
+        .catch(async (error) => {
           console.error('Background connection test failed:', error);
           // Update with failure status
-          storage.updateAccountConnection(account.id, {
+          await storage.updateAccountConnection(account.id, {
             isActive: false,
             lastChecked: new Date(),
             lastError: 'Connection test failed: ' + error.message,
           });
+          
+          // Stop push subscription for failed EWS accounts
+          if (protocol === 'EWS') {
+            try {
+              const pushService = getEwsPushService(storage);
+              await pushService.stopSubscription(account.id);
+            } catch (error) {
+              console.error(`Failed to stop push subscription for failed account ${account.id}:`, error);
+            }
+          }
         });
       
       res.json(account);
@@ -349,6 +371,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Failed to update account" });
       }
       
+      // Restart push subscription for updated EWS accounts
+      if (protocol === 'EWS') {
+        try {
+          const pushService = getEwsPushService(storage);
+          // Stop existing subscription if any
+          await pushService.stopSubscription(id);
+          // Start new subscription with updated settings
+          const subscriptionResult = await pushService.startSubscription(id);
+          console.log(`Push subscription restarted for updated account ${id}:`, subscriptionResult);
+        } catch (error) {
+          console.error(`Failed to restart push subscription for updated account ${id}:`, error);
+        }
+      }
+      
       res.json(updatedAccount);
       
     } catch (error: any) {
@@ -375,11 +411,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Account not found or does not belong to user" });
       }
       
+      // Stop push subscription before deleting EWS account
+      if (accountToDelete.protocol === 'EWS') {
+        try {
+          const pushService = getEwsPushService(storage);
+          await pushService.stopSubscription(id);
+          console.log(`Push subscription stopped for deleted account ${id}`);
+        } catch (error) {
+          console.error(`Failed to stop push subscription for deleted account ${id}:`, error);
+        }
+      }
+      
       await storage.deleteAccountConnection(id);
       res.json({ message: "Account deleted successfully" });
     } catch (error: any) {
       console.error("Error deleting account:", error);
       res.status(500).json({ message: error.message || "Failed to delete account" });
+    }
+  });
+
+  // Push notification management routes
+  app.get('/api/accounts/:accountId/push-status', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      // Only EWS accounts support push notifications
+      if (account.protocol !== 'EWS') {
+        return res.json({ supported: false, message: 'Push notifications only supported for EWS accounts' });
+      }
+      
+      // Get push notification status
+      const pushService = getEwsPushService(storage);
+      const status = pushService.getSubscriptionStatus(accountId);
+      
+      res.json({
+        supported: true,
+        ...status
+      });
+      
+    } catch (error: any) {
+      console.error("Error getting push status:", error);
+      res.status(500).json({ message: error.message || "Failed to get push status" });
+    }
+  });
+
+  app.post('/api/accounts/:accountId/push-start', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      // Only EWS accounts support push notifications
+      if (account.protocol !== 'EWS') {
+        return res.status(400).json({ message: 'Push notifications only supported for EWS accounts' });
+      }
+      
+      // Start push subscription
+      const pushService = getEwsPushService(storage);
+      const result = await pushService.startSubscription(accountId);
+      
+      res.json(result);
+      
+    } catch (error: any) {
+      console.error("Error starting push subscription:", error);
+      res.status(500).json({ message: error.message || "Failed to start push subscription" });
+    }
+  });
+
+  app.post('/api/accounts/:accountId/push-stop', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      // Stop push subscription
+      const pushService = getEwsPushService(storage);
+      await pushService.stopSubscription(accountId);
+      
+      res.json({ success: true, message: 'Push subscription stopped' });
+      
+    } catch (error: any) {
+      console.error("Error stopping push subscription:", error);
+      res.status(500).json({ message: error.message || "Failed to stop push subscription" });
     }
   });
 

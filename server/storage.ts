@@ -34,6 +34,7 @@ export interface IStorage {
   upsertUser(user: UpsertUser): Promise<User>;
   // Account connections
   getUserAccountConnections(userId: string): Promise<AccountConnection[]>;
+  getAllActiveEwsAccounts(): Promise<AccountConnection[]>;
   createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection>;
   getAccountConnectionEncrypted(id: string): Promise<{ settingsJson: string } | undefined>;
   updateAccountConnection(id: string, updates: Partial<AccountConnection>): Promise<AccountConnection | undefined>;
@@ -95,6 +96,18 @@ export class DatabaseStorage implements IStorage {
       ...account,
       settingsJson: JSON.stringify(decryptAccountSettings(account.settingsJson))
     }));
+  }
+
+  async getAllActiveEwsAccounts(): Promise<AccountConnection[]> {
+    const accounts = await db.select().from(accountConnections).where(
+      and(
+        eq(accountConnections.protocol, 'EWS'),
+        eq(accountConnections.isActive, true)
+      )
+    );
+    
+    // Return with encrypted settings for internal use (don't decrypt for security)
+    return accounts;
   }
 
   async createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection> {
