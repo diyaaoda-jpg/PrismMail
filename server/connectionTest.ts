@@ -96,6 +96,28 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
       settings = decryptAccountSettingsWithPassword(settingsJson);
     }
     
+    // First, try a simple HTTP check to validate the URL
+    const testUrl = settings.host.startsWith('http') ? settings.host : `https://${settings.host}`;
+    
+    try {
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'PrismMail/1.0'
+        },
+        // Short timeout for initial connectivity test
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      // We expect some response, even if it's an error (401, 404, etc.)
+      // The important thing is that we can reach the server
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Connection timeout - server may be unreachable');
+      }
+      throw new Error(`Cannot reach server: ${fetchError.message}`);
+    }
+    
     // Dynamic import to avoid require() issues
     const ewsApi = await import('ews-javascript-api');
     const { ExchangeService, ExchangeVersion, WebCredentials, Uri, WellKnownFolderName, Folder, PropertySet, BasePropertySet } = ewsApi;
@@ -103,13 +125,10 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
     
-    // Construct EWS URL - typically https://server/EWS/Exchange.asmx
+    // Use the URL as provided by user
     let ewsUrl = settings.host;
     if (!ewsUrl.startsWith('http')) {
-      ewsUrl = (settings.useSSL ? 'https://' : 'http://') + ewsUrl;
-    }
-    if (!ewsUrl.includes('/EWS/') && !ewsUrl.includes('/ews')) {
-      ewsUrl = ewsUrl.endsWith('/') ? ewsUrl + 'EWS/Exchange.asmx' : ewsUrl + '/EWS/Exchange.asmx';
+      ewsUrl = 'https://' + ewsUrl;
     }
     
     service.Url = new Uri(ewsUrl);
