@@ -9,12 +9,21 @@ export interface ConnectionTestResult {
 
 /**
  * Test IMAP connection with the provided settings
- * @param settingsJson - Encrypted settings JSON from database
+ * @param settingsJson - Settings JSON (plain text for testing, encrypted for saved accounts)
  * @returns Connection test result
  */
 export async function testImapConnection(settingsJson: string): Promise<ConnectionTestResult> {
   try {
-    const settings = decryptAccountSettingsWithPassword(settingsJson);
+    // For connection testing, the settingsJson is plain text
+    // For saved accounts, it's encrypted and needs decryption
+    let settings: any;
+    try {
+      // First try to parse as plain JSON (for connection testing)
+      settings = JSON.parse(settingsJson);
+    } catch {
+      // If that fails, try to decrypt (for saved accounts)
+      settings = decryptAccountSettingsWithPassword(settingsJson);
+    }
     
     const client = new ImapFlow({
       host: settings.host,
@@ -71,12 +80,21 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
 
 /**
  * Test EWS (Exchange Web Services) connection
- * @param settingsJson - Encrypted settings JSON from database
+ * @param settingsJson - Settings JSON (plain text for testing, encrypted for saved accounts)
  * @returns Connection test result
  */
 export async function testEwsConnection(settingsJson: string): Promise<ConnectionTestResult> {
   try {
-    const settings = decryptAccountSettingsWithPassword(settingsJson);
+    // For connection testing, the settingsJson is plain text
+    // For saved accounts, it's encrypted and needs decryption
+    let settings: any;
+    try {
+      // First try to parse as plain JSON (for connection testing)
+      settings = JSON.parse(settingsJson);
+    } catch {
+      // If that fails, try to decrypt (for saved accounts)
+      settings = decryptAccountSettingsWithPassword(settingsJson);
+    }
     
     // Dynamic import to avoid require() issues
     const ewsApi = await import('ews-javascript-api');
