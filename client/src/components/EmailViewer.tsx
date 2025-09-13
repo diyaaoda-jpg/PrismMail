@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal } from "lucide-react";
+import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +11,7 @@ import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
   email: EmailMessage | null;
+  currentUserEmail?: string;
   onReply?: (email: EmailMessage) => void;
   onReplyAll?: (email: EmailMessage) => void;
   onForward?: (email: EmailMessage) => void;
@@ -20,6 +22,7 @@ interface EmailViewerProps {
 
 export function EmailViewer({
   email,
+  currentUserEmail,
   onReply,
   onReplyAll, 
   onForward,
@@ -74,6 +77,14 @@ export function EmailViewer({
     2: 'Medium Priority', 
     3: 'High Priority'
   };
+
+  const contextualLabels = useMemo(() => {
+    return email ? getContextualLabels(email) : { reply: 'Reply', replyAll: 'Reply All', forward: 'Forward' };
+  }, [email]);
+
+  const showReplyAll = useMemo(() => {
+    return email ? shouldShowReplyAll(email, currentUserEmail) : true;
+  }, [email, currentUserEmail]);
 
   return (
     <div className="flex-1 flex flex-col bg-background">
@@ -183,15 +194,17 @@ export function EmailViewer({
           <div className="flex items-center gap-2">
             <Button onClick={handleReply} data-testid="button-reply" className="hover-elevate active-elevate-2">
               <Reply className="h-4 w-4 mr-2" />
-              Reply
+              {contextualLabels.reply}
             </Button>
-            <Button variant="outline" onClick={handleReplyAll} data-testid="button-reply-all" className="hover-elevate active-elevate-2">
-              <ReplyAll className="h-4 w-4 mr-2" />
-              Reply All
-            </Button>
+            {showReplyAll && (
+              <Button variant="outline" onClick={handleReplyAll} data-testid="button-reply-all" className="hover-elevate active-elevate-2">
+                <ReplyAll className="h-4 w-4 mr-2" />
+                {contextualLabels.replyAll}
+              </Button>
+            )}
             <Button variant="outline" onClick={handleForward} data-testid="button-forward" className="hover-elevate active-elevate-2">
               <Forward className="h-4 w-4 mr-2" />
-              Forward
+              {contextualLabels.forward}
             </Button>
           </div>
         </div>

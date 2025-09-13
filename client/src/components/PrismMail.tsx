@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { BookOpen, Settings } from "lucide-react";
+import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -121,7 +122,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [composeReplyTo, setComposeReplyTo] = useState<{to: string; subject: string; body?: string} | undefined>();
+  const [composeReplyTo, setComposeReplyTo] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
 
   // Fetch user's accounts
   const { data: accounts = [], isLoading: accountsLoading } = useQuery<AccountConnection[]>({
@@ -409,30 +410,39 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, []);
 
   const handleReply = useCallback((email: EmailMessage) => {
+    const replyData = makeReply(email, user?.email);
     setComposeReplyTo({
-      to: email.from,
-      subject: email.subject.startsWith('Re: ') ? email.subject : `Re: ${email.subject}`,
-      body: `\n\n--- Original Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+      to: replyData.to,
+      cc: replyData.cc,
+      bcc: replyData.bcc,
+      subject: replyData.subject,
+      body: replyData.body
     });
     setIsComposeOpen(true);
     console.log('Reply to:', email.subject);
-  }, []);
+  }, [user?.email]);
 
   const handleReplyAll = useCallback((email: EmailMessage) => {
+    const replyAllData = makeReplyAll(email, user?.email);
     setComposeReplyTo({
-      to: email.from,
-      subject: email.subject.startsWith('Re: ') ? email.subject : `Re: ${email.subject}`,
-      body: `\n\n--- Original Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+      to: replyAllData.to,
+      cc: replyAllData.cc,
+      bcc: replyAllData.bcc,
+      subject: replyAllData.subject,
+      body: replyAllData.body
     });
     setIsComposeOpen(true);
     console.log('Reply all to:', email.subject);
-  }, []);
+  }, [user?.email]);
 
   const handleForward = useCallback((email: EmailMessage) => {
+    const forwardData = makeForward(email);
     setComposeReplyTo({
-      to: '',
-      subject: email.subject.startsWith('Fwd: ') ? email.subject : `Fwd: ${email.subject}`,
-      body: `\n\n--- Forwarded Message ---\nFrom: ${email.from}\nDate: ${email.date.toLocaleString()}\nSubject: ${email.subject}\n\n${email.snippet}`
+      to: forwardData.to,
+      cc: forwardData.cc,
+      bcc: forwardData.bcc,
+      subject: forwardData.subject,
+      body: forwardData.body
     });
     setIsComposeOpen(true);
     console.log('Forward:', email.subject);
@@ -542,6 +552,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
         onAccountSelect={setSelectedAccount}
         onCompose={handleCompose}
         onSearch={handleSearch}
+        onSettings={handleSettings}
         unreadCounts={mockUnreadCounts}
         accounts={accounts}
       />
@@ -637,6 +648,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           {/* Email viewer */}
           <EmailViewer
             email={selectedEmail}
+            currentUserEmail={user?.email}
             onReply={handleReply}
             onReplyAll={handleReplyAll}
             onForward={handleForward}

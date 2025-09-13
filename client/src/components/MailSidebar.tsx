@@ -23,6 +23,7 @@ interface MailSidebarProps {
   onAccountSelect?: (accountId: string) => void;
   onCompose?: () => void;
   onSearch?: (query: string) => void;
+  onSettings?: () => void;
   unreadCounts?: Record<string, number>;
   accounts?: Array<{
     id: string;
@@ -53,6 +54,7 @@ export function MailSidebar({
   onAccountSelect,
   onCompose,
   onSearch,
+  onSettings,
   unreadCounts = {},
   accounts = [],
 }: MailSidebarProps) {
@@ -78,6 +80,11 @@ export function MailSidebar({
   const handleAccountSelect = (accountId: string) => {
     onAccountSelect?.(accountId);
     console.log('Selected account:', accountId);
+  };
+
+  const handleSettings = () => {
+    onSettings?.();
+    console.log('Settings clicked');
   };
 
   const renderAccount = (account: { id: string; name: string; protocol: 'IMAP' | 'EWS'; isActive: boolean }) => {
@@ -226,6 +233,7 @@ export function MailSidebar({
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 hover-elevate active-elevate-2"
+              onClick={handleSettings}
               data-testid="button-settings"
             >
               <Settings className="h-4 w-4" />

@@ -19,6 +19,8 @@ interface ComposeDialogProps {
   onClose: () => void;
   replyTo?: {
     to: string;
+    cc?: string;
+    bcc?: string;
     subject: string;
     body?: string;
   };
@@ -28,8 +30,8 @@ export function ComposeDialog({ isOpen, onClose, replyTo }: ComposeDialogProps) 
   const { toast } = useToast();
   const [formData, setFormData] = useState({
     to: replyTo?.to || "",
-    cc: "",
-    bcc: "",
+    cc: replyTo?.cc || "",
+    bcc: replyTo?.bcc || "",
     subject: replyTo?.subject || "",
     body: replyTo?.body || ""
   });

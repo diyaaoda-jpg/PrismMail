@@ -1,0 +1,106 @@
+/* Theme Palette Overrides */
+
+/* Ocean Palette - Deep blues and teals */
+.palette-ocean {
+  --accent: 200 85% 90%;
+  --accent-foreground: 200 85% 25%;
+  --chart-1: 200 85% 55%;
+  --chart-2: 180 70% 45%;
+  --chart-3: 220 80% 60%;
+  --chart-4: 190 75% 50%;
+  --chart-5: 210 85% 65%;
+}
+
+.palette-ocean.dark {
+  --accent: 200 85% 20%;
+  --accent-foreground: 200 85% 85%;
+  --chart-1: 200 85% 75%;
+  --chart-2: 180 70% 65%;
+  --chart-3: 220 80% 80%;
+  --chart-4: 190 75% 70%;
+  --chart-5: 210 85% 85%;
+}
+
+/* Forest Palette - Rich greens and earth tones */
+.palette-forest {
+  --accent: 142 76% 90%;
+  --accent-foreground: 142 76% 25%;
+  --chart-1: 142 76% 36%;
+  --chart-2: 120 50% 45%;
+  --chart-3: 85 60% 50%;
+  --chart-4: 160 70% 40%;
+  --chart-5: 100 55% 55%;
+}
+
+.palette-forest.dark {
+  --accent: 142 76% 20%;
+  --accent-foreground: 142 76% 85%;
+  --chart-1: 142 76% 55%;
+  --chart-2: 120 50% 65%;
+  --chart-3: 85 60% 70%;
+  --chart-4: 160 70% 60%;
+  --chart-5: 100 55% 75%;
+}
+
+/* Amber Palette - Warm oranges and yellows */
+.palette-amber {
+  --accent: 45 85% 90%;
+  --accent-foreground: 45 85% 25%;
+  --chart-1: 45 85% 60%;
+  --chart-2: 35 80% 55%;
+  --chart-3: 55 75% 65%;
+  --chart-4: 40 85% 50%;
+  --chart-5: 50 80% 70%;
+}
+
+.palette-amber.dark {
+  --accent: 45 85% 20%;
+  --accent-foreground: 45 85% 85%;
+  --chart-1: 45 85% 75%;
+  --chart-2: 35 80% 75%;
+  --chart-3: 55 75% 85%;
+  --chart-4: 40 85% 70%;
+  --chart-5: 50 80% 90%;
+}
+
+/* Rose Palette - Soft pinks and roses */
+.palette-rose {
+  --accent: 350 75% 90%;
+  --accent-foreground: 350 75% 25%;
+  --chart-1: 350 75% 65%;
+  --chart-2: 340 70% 60%;
+  --chart-3: 10 75% 70%;
+  --chart-4: 330 80% 55%;
+  --chart-5: 360 70% 75%;
+}
+
+.palette-rose.dark {
+  --accent: 350 75% 20%;
+  --accent-foreground: 350 75% 85%;
+  --chart-1: 350 75% 85%;
+  --chart-2: 340 70% 80%;
+  --chart-3: 10 75% 90%;
+  --chart-4: 330 80% 75%;
+  --chart-5: 360 70% 95%;
+}
+
+/* Grape Palette - Deep purples and violets */
+.palette-grape {
+  --accent: 270 75% 90%;
+  --accent-foreground: 270 75% 25%;
+  --chart-1: 270 75% 65%;
+  --chart-2: 260 70% 60%;
+  --chart-3: 280 80% 70%;
+  --chart-4: 250 75% 55%;
+  --chart-5: 290 70% 75%;
+}
+
+.palette-grape.dark {
+  --accent: 270 75% 20%;
+  --accent-foreground: 270 75% 85%;
+  --chart-1: 270 75% 85%;
+  --chart-2: 260 70% 80%;
+  --chart-3: 280 80% 90%;
+  --chart-4: 250 75% 75%;
+  --chart-5: 290 70% 95%;
+}
