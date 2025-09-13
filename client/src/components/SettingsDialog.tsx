@@ -262,8 +262,8 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   return (
     <>
       <Dialog open={isOpen} onOpenChange={handleClose}>
-        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
-          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4 flex-shrink-0">
             <DialogTitle className="text-lg font-semibold">
               Settings
             </DialogTitle>
@@ -280,9 +280,9 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
             </Button>
           </DialogHeader>
           
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
                 <TabsTrigger value="account" data-testid="tab-account">
                   <User className="h-4 w-4 mr-2" />
                   Account
@@ -301,7 +301,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                 </TabsTrigger>
               </TabsList>
 
-              <div className="flex-1 overflow-y-auto pt-6">
+              <div className="flex-1 overflow-y-auto pt-6 pr-1">
                 {/* Account Settings */}
                 <TabsContent value="account" className="space-y-6">
                   <Card>
