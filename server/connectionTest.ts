@@ -98,7 +98,7 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     
     // Dynamic import to avoid require() issues
     const ewsApi = await import('ews-javascript-api');
-    const { ExchangeService, ExchangeVersion, WebCredentials, Uri, WellKnownFolderName } = ewsApi;
+    const { ExchangeService, ExchangeVersion, WebCredentials, Uri, WellKnownFolderName, Folder, PropertySet, BasePropertySet } = ewsApi;
     
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
@@ -114,8 +114,9 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     
     service.Url = new Uri(ewsUrl);
     
-    // Try to get inbox folder to test connection
-    await service.GetFolder(WellKnownFolderName.Inbox);
+    // Try to get inbox folder to test connection using correct API method
+    const propertySet = new PropertySet(BasePropertySet.IdOnly);
+    await Folder.Bind(service, WellKnownFolderName.Inbox, propertySet);
 
     return {
       success: true,
