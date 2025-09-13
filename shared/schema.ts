@@ -152,7 +152,161 @@ export type InsertUserPrefs = z.infer<typeof insertUserPrefsSchema>;
 export type AccountFolder = typeof accountFolders.$inferSelect;
 export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
 
-// Settings JSON type definitions for account connections
+// Enhanced validation schemas for account settings
+
+// SMTP Settings validation schema
+export const smtpSettingsSchema = z.object({
+  host: z.string()
+    .min(1, "SMTP server is required")
+    .max(255, "SMTP server name is too long")
+    .refine(
+      (host) => {
+        // Basic hostname validation - allow IP addresses and domain names
+        const hostnameRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|(?:[0-9]{1,3}\.){3}[0-9]{1,3})$/;
+        return hostnameRegex.test(host);
+      },
+      "Please enter a valid server hostname or IP address (e.g., smtp.gmail.com)"
+    ),
+  port: z.number()
+    .int("Port must be a whole number")
+    .min(1, "Port must be greater than 0")
+    .max(65535, "Port must be less than 65536"),
+    // Note: Removed blocking validation for non-standard ports to support all providers
+    // Common ports: 25 (unencrypted), 465 (SSL), 587 (STARTTLS), 2525 (alternative)
+  secure: z.boolean(),
+  username: z.string()
+    .min(1, "SMTP username is required")
+    .max(255, "Username is too long"),
+  password: z.string()
+    .min(1, "SMTP password is required")
+    .max(1024, "Password is too long")
+}).strict();
+
+// IMAP Settings validation schema
+export const imapSettingsSchema = z.object({
+  host: z.string()
+    .min(1, "IMAP server is required")
+    .max(255, "Server name is too long")
+    .refine(
+      (host) => {
+        // Basic hostname validation - allow IP addresses and domain names
+        const hostnameRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|(?:[0-9]{1,3}\.){3}[0-9]{1,3})$/;
+        return hostnameRegex.test(host);
+      },
+      "Please enter a valid server hostname or IP address (e.g., imap.gmail.com)"
+    ),
+  port: z.number()
+    .int("Port must be a whole number")
+    .min(1, "Port must be greater than 0")
+    .max(65535, "Port must be less than 65536"),
+    // Note: Allow any valid port 1-65535. Common ports: 993 (SSL), 143 (STARTTLS)
+  username: z.string()
+    .min(1, "Username is required")
+    .max(255, "Username is too long")
+    .refine(
+      (username) => {
+        // Basic email validation for username
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(username) || username.length > 0;
+      },
+      "Username is typically your email address"
+    ),
+  password: z.string()
+    .min(1, "Password is required")
+    .max(1024, "Password is too long"),
+  useSSL: z.boolean(),
+  // Note: Allow both SSL (port 993) and STARTTLS (port 143) configurations
+  smtp: smtpSettingsSchema.optional()
+}).strict();
+
+// EWS Settings validation schema
+export const ewsSettingsSchema = z.object({
+  host: z.string()
+    .min(1, "Exchange server is required")
+    .max(500, "Server URL is too long")
+    .refine(
+      (host) => {
+        // Enhanced EWS validation for proper Exchange server formats
+        try {
+          // If it starts with http, must be https
+          if (host.startsWith('http')) {
+            const url = new URL(host);
+            if (url.protocol !== 'https:') {
+              return false; // EWS must use HTTPS
+            }
+            // Must have valid hostname and can optionally include EWS path
+            const isValidPath = !url.pathname || 
+                              url.pathname === '/' || 
+                              url.pathname.toLowerCase().includes('/ews/') ||
+                              url.pathname.toLowerCase().includes('/exchange.asmx');
+            return url.hostname.length > 0 && isValidPath;
+          } else {
+            // Otherwise validate as hostname/domain
+            const hostnameRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|(?:[0-9]{1,3}\.){3}[0-9]{1,3})$/;
+            return hostnameRegex.test(host) && host.includes('.'); // Domain must have TLD
+          }
+        } catch {
+          return false;
+        }
+      },
+      "Exchange server must be a valid domain (e.g., mail.company.com) or HTTPS URL (e.g., https://mail.company.com/EWS/Exchange.asmx)"
+    ),
+  username: z.string()
+    .min(1, "Username is required")
+    .max(255, "Username is too long")
+    .refine(
+      (username) => {
+        // Accept email format or domain\username format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const domainUserRegex = /^[^\\]+\\[^\\]+$/;
+        return emailRegex.test(username) || domainUserRegex.test(username) || username.length > 0;
+      },
+      "Username is typically your email address or DOMAIN\\username format"
+    ),
+  password: z.string()
+    .min(1, "Password is required")
+    .max(1024, "Password is too long")
+}).strict();
+
+// Union schema for account settings validation
+export const accountSettingsSchema = z.discriminatedUnion('protocol', [
+  z.object({ protocol: z.literal('IMAP'), settings: imapSettingsSchema }),
+  z.object({ protocol: z.literal('EWS'), settings: ewsSettingsSchema })
+]);
+
+// Enhanced account connection validation schema
+export const enhancedAccountConnectionSchema = z.object({
+  name: z.string()
+    .min(1, "Account name is required")
+    .max(100, "Account name is too long")
+    .refine(
+      (name) => name.trim().length > 0,
+      "Account name cannot be just whitespace"
+    ),
+  protocol: z.enum(["IMAP", "EWS"], {
+    errorMap: () => ({ message: "Protocol must be either IMAP or EWS" })
+  }),
+  settingsJson: z.string()
+    .min(1, "Account settings are required")
+    .refine(
+      (json) => {
+        try {
+          JSON.parse(json);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      "Invalid account settings format"
+    ),
+  userId: z.string()
+    .min(1, "User ID is required"),
+  isActive: z.boolean().optional(),
+  lastChecked: z.date().optional().nullable(),
+  lastError: z.string().optional().nullable()
+}).strict();
+
+// Settings JSON type definitions for account connections (kept for backward compatibility)
 export interface SmtpSettings {
   host: string;
   port: number;
@@ -183,6 +337,13 @@ export type AccountSettings = ImapSettings | EwsSettings;
 // Helper type to determine settings type based on protocol
 export type AccountSettingsForProtocol<T extends 'IMAP' | 'EWS'> = 
   T extends 'IMAP' ? ImapSettings : EwsSettings;
+
+// Inferred types from validation schemas
+export type ValidatedSmtpSettings = z.infer<typeof smtpSettingsSchema>;
+export type ValidatedImapSettings = z.infer<typeof imapSettingsSchema>;
+export type ValidatedEwsSettings = z.infer<typeof ewsSettingsSchema>;
+export type ValidatedAccountSettings = z.infer<typeof accountSettingsSchema>;
+export type ValidatedAccountConnection = z.infer<typeof enhancedAccountConnectionSchema>;
 
 // Email composition schemas and types
 export const sendEmailRequestSchema = z.object({

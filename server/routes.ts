@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
-import { testConnection } from "./connectionTest";
+import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
 import { discoverEwsFolders } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
@@ -12,36 +12,263 @@ import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
 
+// Standardized error response interface
+interface ApiErrorResponse {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    details?: string;
+    field?: string;
+    suggestions?: string[];
+    timestamp: string;
+  };
+  requestId?: string;
+}
+
+interface ApiSuccessResponse<T = any> {
+  success: true;
+  data: T;
+  message?: string;
+  timestamp: string;
+}
+
+type ApiResponse<T = any> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+// Error codes for different types of errors
+const ErrorCodes = {
+  // Validation errors
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  MISSING_REQUIRED_FIELDS: 'MISSING_REQUIRED_FIELDS',
+  INVALID_INPUT_FORMAT: 'INVALID_INPUT_FORMAT',
+  
+  // Authentication/Authorization errors
+  AUTHENTICATION_FAILED: 'AUTHENTICATION_FAILED',
+  AUTHORIZATION_FAILED: 'AUTHORIZATION_FAILED',
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  
+  // Connection errors
+  CONNECTION_TEST_FAILED: 'CONNECTION_TEST_FAILED',
+  IMAP_CONNECTION_FAILED: 'IMAP_CONNECTION_FAILED',
+  EWS_CONNECTION_FAILED: 'EWS_CONNECTION_FAILED',
+  SMTP_CONNECTION_FAILED: 'SMTP_CONNECTION_FAILED',
+  
+  // Resource errors
+  RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
+  ACCOUNT_NOT_FOUND: 'ACCOUNT_NOT_FOUND',
+  
+  // Server errors
+  INTERNAL_SERVER_ERROR: 'INTERNAL_SERVER_ERROR',
+  DATABASE_ERROR: 'DATABASE_ERROR',
+  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
+  
+  // Business logic errors
+  UNSUPPORTED_PROTOCOL: 'UNSUPPORTED_PROTOCOL',
+  INVALID_ACCOUNT_STATE: 'INVALID_ACCOUNT_STATE',
+  
+  // Email sending errors
+  EMAIL_SEND_FAILED: 'EMAIL_SEND_FAILED',
+  EMAIL_VALIDATION_FAILED: 'EMAIL_VALIDATION_FAILED'
+} as const;
+
+/**
+ * Enhanced error handling utility class
+ */
+class ApiError extends Error {
+  constructor(
+    public code: string,
+    public message: string,
+    public statusCode: number = 500,
+    public details?: string,
+    public field?: string,
+    public suggestions?: string[]
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
+ * Create standardized error response
+ */
+function createErrorResponse(
+  error: ApiError | Error,
+  requestId?: string
+): { statusCode: number; response: ApiErrorResponse } {
+  let statusCode = 500;
+  let code = ErrorCodes.INTERNAL_SERVER_ERROR;
+  let message = 'An unexpected error occurred';
+  let details: string | undefined;
+  let field: string | undefined;
+  let suggestions: string[] | undefined;
+
+  if (error instanceof ApiError) {
+    statusCode = error.statusCode;
+    code = error.code;
+    message = error.message;
+    details = error.details;
+    field = error.field;
+    suggestions = error.suggestions;
+  } else if (error instanceof z.ZodError) {
+    statusCode = 400;
+    code = ErrorCodes.VALIDATION_ERROR;
+    message = 'Validation failed';
+    details = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+    suggestions = ['Please check your input and try again', 'Ensure all required fields are provided'];
+  } else {
+    // Log unexpected errors for debugging
+    console.error('Unexpected error:', error);
+    message = process.env.NODE_ENV === 'development' ? error.message : 'An unexpected error occurred';
+  }
+
+  return {
+    statusCode,
+    response: {
+      success: false,
+      error: {
+        code,
+        message,
+        details,
+        field,
+        suggestions,
+        timestamp: new Date().toISOString()
+      },
+      requestId
+    }
+  };
+}
+
+/**
+ * Create standardized success response
+ */
+function createSuccessResponse<T>(data: T, message?: string): ApiSuccessResponse<T> {
+  return {
+    success: true,
+    data,
+    message,
+    timestamp: new Date().toISOString()
+  };
+}
+
+/**
+ * Enhanced error handler middleware
+ */
+function handleApiError(error: any, res: any, operation: string, requestId?: string) {
+  console.error(`[${operation}] Error:`, {
+    error: error.message,
+    stack: error.stack,
+    requestId,
+    timestamp: new Date().toISOString()
+  });
+
+  const { statusCode, response } = createErrorResponse(error, requestId);
+  res.status(statusCode).json(response);
+}
+
+/**
+ * Validation helper for account connection data
+ */
+function validateAccountData(data: any): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (!data.name?.trim()) {
+    errors.push('Account name is required and cannot be empty');
+  }
+  
+  if (!data.protocol || !['IMAP', 'EWS'].includes(data.protocol)) {
+    errors.push('Protocol must be either IMAP or EWS');
+  }
+  
+  if (!data.host?.trim()) {
+    errors.push('Mail server host is required');
+  }
+  
+  if (!data.username?.trim()) {
+    errors.push('Username is required');
+  }
+  
+  if (!data.password?.trim()) {
+    errors.push('Password is required');
+  }
+  
+  // Protocol-specific validation
+  if (data.protocol === 'IMAP') {
+    if (data.enableCustomSmtp && (!data.smtpHost?.trim() || !data.smtpPort?.trim())) {
+      errors.push('SMTP host and port are required when custom SMTP is enabled');
+    }
+  }
+  
+  if (data.protocol === 'EWS') {
+    // Basic URL validation for EWS
+    const hostUrl = data.host.trim();
+    if (!hostUrl.includes('.') && !hostUrl.startsWith('http')) {
+      errors.push('EWS server should be a domain name (e.g., mail.company.com) or full URL');
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+    const requestId = `user-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401,
+          'Authentication token is missing required user information'
+        );
+      }
+      
       const user = await storage.getUser(userId);
-      res.json(user);
+      if (!user) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'User not found',
+          404,
+          `User with ID ${userId} does not exist`
+        );
+      }
+      
+      res.json(createSuccessResponse(user, 'User retrieved successfully'));
     } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
+      handleApiError(error, res, 'GET /api/auth/user', requestId);
     }
   });
 
   // Account connection routes
   app.get('/api/accounts', isAuthenticated, async (req: any, res) => {
+    const requestId = `accounts-list-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+      
       const accounts = await storage.getUserAccountConnections(userId);
-      res.json(accounts);
+      res.json(createSuccessResponse(accounts, `Retrieved ${accounts.length} email accounts`));
     } catch (error) {
-      console.error("Error fetching accounts:", error);
-      res.status(500).json({ message: "Failed to fetch accounts" });
+      handleApiError(error, res, 'GET /api/accounts', requestId);
     }
   });
 
-  // Test connection endpoint - validates credentials before creating account
+  // Enhanced connection test endpoint with detailed validation and error handling
   app.post('/api/accounts/test-connection', isAuthenticated, async (req: any, res) => {
+    const requestId = `test-connection-${Date.now()}`;
     try {
       const { 
         protocol, host, port, username, password, useSSL,
@@ -49,39 +276,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
       } = req.body;
 
-      // Validate required fields
-      if (!protocol || !host || !username || !password) {
-        return res.status(400).json({ 
-          message: "Missing required fields: protocol, host, username, password" 
-        });
+      // Enhanced validation with detailed error messages
+      const validation = validateAccountData({ protocol, host, username, password, enableCustomSmtp, smtpHost, smtpPort });
+      if (!validation.isValid) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid account configuration',
+          400,
+          validation.errors.join('; '),
+          undefined,
+          [
+            'Check that all required fields are filled out correctly',
+            'Ensure the server address is correct',
+            'Verify your username and password are accurate',
+            'For IMAP accounts, use port 993 with SSL enabled'
+          ]
+        );
       }
 
       // Create temporary settings JSON for testing
       let settingsJson: string;
+      let testSmtp = false;
       
       if (protocol === 'IMAP') {
-        // For IMAP: enforce port 993 and SSL, and include SMTP settings
+        testSmtp = true;
         const settings: any = {
-          host,
+          host: host.trim(),
           port: 993, // Always use 993 for IMAP
-          username,
-          password,
+          username: username.trim(),
+          password: password.trim(),
           useSSL: true // Always use SSL for IMAP
         };
 
-        // Add SMTP configuration if provided
+        // Add SMTP configuration
         if (enableCustomSmtp) {
-          if (!smtpHost || !smtpPort) {
-            return res.status(400).json({ 
-              message: "SMTP host and port are required when custom SMTP is enabled" 
-            });
+          if (!smtpHost?.trim() || !smtpPort?.trim()) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'SMTP configuration is incomplete',
+              400,
+              'SMTP host and port are required when custom SMTP is enabled',
+              'smtpHost',
+              [
+                'Provide a valid SMTP server hostname',
+                'Use common SMTP ports: 587 (STARTTLS) or 465 (SSL)',
+                'Ensure SMTP credentials are correct'
+              ]
+            );
           }
           settings.smtp = {
-            host: smtpHost,
+            host: smtpHost.trim(),
             port: parseInt(smtpPort),
             secure: smtpSecure ?? (parseInt(smtpPort) === 465),
-            username: smtpUsername || username, // Default to IMAP username
-            password: smtpPassword || password  // Default to IMAP password
+            username: (smtpUsername || username).trim(),
+            password: smtpPassword || password
           };
         } else {
           // Auto-configure SMTP based on IMAP settings
@@ -90,91 +338,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
             host: autoSmtpHost,
             port: 587,
             secure: false, // STARTTLS on port 587
-            username: username,
-            password: password
+            username: username.trim(),
+            password: password.trim()
           };
         }
 
         settingsJson = JSON.stringify(settings);
       } else if (protocol === 'EWS') {
-        // For EWS: no port or SSL settings needed, and no separate SMTP
         settingsJson = JSON.stringify({
-          host, // Should be full EWS URL like https://mail.example.com/ews
-          username,
-          password
+          host: host.trim(),
+          username: username.trim(),
+          password: password.trim()
         });
       } else {
-        return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Unsupported email protocol',
+          400,
+          `Protocol "${protocol}" is not supported`,
+          'protocol',
+          [
+            'Use "IMAP" for most email providers (Gmail, Outlook.com, Yahoo)',
+            'Use "EWS" for corporate Exchange servers',
+            'Contact your email provider if unsure which protocol to use'
+          ]
+        );
       }
 
-      // Test the connection (include SMTP test for IMAP accounts)
-      const testSmtp = protocol === 'IMAP';
-      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson, testSmtp);
+      console.log(`[${requestId}] Starting connection test for ${protocol} account`);
+      
+      // Test the connection with retry logic
+      const testResult: ConnectionTestResult = await testConnection(
+        protocol as 'IMAP' | 'EWS',
+        settingsJson,
+        testSmtp,
+        2 // Retry once for transient failures
+      );
 
       if (testResult.success) {
-        res.json({ 
-          success: true, 
-          message: `${protocol} connection test successful${testSmtp ? ' (including SMTP)' : ''}`,
-          details: testResult
-        });
+        const response = createSuccessResponse(
+          {
+            protocol,
+            testDuration: testResult.testDuration,
+            details: testResult.details
+          },
+          `${protocol} connection test successful${testSmtp ? ' (including SMTP)' : ''}`
+        );
+        console.log(`[${requestId}] Connection test successful in ${testResult.testDuration}ms`);
+        res.json(response);
       } else {
-        res.status(400).json({ 
-          success: false, 
-          message: testResult.error || `${protocol} connection test failed`
-        });
+        console.warn(`[${requestId}] Connection test failed: ${testResult.error}`);
+        throw new ApiError(
+          testResult.errorCode || ErrorCodes.CONNECTION_TEST_FAILED,
+          testResult.error || `${protocol} connection test failed`,
+          400,
+          testResult.details?.diagnostics?.join('; '),
+          undefined,
+          testResult.details?.suggestions || [
+            'Verify your server settings are correct',
+            'Check your internet connection',
+            'Ensure your credentials are valid',
+            'Try again in a few minutes'
+          ]
+        );
       }
 
-    } catch (error: any) {
-      console.error("Connection test error:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: error.message || "Connection test failed" 
-      });
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/accounts/test-connection', requestId);
     }
   });
 
+  // Enhanced account creation endpoint
   app.post('/api/accounts', isAuthenticated, async (req: any, res) => {
+    const requestId = `create-account-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
       const { 
         name, protocol, host, port, username, password, useSSL,
         // SMTP settings for IMAP accounts
         enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
       } = req.body;
       
-      // Validate required fields
-      if (!name || !protocol || !host || !username || !password) {
-        return res.status(400).json({ 
-          message: "Missing required fields" 
-        });
+      // Enhanced validation
+      const validation = validateAccountData({
+        name, protocol, host, username, password, enableCustomSmtp, smtpHost, smtpPort
+      });
+      if (!validation.isValid) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid account data',
+          400,
+          validation.errors.join('; '),
+          undefined,
+          [
+            'Fill out all required fields',
+            'Ensure account name is descriptive',
+            'Verify server and credential information is correct'
+          ]
+        );
       }
 
       // Create settingsJson based on protocol
       let settingsJson: string;
       
       if (protocol === 'IMAP') {
-        // For IMAP: enforce port 993 and SSL, and include SMTP settings
         const settings: any = {
-          host,
+          host: host.trim(),
           port: 993, // Always use 993 for IMAP
-          username,
-          password,
+          username: username.trim(),
+          password: password.trim(),
           useSSL: true // Always use SSL for IMAP
         };
 
         // Add SMTP configuration
         if (enableCustomSmtp) {
-          if (!smtpHost || !smtpPort) {
-            return res.status(400).json({ 
-              message: "SMTP host and port are required when custom SMTP is enabled" 
-            });
+          if (!smtpHost?.trim() || !smtpPort?.trim()) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'SMTP configuration is incomplete',
+              400,
+              'SMTP host and port are required when custom SMTP is enabled',
+              'smtpHost'
+            );
           }
           settings.smtp = {
-            host: smtpHost,
+            host: smtpHost.trim(),
             port: parseInt(smtpPort),
             secure: smtpSecure ?? (parseInt(smtpPort) === 465),
-            username: smtpUsername || username, // Default to IMAP username
-            password: smtpPassword || password  // Default to IMAP password
+            username: (smtpUsername || username).trim(),
+            password: smtpPassword || password
           };
         } else {
           // Auto-configure SMTP based on IMAP settings
@@ -183,44 +483,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
             host: autoSmtpHost,
             port: 587,
             secure: false, // STARTTLS on port 587
-            username: username,
-            password: password
+            username: username.trim(),
+            password: password.trim()
           };
         }
 
         settingsJson = JSON.stringify(settings);
       } else if (protocol === 'EWS') {
-        // For EWS: no port or SSL settings needed, and no separate SMTP
         settingsJson = JSON.stringify({
-          host, // Should be full EWS URL like https://mail.example.com/ews
-          username,
-          password
+          host: host.trim(),
+          username: username.trim(),
+          password: password.trim()
         });
       } else {
-        return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Unsupported email protocol',
+          400,
+          `Protocol "${protocol}" is not supported`,
+          'protocol'
+        );
       }
+
+      console.log(`[${requestId}] Creating new ${protocol} account: ${name}`);
 
       // Prepare account data for storage
       const accountData = {
         userId,
-        name,
+        name: name.trim(),
         protocol,
         settingsJson
       };
       
       // Create the account first
       const account = await storage.createAccountConnection(accountData);
+      console.log(`[${requestId}] Account created with ID: ${account.id}`);
       
       // Get encrypted settings for connection testing
       const encryptedAccount = await storage.getAccountConnectionEncrypted(account.id);
       if (!encryptedAccount) {
-        throw new Error('Failed to retrieve account for connection testing');
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to retrieve account for connection testing',
+          500,
+          'Account was created but could not be retrieved for validation'
+        );
       }
       
       // Test the connection in the background (include SMTP test for IMAP)
       const testSmtp = protocol === 'IMAP';
-      testConnection(protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson, testSmtp)
+      console.log(`[${requestId}] Starting background connection test`);
+      
+      testConnection(protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson, testSmtp, 2)
         .then(async (result) => {
+          console.log(`[${requestId}] Background connection test result:`, result.success ? 'SUCCESS' : 'FAILED');
+          
           // Update the account with connection test results
           await storage.updateAccountConnection(account.id, {
             isActive: result.success,
@@ -231,28 +548,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // If EWS account and successfully connected, discover folders first, then start push notifications
           if (result.success && protocol === 'EWS') {
             try {
-              console.log(`Discovering EWS folders for new account ${account.id}`);
+              console.log(`[${requestId}] Discovering EWS folders for new account`);
               
-              // First, discover and sync folders to database
               const folderDiscoveryResult = await discoverEwsFolders(account.id, encryptedAccount.settingsJson, storage);
               
               if (folderDiscoveryResult.success) {
-                console.log(`Folder discovery successful for account ${account.id}: ${folderDiscoveryResult.folderCount} folders discovered`);
+                console.log(`[${requestId}] Folder discovery successful: ${folderDiscoveryResult.folderCount} folders discovered`);
                 
                 // Only start push notifications after successful folder discovery
                 const pushService = getEwsPushService(storage);
                 const subscriptionResult = await pushService.startSubscription(account.id);
-                console.log(`Push subscription result for account ${account.id}:`, subscriptionResult);
+                console.log(`[${requestId}] Push subscription result:`, subscriptionResult);
               } else {
-                console.error(`Folder discovery failed for account ${account.id}: ${folderDiscoveryResult.error}`);
-                // Update account with folder discovery error but keep it active
+                console.error(`[${requestId}] Folder discovery failed: ${folderDiscoveryResult.error}`);
                 await storage.updateAccountConnection(account.id, {
                   lastError: `Folder discovery failed: ${folderDiscoveryResult.error}`
                 });
               }
             } catch (error) {
-              console.error(`Failed to setup EWS account ${account.id}:`, error);
-              // Update account with setup error
+              console.error(`[${requestId}] Failed to setup EWS account:`, error);
               await storage.updateAccountConnection(account.id, {
                 lastError: `EWS setup failed: ${(error as Error).message}`
               });
@@ -264,14 +578,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             try {
               const idleService = getImapIdleService(storage);
               const idleResult = await idleService.startIdleConnection(account.id, 'INBOX');
-              console.log(`IDLE connection result for account ${account.id}:`, idleResult);
+              console.log(`[${requestId}] IDLE connection result:`, idleResult);
             } catch (error) {
-              console.error(`Failed to start IDLE connection for account ${account.id}:`, error);
+              console.error(`[${requestId}] Failed to start IDLE connection:`, error);
             }
           }
         })
         .catch(async (error) => {
-          console.error('Background connection test failed:', error);
+          console.error(`[${requestId}] Background connection test failed:`, error);
+          
           // Update with failure status
           await storage.updateAccountConnection(account.id, {
             isActive: false,
@@ -279,968 +594,640 @@ export async function registerRoutes(app: Express): Promise<Server> {
             lastError: 'Connection test failed: ' + error.message,
           });
           
-          // Stop push subscription for failed EWS accounts
+          // Stop services for failed accounts
           if (protocol === 'EWS') {
             try {
               const pushService = getEwsPushService(storage);
               await pushService.stopSubscription(account.id);
-            } catch (error) {
-              console.error(`Failed to stop push subscription for failed account ${account.id}:`, error);
+            } catch (cleanupError) {
+              console.error(`[${requestId}] Failed to stop push subscription for failed account:`, cleanupError);
             }
           }
           
-          // Stop IDLE connection for failed IMAP accounts
           if (protocol === 'IMAP') {
             try {
               const idleService = getImapIdleService(storage);
               await idleService.stopIdleConnection(account.id);
-            } catch (error) {
-              console.error(`Failed to stop IDLE connection for failed account ${account.id}:`, error);
+            } catch (cleanupError) {
+              console.error(`[${requestId}] Failed to stop IDLE connection for failed account:`, cleanupError);
             }
           }
         });
       
-      res.json(account);
-    } catch (error: any) {
-      console.error("Error creating account:", error);
-      res.status(500).json({ message: error.message || "Failed to create account" });
+      res.json(createSuccessResponse(account, 'Email account created successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/accounts', requestId);
     }
   });
 
+  // Enhanced account update endpoint
   app.put('/api/accounts/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-account-${Date.now()}`;
     try {
-      const { id } = req.params;
       const userId = req.user.claims.sub;
+      const accountId = req.params.id;
+      
+      // Validate the ID format
+      if (!accountId || typeof accountId !== 'string' || accountId.trim().length === 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid account ID',
+          400,
+          'Account ID must be a valid non-empty string',
+          'id'
+        );
+      }
+      
+      // Check if account exists and belongs to user
+      const existingAccount = await storage.getUserAccountConnections(userId);
+      const accountToUpdate = existingAccount.find(acc => acc.id === accountId);
+      
+      if (!accountToUpdate) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`,
+          'id',
+          [
+            'Verify the account ID is correct',
+            'Ensure you have permission to modify this account',
+            'Check if the account was deleted'
+          ]
+        );
+      }
+
       const { 
         name, protocol, host, port, username, password, useSSL,
-        // SMTP settings for IMAP accounts
         enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
       } = req.body;
       
-      // Validate the ID is a proper string
-      if (!id || typeof id !== 'string') {
-        return res.status(400).json({ message: "Invalid account ID" });
-      }
-      
-      // Verify the account belongs to the user before updating
-      const accounts = await storage.getUserAccountConnections(userId);
-      const accountToUpdate = accounts.find(account => account.id === id);
-      
-      if (!accountToUpdate) {
-        return res.status(404).json({ message: "Account not found or does not belong to user" });
-      }
-      
-      // Validate required fields
-      if (!name || !protocol || !host || !username || !password) {
-        return res.status(400).json({ 
-          message: "Missing required fields" 
-        });
+      // Enhanced validation
+      const validation = validateAccountData({
+        name, protocol, host, username, password, enableCustomSmtp, smtpHost, smtpPort
+      });
+      if (!validation.isValid) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid account data',
+          400,
+          validation.errors.join('; ')
+        );
       }
 
-      // Create settingsJson based on protocol with SMTP support
+      // Create updated settingsJson
       let settingsJson: string;
       
       if (protocol === 'IMAP') {
-        // For IMAP: enforce port 993 and SSL, and include SMTP settings
         const settings: any = {
-          host,
-          port: 993, // Always use 993 for IMAP
-          username,
-          password,
-          useSSL: true // Always use SSL for IMAP
+          host: host.trim(),
+          port: 993,
+          username: username.trim(),
+          password: password.trim(),
+          useSSL: true
         };
 
-        // Add SMTP configuration
         if (enableCustomSmtp) {
-          if (!smtpHost || !smtpPort) {
-            return res.status(400).json({ 
-              message: "SMTP host and port are required when custom SMTP is enabled" 
-            });
+          if (!smtpHost?.trim() || !smtpPort?.trim()) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'SMTP configuration is incomplete',
+              400,
+              'SMTP host and port are required when custom SMTP is enabled'
+            );
           }
           settings.smtp = {
-            host: smtpHost,
+            host: smtpHost.trim(),
             port: parseInt(smtpPort),
             secure: smtpSecure ?? (parseInt(smtpPort) === 465),
-            username: smtpUsername || username, // Default to IMAP username
-            password: smtpPassword || password  // Default to IMAP password
+            username: (smtpUsername || username).trim(),
+            password: smtpPassword || password
           };
         } else {
-          // Auto-configure SMTP based on IMAP settings
           const autoSmtpHost = host.replace(/^imap\./, 'smtp.');
           settings.smtp = {
             host: autoSmtpHost,
             port: 587,
-            secure: false, // STARTTLS on port 587
-            username: username,
-            password: password
+            secure: false,
+            username: username.trim(),
+            password: password.trim()
           };
         }
 
         settingsJson = JSON.stringify(settings);
       } else if (protocol === 'EWS') {
-        // For EWS: no port or SSL settings needed, and no separate SMTP
         settingsJson = JSON.stringify({
-          host, // Should be full EWS URL like https://mail.example.com/ews
-          username,
-          password
+          host: host.trim(),
+          username: username.trim(),
+          password: password.trim()
         });
       } else {
-        return res.status(400).json({ message: "Unsupported protocol. Use IMAP or EWS." });
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Unsupported email protocol',
+          400,
+          `Protocol "${protocol}" is not supported`
+        );
       }
-      
-      // Test the connection with new settings (include SMTP test for IMAP)
-      const testSmtp = protocol === 'IMAP';
-      const testResult = await testConnection(protocol as 'IMAP' | 'EWS', settingsJson, testSmtp);
-      
-      if (!testResult.success) {
-        return res.status(400).json({ 
-          success: false, 
-          message: testResult.error || `${protocol} connection test failed`
-        });
-      }
-      
-      // Update the account with new settings
-      const updatedAccount = await storage.updateAccountConnection(id, {
-        name,
+
+      console.log(`[${requestId}] Updating account ${accountId} (${name})`);
+
+      // Update the account
+      const updatedAccount = await storage.updateAccountConnection(accountId, {
+        name: name.trim(),
         protocol,
-        settingsJson: settingsJson,
-        isActive: true,
-        lastChecked: new Date(),
+        settingsJson,
+        isActive: false, // Will be updated after connection test
         lastError: null,
+        lastChecked: new Date()
       });
-      
-      if (!updatedAccount) {
-        return res.status(404).json({ message: "Failed to update account" });
-      }
-      
-      // Restart push subscription for updated EWS accounts
-      if (protocol === 'EWS') {
-        try {
-          const pushService = getEwsPushService(storage);
-          // Stop existing subscription if any
-          await pushService.stopSubscription(id);
-          
-          console.log(`Discovering EWS folders for updated account ${id}`);
-          
-          // Get encrypted account settings for folder discovery
-          const encryptedAccount = await storage.getAccountConnectionEncrypted(id);
-          if (!encryptedAccount) {
-            throw new Error('Failed to retrieve encrypted account settings for folder discovery');
-          }
-          
-          // First, discover and sync folders to database with encrypted settings
-          const folderDiscoveryResult = await discoverEwsFolders(id, encryptedAccount.settingsJson, storage);
-          
-          if (folderDiscoveryResult.success) {
-            console.log(`Folder discovery successful for updated account ${id}: ${folderDiscoveryResult.folderCount} folders discovered`);
-            
-            // Only start push notifications after successful folder discovery
-            const subscriptionResult = await pushService.startSubscription(id);
-            console.log(`Push subscription restarted for updated account ${id}:`, subscriptionResult);
-          } else {
-            console.error(`Folder discovery failed for updated account ${id}: ${folderDiscoveryResult.error}`);
-            // Update account with folder discovery error but keep it active
-            await storage.updateAccountConnection(id, {
-              lastError: `Folder discovery failed: ${folderDiscoveryResult.error}`
+
+      // Test connection in background
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (encryptedAccount) {
+        const testSmtp = protocol === 'IMAP';
+        testConnection(protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson, testSmtp, 2)
+          .then(async (result) => {
+            await storage.updateAccountConnection(accountId, {
+              isActive: result.success,
+              lastChecked: result.lastChecked,
+              lastError: result.error || null,
             });
-          }
-        } catch (error) {
-          console.error(`Failed to restart push subscription for updated account ${id}:`, error);
-          // Update account with error
-          await storage.updateAccountConnection(id, {
-            lastError: `EWS update failed: ${(error as Error).message}`
+            console.log(`[${requestId}] Account update connection test result:`, result.success ? 'SUCCESS' : 'FAILED');
+          })
+          .catch(async (error) => {
+            console.error(`[${requestId}] Account update connection test failed:`, error);
+            await storage.updateAccountConnection(accountId, {
+              isActive: false,
+              lastError: 'Connection test failed: ' + error.message,
+            });
           });
-        }
       }
-      
-      // Restart IDLE connection for updated IMAP accounts
-      if (protocol === 'IMAP') {
-        try {
-          const idleService = getImapIdleService(storage);
-          // Stop existing IDLE connection if any
-          await idleService.stopIdleConnection(id);
-          // Start new IDLE connection with updated settings
-          const idleResult = await idleService.startIdleConnection(id, 'INBOX');
-          console.log(`IDLE connection restarted for updated account ${id}:`, idleResult);
-        } catch (error) {
-          console.error(`Failed to restart IDLE connection for updated account ${id}:`, error);
-        }
-      }
-      
-      res.json(updatedAccount);
-      
-    } catch (error: any) {
-      console.error("Error updating account:", error);
-      res.status(500).json({ message: error.message || "Failed to update account" });
+
+      res.json(createSuccessResponse(updatedAccount, 'Account updated successfully'));
+    } catch (error) {
+      handleApiError(error, res, `PUT /api/accounts/${req.params.id}`, requestId);
     }
   });
 
+  // Enhanced account deletion endpoint
   app.delete('/api/accounts/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `delete-account-${Date.now()}`;
     try {
-      const { id } = req.params;
       const userId = req.user.claims.sub;
+      const accountId = req.params.id;
       
-      // Validate the ID is a proper string
-      if (!id || typeof id !== 'string') {
-        return res.status(400).json({ message: "Invalid account ID" });
+      if (!accountId || typeof accountId !== 'string' || accountId.trim().length === 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid account ID',
+          400,
+          'Account ID must be a valid non-empty string'
+        );
       }
       
-      // Verify the account belongs to the user before deleting
-      const accounts = await storage.getUserAccountConnections(userId);
-      const accountToDelete = accounts.find(account => account.id === id);
+      // Check if account exists and belongs to user
+      const existingAccounts = await storage.getUserAccountConnections(userId);
+      const accountToDelete = existingAccounts.find(acc => acc.id === accountId);
       
       if (!accountToDelete) {
-        return res.status(404).json({ message: "Account not found or does not belong to user" });
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
       }
-      
-      // Stop push subscription before deleting EWS account
+
+      console.log(`[${requestId}] Deleting account ${accountId} (${accountToDelete.name})`);
+
+      // Stop services before deletion
       if (accountToDelete.protocol === 'EWS') {
         try {
           const pushService = getEwsPushService(storage);
-          await pushService.stopSubscription(id);
-          console.log(`Push subscription stopped for deleted account ${id}`);
+          await pushService.stopSubscription(accountId);
+          console.log(`[${requestId}] EWS push subscription stopped`);
         } catch (error) {
-          console.error(`Failed to stop push subscription for deleted account ${id}:`, error);
+          console.warn(`[${requestId}] Failed to stop EWS push subscription:`, error);
         }
       }
       
-      // Stop IDLE connection before deleting IMAP account
       if (accountToDelete.protocol === 'IMAP') {
         try {
           const idleService = getImapIdleService(storage);
-          await idleService.stopIdleConnection(id);
-          console.log(`IDLE connection stopped for deleted account ${id}`);
+          await idleService.stopIdleConnection(accountId);
+          console.log(`[${requestId}] IMAP IDLE connection stopped`);
         } catch (error) {
-          console.error(`Failed to stop IDLE connection for deleted account ${id}:`, error);
+          console.warn(`[${requestId}] Failed to stop IMAP IDLE connection:`, error);
         }
       }
-      
-      await storage.deleteAccountConnection(id);
-      res.json({ message: "Account deleted successfully" });
-    } catch (error: any) {
-      console.error("Error deleting account:", error);
-      res.status(500).json({ message: error.message || "Failed to delete account" });
-    }
-  });
 
-  // Push notification management routes
-  app.get('/api/accounts/:accountId/push-status', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const userId = req.user.claims.sub;
+      // Delete the account
+      await storage.deleteAccountConnection(accountId);
       
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      // Only EWS accounts support push notifications
-      if (account.protocol !== 'EWS') {
-        return res.json({ supported: false, message: 'Push notifications only supported for EWS accounts' });
-      }
-      
-      // Get push notification status
-      const pushService = getEwsPushService(storage);
-      const status = pushService.getSubscriptionStatus(accountId);
-      
-      res.json({
-        supported: true,
-        ...status
-      });
-      
-    } catch (error: any) {
-      console.error("Error getting push status:", error);
-      res.status(500).json({ message: error.message || "Failed to get push status" });
-    }
-  });
-
-  app.post('/api/accounts/:accountId/push-start', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const userId = req.user.claims.sub;
-      
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      // Only EWS accounts support push notifications
-      if (account.protocol !== 'EWS') {
-        return res.status(400).json({ message: 'Push notifications only supported for EWS accounts' });
-      }
-      
-      // Start push subscription
-      const pushService = getEwsPushService(storage);
-      const result = await pushService.startSubscription(accountId);
-      
-      res.json(result);
-      
-    } catch (error: any) {
-      console.error("Error starting push subscription:", error);
-      res.status(500).json({ message: error.message || "Failed to start push subscription" });
-    }
-  });
-
-  app.post('/api/accounts/:accountId/push-stop', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const userId = req.user.claims.sub;
-      
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      // Stop push subscription
-      const pushService = getEwsPushService(storage);
-      await pushService.stopSubscription(accountId);
-      
-      res.json({ success: true, message: 'Push subscription stopped' });
-      
-    } catch (error: any) {
-      console.error("Error stopping push subscription:", error);
-      res.status(500).json({ message: error.message || "Failed to stop push subscription" });
-    }
-  });
-
-  // Account folder routes
-  app.get('/api/accounts/:accountId/folders', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      // Get folders for this account
-      const folders = await storage.getAccountFolders(accountId);
-      
-      res.json(folders);
+      res.json(createSuccessResponse(
+        { deletedAccountId: accountId },
+        `Account "${accountToDelete.name}" deleted successfully`
+      ));
     } catch (error) {
-      console.error("Error fetching account folders:", error);
-      res.status(500).json({ message: "Failed to fetch folders" });
+      handleApiError(error, res, `DELETE /api/accounts/${req.params.id}`, requestId);
     }
   });
 
-  // Discover folders for an account
-  app.post('/api/accounts/:accountId/discover-folders', isAuthenticated, async (req: any, res) => {
+  // Mail routes with enhanced error handling
+  app.get('/api/mail', isAuthenticated, async (req: any, res) => {
+    const requestId = `mail-list-${Date.now()}`;
     try {
-      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+      const { folder = 'INBOX', limit = 25, offset = 0 } = req.query;
       
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
-      const account = accounts.find((a: any) => a.id === accountId);
+      // Validate query parameters
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
       
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      if (!account.isActive) {
-        return res.status(400).json({ message: 'Account is not active' });
-      }
-      
-      // Get encrypted account settings
-      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
-      if (!encryptedAccount) {
-        return res.status(404).json({ message: 'Account settings not found' });
-      }
-      
-      let result;
-      
-      if (account.protocol === 'IMAP') {
-        result = await discoverImapFolders(
-          accountId,
-          encryptedAccount.settingsJson,
-          storage
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 200',
+          'limit'
         );
-      } else if (account.protocol === 'EWS') {
-        result = await discoverEwsFolders(
-          accountId,
-          encryptedAccount.settingsJson,
-          storage
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
         );
-      } else {
-        return res.status(400).json({ message: `Unsupported protocol: ${account.protocol}` });
       }
-      
-      res.json({
-        success: result.success,
-        folderCount: result.folderCount,
-        error: result.error
-      });
-      
+
+      const messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
+      res.json(createSuccessResponse(
+        messages,
+        `Retrieved ${messages.length} messages from ${folder}`
+      ));
     } catch (error) {
-      console.error("Error discovering account folders:", error);
-      res.status(500).json({ message: "Failed to discover folders" });
+      handleApiError(error, res, 'GET /api/mail', requestId);
     }
   });
 
-  // Mail routes
-  app.get('/api/mail/:accountId/:folder', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId, folder } = req.params;
-      const { limit = 50, offset = 0 } = req.query;
-      const messages = await storage.getMailMessages(accountId, folder.toUpperCase(), parseInt(limit), parseInt(offset));
-      res.json(messages);
-    } catch (error) {
-      console.error("Error fetching mail:", error);
-      res.status(500).json({ message: "Failed to fetch mail" });
-    }
-  });
-
-  // Fallback route for backwards compatibility
-  app.get('/api/mail/:accountId', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const { folder, limit = 50, offset = 0 } = req.query;
-      const messages = await storage.getMailMessages(accountId, folder, parseInt(limit), parseInt(offset));
-      res.json(messages);
-    } catch (error) {
-      console.error("Error fetching mail:", error);
-      res.status(500).json({ message: "Failed to fetch mail" });
-    }
-  });
-
-  app.patch('/api/mail/:messageId', isAuthenticated, async (req: any, res) => {
-    try {
-      const { messageId } = req.params;
-      const message = await storage.updateMailMessage(messageId, req.body);
-      res.json(message);
-    } catch (error) {
-      console.error("Error updating message:", error);
-      res.status(500).json({ message: "Failed to update message" });
-    }
-  });
-
-  // Email synchronization routes
-  app.post('/api/accounts/:accountId/sync', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const { folder = 'INBOX', limit = 25 } = req.body;
-      
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      if (!account.isActive) {
-        console.error(`Sync failed for account ${accountId}: Account is not active. Account status:`, {
-          id: account.id,
-          name: account.name,
-          protocol: account.protocol,
-          isActive: account.isActive,
-          lastError: account.lastError
-        });
-        return res.status(400).json({ 
-          message: 'Account is not active',
-          accountStatus: {
-            id: account.id,
-            name: account.name,
-            isActive: account.isActive,
-            lastError: account.lastError
-          }
-        });
-      }
-      
-      // Get encrypted account settings
-      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
-      if (!encryptedAccount) {
-        return res.status(404).json({ message: 'Account settings not found' });
-      }
-      
-      if (account.protocol === 'IMAP') {
-        // Import IMAP sync function
-        const { syncImapEmails } = await import('./emailSync');
-        
-        const result = await syncImapEmails(
-          accountId,
-          encryptedAccount.settingsJson,
-          storage,
-          { folder, limit }
-        );
-        
-        // Update account sync status
-        if (!result.success && result.error) {
-          await storage.updateAccountConnection(accountId, { 
-            lastError: result.error,
-            lastChecked: result.lastSync
-          });
-        } else {
-          await storage.updateAccountConnection(accountId, { 
-            lastError: null,
-            lastChecked: result.lastSync
-          });
-        }
-        
-        res.json(result);
-      } else if (account.protocol === 'EWS') {
-        // Import EWS sync function
-        const { syncEwsEmails } = await import('./ewsSync');
-        
-        const result = await syncEwsEmails(storage, accountId, folder, limit);
-        
-        if (result.error) {
-          res.status(500).json({
-            success: false,
-            error: result.error,
-            messageCount: result.messageCount
-          });
-        } else {
-          res.json({
-            success: true,
-            messageCount: result.messageCount,
-            lastSync: new Date()
-          });
-        }
-      } else {
-        res.status(400).json({ message: `Unsupported protocol: ${account.protocol}` });
-      }
-      
-    } catch (error) {
-      console.error("Error syncing account:", error);
-      res.status(500).json({ message: "Failed to sync account" });
-    }
-  });
-
-  // Sync all folders for a specific account
-  app.post('/api/accounts/:accountId/sync-all', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const { limit = 25 } = req.body;
-      
-      // Verify account belongs to the authenticated user
-      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
-      const account = accounts.find((a: any) => a.id === accountId);
-      
-      if (!account) {
-        return res.status(404).json({ message: 'Account not found' });
-      }
-      
-      if (!account.isActive) {
-        return res.status(400).json({ message: 'Account is not active' });
-      }
-      
-      // Get all active folders for this account
-      const folders = await storage.getAccountFolders(accountId);
-      const activeFolders = folders.filter(folder => folder.isActive);
-      
-      if (activeFolders.length === 0) {
-        return res.status(400).json({ message: 'No active folders found for this account' });
-      }
-      
-      console.log(`Starting sync-all for account ${accountId} with ${activeFolders.length} folders`);
-      
-      const results = [];
-      let totalMessageCount = 0;
-      
-      // Get encrypted account settings
-      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
-      if (!encryptedAccount) {
-        return res.status(404).json({ message: 'Account settings not found' });
-      }
-      
-      // Sync each folder
-      for (const folder of activeFolders) {
-        try {
-          console.log(`Syncing folder: ${folder.displayName} (${folder.folderType})`);
-          
-          let result;
-          
-          if (account.protocol === 'IMAP') {
-            // Import IMAP sync function
-            const { syncImapEmails } = await import('./emailSync');
-            
-            result = await syncImapEmails(
-              accountId,
-              encryptedAccount.settingsJson,
-              storage,
-              { folder: folder.folderId, limit }
-            );
-          } else if (account.protocol === 'EWS') {
-            // Import EWS sync function
-            const { syncEwsEmails } = await import('./ewsSync');
-            
-            result = await syncEwsEmails(storage, accountId, folder.folderId, limit);
-          } else {
-            throw new Error(`Unsupported protocol: ${account.protocol}`);
-          }
-          
-          // Update folder sync timestamp
-          await storage.updateAccountFolder(folder.id, {
-            lastSynced: new Date()
-          });
-          
-          const folderResult = {
-            folderId: folder.folderId,
-            folderType: folder.folderType,
-            displayName: folder.displayName,
-            success: result.success !== false,
-            messageCount: result.messageCount || 0,
-            error: result.error
-          };
-          
-          results.push(folderResult);
-          totalMessageCount += folderResult.messageCount;
-          
-          console.log(`Folder ${folder.displayName}: ${folderResult.messageCount} messages synced`);
-          
-        } catch (error) {
-          console.error(`Error syncing folder ${folder.displayName}:`, error);
-          results.push({
-            folderId: folder.folderId,
-            folderType: folder.folderType,
-            displayName: folder.displayName,
-            success: false,
-            messageCount: 0,
-            error: (error as Error).message
-          });
-        }
-      }
-      
-      // Update account sync status
-      const hasErrors = results.some(r => !r.success);
-      await storage.updateAccountConnection(accountId, {
-        lastChecked: new Date(),
-        lastError: hasErrors ? 'Some folders failed to sync' : null
-      });
-      
-      console.log(`Sync-all completed for account ${accountId}: ${totalMessageCount} total messages`);
-      
-      res.json({
-        success: !hasErrors,
-        accountId,
-        foldersProcessed: results.length,
-        totalMessageCount,
-        results
-      });
-      
-    } catch (error) {
-      console.error("Error syncing all folders:", error);
-      res.status(500).json({ message: "Failed to sync all folders" });
-    }
-  });
-
-  // Sync all accounts for the authenticated user
-  app.post('/api/sync/all', isAuthenticated, async (req: any, res) => {
-    try {
-      // Import sync function dynamically
-      const { syncAllUserAccounts } = await import('./emailSync');
-      
-      const results = await syncAllUserAccounts(req.user.claims.sub, storage);
-      
-      res.json({
-        success: true,
-        accountsProcessed: results.length,
-        results
-      });
-      
-    } catch (error) {
-      console.error("Error syncing all accounts:", error);
-      res.status(500).json({ message: "Failed to sync accounts" });
-    }
-  });
-
-  // Priority rules routes
-  app.get('/api/rules/:accountId', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const rules = await storage.getPriorityRules(accountId);
-      res.json(rules);
-    } catch (error) {
-      console.error("Error fetching rules:", error);
-      res.status(500).json({ message: "Failed to fetch rules" });
-    }
-  });
-
-  app.post('/api/rules', isAuthenticated, async (req: any, res) => {
-    try {
-      const rule = await storage.createPriorityRule(req.body);
-      res.json(rule);
-    } catch (error) {
-      console.error("Error creating rule:", error);
-      res.status(500).json({ message: "Failed to create rule" });
-    }
-  });
-
-  // VIP contacts routes
-  app.get('/api/vips', isAuthenticated, async (req: any, res) => {
+  // Enhanced email sending endpoint
+  app.post('/api/mail/send', isAuthenticated, async (req: any, res) => {
+    const requestId = `send-email-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
-      const vips = await storage.getVipContacts(userId);
-      res.json(vips);
-    } catch (error) {
-      console.error("Error fetching VIPs:", error);
-      res.status(500).json({ message: "Failed to fetch VIPs" });
-    }
-  });
+      
+      // Validate request body using Zod schema
+      const emailRequest = sendEmailRequestSchema.parse(req.body);
+      console.log(`[${requestId}] Sending email from account ${emailRequest.accountId}`);
 
-  app.post('/api/vips', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const vip = await storage.createVipContact({ ...req.body, userId });
-      res.json(vip);
-    } catch (error) {
-      console.error("Error creating VIP:", error);
-      res.status(500).json({ message: "Failed to create VIP" });
-    }
-  });
-
-  // User preferences routes
-  app.get('/api/preferences', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const prefs = await storage.getUserPrefs(userId);
-      res.json(prefs);
-    } catch (error) {
-      console.error("Error fetching preferences:", error);
-      res.status(500).json({ message: "Failed to fetch preferences" });
-    }
-  });
-
-  app.post('/api/preferences', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const prefs = await storage.upsertUserPrefs({ ...req.body, userId });
-      res.json(prefs);
-    } catch (error) {
-      console.error("Error updating preferences:", error);
-      res.status(500).json({ message: "Failed to update preferences" });
-    }
-  });
-
-  // Email sending endpoint - only for IMAP accounts with SMTP configuration
-  app.post('/api/accounts/:accountId/send', isAuthenticated, async (req: any, res) => {
-    try {
-      const { accountId } = req.params;
-      const userId = req.user.claims.sub;
-
-      // Validate request body against schema
-      const validationResult = sendEmailRequestSchema.safeParse(req.body);
-      if (!validationResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: "Invalid email data: " + validationResult.error.issues.map(i => i.message).join(", ")
-        });
-      }
-
-      const emailData: SendEmailRequest = validationResult.data;
-
-      // Verify account belongs to user and get encrypted settings
+      // Get and validate the account
       const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find(acc => acc.id === accountId);
-
+      const account = accounts.find(acc => acc.id === emailRequest.accountId);
+      
       if (!account) {
-        return res.status(404).json({
-          success: false,
-          error: "Account not found or does not belong to user"
-        });
-      }
-
-      // Only IMAP accounts support SMTP sending
-      if (account.protocol !== 'IMAP') {
-        return res.status(400).json({
-          success: false,
-          error: "Email sending is only supported for IMAP accounts. EWS accounts handle sending internally."
-        });
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Email account not found',
+          404,
+          `Account with ID ${emailRequest.accountId} does not exist or does not belong to the user`,
+          'accountId',
+          [
+            'Verify the account ID is correct',
+            'Ensure the account still exists',
+            'Check if you have permission to send from this account'
+          ]
+        );
       }
 
       if (!account.isActive) {
-        return res.status(400).json({
-          success: false,
-          error: "Account is not active. Please check account connection."
-        });
+        throw new ApiError(
+          ErrorCodes.INVALID_ACCOUNT_STATE,
+          'Cannot send email from inactive account',
+          400,
+          'The selected account has connection issues and cannot send emails',
+          'accountId',
+          [
+            'Check the account connection status',
+            'Test the account connection in settings',
+            'Fix any configuration issues before sending'
+          ]
+        );
       }
 
-      // Get encrypted settings for SMTP configuration
-      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      // Get encrypted account settings for SMTP configuration
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(emailRequest.accountId);
       if (!encryptedAccount) {
-        return res.status(500).json({
-          success: false,
-          error: "Failed to retrieve account settings"
-        });
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to retrieve account settings',
+          500,
+          'Account settings could not be loaded for email sending'
+        );
       }
 
-      // Decrypt settings to get SMTP configuration
-      const settings = decryptAccountSettingsWithPassword(encryptedAccount.settingsJson) as ImapSettings;
-      
-      if (!settings.smtp) {
-        return res.status(500).json({
-          success: false,
-          error: "SMTP configuration not found for this account"
-        });
-      }
-
-      // Create nodemailer transporter with SMTP settings
-      const transporter = nodemailer.createTransport({
-        host: settings.smtp.host,
-        port: settings.smtp.port,
-        secure: settings.smtp.secure,
-        auth: {
-          user: settings.smtp.username,
-          pass: settings.smtp.password
-        },
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 30000
-      });
-
-      // Verify SMTP connection
+      // Decrypt and parse account settings
+      let accountSettings: any;
       try {
-        await transporter.verify();
-      } catch (error: any) {
-        console.error('SMTP verification failed:', error);
-        return res.status(500).json({
-          success: false,
-          error: "SMTP connection failed: " + error.message
+        accountSettings = decryptAccountSettingsWithPassword(encryptedAccount.settingsJson);
+      } catch (decryptError) {
+        throw new ApiError(
+          ErrorCodes.INTERNAL_SERVER_ERROR,
+          'Failed to decrypt account settings',
+          500,
+          'Account settings could not be decrypted'
+        );
+      }
+
+      // Validate email addresses
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(emailRequest.to)) {
+        throw new ApiError(
+          ErrorCodes.EMAIL_VALIDATION_FAILED,
+          'Invalid recipient email address',
+          400,
+          `"${emailRequest.to}" is not a valid email address`,
+          'to'
+        );
+      }
+
+      // Configure transport for the account protocol
+      let transporter: nodemailer.Transporter;
+      
+      if (account.protocol === 'EWS') {
+        throw new ApiError(
+          ErrorCodes.EMAIL_SEND_FAILED,
+          'Email sending via EWS is not yet supported',
+          501,
+          'EWS email sending functionality is under development',
+          undefined,
+          [
+            'Use an IMAP account for sending emails',
+            'Contact support for EWS sending updates'
+          ]
+        );
+      } else if (account.protocol === 'IMAP') {
+        // Use SMTP settings from account configuration
+        const smtpSettings = accountSettings.smtp;
+        if (!smtpSettings || !smtpSettings.host) {
+          throw new ApiError(
+            ErrorCodes.EMAIL_SEND_FAILED,
+            'SMTP configuration missing',
+            500,
+            'Account does not have proper SMTP settings configured'
+          );
+        }
+
+        transporter = nodemailer.createTransporter({
+          host: smtpSettings.host,
+          port: smtpSettings.port || 587,
+          secure: smtpSettings.secure || false,
+          auth: {
+            user: smtpSettings.username || accountSettings.username,
+            pass: smtpSettings.password || accountSettings.password,
+          },
+          connectionTimeout: 30000,
+          greetingTimeout: 30000,
+          socketTimeout: 30000,
         });
+
+        // Verify SMTP connection
+        try {
+          await transporter.verify();
+          console.log(`[${requestId}] SMTP connection verified`);
+        } catch (error: any) {
+          console.error(`[${requestId}] SMTP verification failed:`, error);
+          throw new ApiError(
+            ErrorCodes.SMTP_CONNECTION_FAILED,
+            'SMTP connection failed',
+            500,
+            `Cannot connect to SMTP server: ${error.message}`,
+            undefined,
+            [
+              'Check SMTP server settings in account configuration',
+              'Verify SMTP credentials are correct',
+              'Ensure SMTP server is reachable'
+            ]
+          );
+        }
+      } else {
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Unsupported protocol for email sending',
+          400,
+          `Protocol "${account.protocol}" does not support email sending`
+        );
       }
 
       // Prepare email message
       const mailOptions = {
-        from: settings.smtp.username, // Use SMTP username as sender
-        to: emailData.to,
-        cc: emailData.cc || undefined,
-        bcc: emailData.bcc || undefined,
-        subject: emailData.subject,
-        text: emailData.body,
-        html: emailData.bodyHtml || emailData.body.replace(/\n/g, '<br>'), // Convert newlines to HTML if no HTML provided
-        attachments: emailData.attachments?.map(att => ({
+        from: `"${account.name}" <${accountSettings.username}>`,
+        to: emailRequest.to,
+        cc: emailRequest.cc,
+        bcc: emailRequest.bcc,
+        subject: emailRequest.subject,
+        text: emailRequest.textContent,
+        html: emailRequest.htmlContent,
+        replyTo: emailRequest.replyTo,
+        attachments: emailRequest.attachments?.map(att => ({
           filename: att.filename,
-          content: att.content,
-          encoding: 'base64',
+          content: Buffer.from(att.content, 'base64'),
           contentType: att.contentType
         }))
       };
 
       // Send the email
-      let sendResult;
+      let sendResult: any;
       try {
         sendResult = await transporter.sendMail(mailOptions);
-        console.log('Email sent successfully:', sendResult.messageId);
+        console.log(`[${requestId}] Email sent successfully:`, sendResult.messageId);
       } catch (error: any) {
-        console.error('Failed to send email:', error);
-        return res.status(500).json({
-          success: false,
-          error: "Failed to send email: " + error.message
-        });
+        console.error(`[${requestId}] Failed to send email:`, error);
+        throw new ApiError(
+          ErrorCodes.EMAIL_SEND_FAILED,
+          'Failed to send email',
+          500,
+          `Email sending failed: ${error.message}`,
+          undefined,
+          [
+            'Check your internet connection',
+            'Verify recipient email addresses are correct',
+            'Ensure account SMTP settings are valid',
+            'Try sending the email again'
+          ]
+        );
       }
 
-      // Append sent email to Sent folder via IMAP APPEND
-      try {
-        const appendResult = await appendSentEmailToFolder(accountId, encryptedAccount.settingsJson, {
-          to: emailData.to,
-          cc: emailData.cc,
-          bcc: emailData.bcc,
-          subject: emailData.subject,
-          bodyText: emailData.body,
-          bodyHtml: emailData.bodyHtml,
-          from: settings.smtp.username,
-          messageId: sendResult.messageId,
-          attachments: emailData.attachments
-        });
+      // Store sent email in database for record keeping
+      const sentEmailData = {
+        userId,
+        accountId: emailRequest.accountId,
+        messageId: sendResult.messageId || `sent-${Date.now()}`,
+        from: mailOptions.from,
+        to: emailRequest.to,
+        cc: emailRequest.cc || null,
+        bcc: emailRequest.bcc || null,
+        subject: emailRequest.subject,
+        textContent: emailRequest.textContent || null,
+        htmlContent: emailRequest.htmlContent || null,
+        folder: 'Sent',
+        flags: ['\\Seen'],
+        date: new Date(),
+        size: JSON.stringify(mailOptions).length,
+        replyTo: emailRequest.replyTo || null,
+        attachments: emailRequest.attachments || []
+      };
 
-        if (!appendResult.success) {
-          console.error('Failed to append to Sent folder:', appendResult.error);
-          // Don't fail the entire request - email was sent successfully
-        } else {
-          console.log('Successfully appended sent email to Sent folder');
-        }
-      } catch (error) {
-        console.error('Error appending to Sent folder:', error);
-        // Don't fail the entire request - email was sent successfully
-      }
-      
-      // Store sent email in database for immediate UI display
       try {
-        const sentEmailData = {
-          accountId,
-          folder: 'SENT',
-          messageId: sendResult.messageId || `sent-${Date.now()}`,
-          threadId: null,
-          subject: emailData.subject,
-          from: settings.smtp.username,
-          to: emailData.to + (emailData.cc ? `, ${emailData.cc}` : '') + (emailData.bcc ? `, ${emailData.bcc}` : ''),
-          date: new Date(),
-          size: emailData.body.length + (emailData.bodyHtml?.length || 0),
-          hasAttachments: (emailData.attachments?.length || 0) > 0,
-          isRead: true, // Sent emails are always "read"
-          isFlagged: false,
-          priority: 0,
-          snippet: emailData.body.substring(0, 200),
-          bodyHtml: emailData.bodyHtml || emailData.body.replace(/\n/g, '<br>'),
-          bodyText: emailData.body
-        };
-
         await storage.createMailMessage(sentEmailData);
-        console.log('Sent email stored in database');
+        console.log(`[${requestId}] Sent email stored in database`);
       } catch (error) {
-        console.error('Failed to store sent email in database:', error);
+        console.error(`[${requestId}] Failed to store sent email in database:`, error);
         // Don't fail the entire request if database storage fails
       }
 
-      // Return success response
       const response: SendEmailResponse = {
         success: true,
         messageId: sendResult.messageId,
-        sentAt: new Date()
+        message: 'Email sent successfully'
       };
 
-      res.json(response);
+      res.json(createSuccessResponse(response, 'Email sent successfully'));
 
-    } catch (error: any) {
-      console.error("Email sending error:", error);
-      res.status(500).json({
-        success: false,
-        error: error.message || "Failed to send email"
-      });
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/mail/send', requestId);
     }
   });
 
-  // DEBUG: Manual folder discovery endpoint for testing
-  app.post('/api/accounts/:accountId/discover-folders', isAuthenticated, async (req: any, res) => {
+  // User preferences routes with enhanced error handling
+  app.get('/api/preferences', isAuthenticated, async (req: any, res) => {
+    const requestId = `preferences-get-${Date.now()}`;
     try {
-      const { accountId } = req.params;
+      const userId = req.user.claims.sub;
+      const preferences = await storage.getUserPreferences(userId);
+      res.json(createSuccessResponse(preferences, 'User preferences retrieved'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/preferences', requestId);
+    }
+  });
+
+  app.post('/api/preferences', isAuthenticated, async (req: any, res) => {
+    const requestId = `preferences-update-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const preferences = req.body;
       
-      console.log(`Manual folder discovery requested for account ${accountId}`);
+      // Basic validation
+      if (preferences.syncInterval && (preferences.syncInterval < 60 || preferences.syncInterval > 3600)) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid sync interval',
+          400,
+          'Sync interval must be between 60 and 3600 seconds',
+          'syncInterval'
+        );
+      }
+
+      const updatedPreferences = await storage.updateUserPreferences(userId, preferences);
+      res.json(createSuccessResponse(
+        updatedPreferences,
+        'User preferences updated successfully'
+      ));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/preferences', requestId);
+    }
+  });
+
+  // Manual folder discovery endpoint
+  app.post('/api/accounts/:accountId/discover-folders', isAuthenticated, async (req: any, res) => {
+    const requestId = `discover-folders-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const accountId = req.params.accountId;
       
-      // Get encrypted account settings
+      if (!accountId) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Account ID is required',
+          400,
+          'Account ID parameter is missing'
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
       const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
       if (!encryptedAccount) {
-        return res.status(404).json({ message: 'Account settings not found' });
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to retrieve account settings',
+          500
+        );
       }
       
-      // Import folder discovery function
-      const { discoverEwsFolders } = await import('./ewsSync');
+      console.log(`[${requestId}] Starting manual folder discovery for account ${accountId}`);
+
+      let result: any;
+      if (account.protocol === 'EWS') {
+        result = await discoverEwsFolders(accountId, encryptedAccount.settingsJson, storage);
+      } else if (account.protocol === 'IMAP') {
+        result = await discoverImapFolders(accountId, encryptedAccount.settingsJson, storage);
+      } else {
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Folder discovery not supported for this protocol',
+          400,
+          `Protocol "${account.protocol}" does not support folder discovery`
+        );
+      }
       
-      // Run folder discovery
-      const result = await discoverEwsFolders(accountId, encryptedAccount.settingsJson, storage);
-      
-      console.log(`Folder discovery result for account ${accountId}:`, result);
-      
-      res.json(result);
-    } catch (error: any) {
-      console.error("Error in manual folder discovery:", error);
-      res.status(500).json({ message: error.message || "Failed to discover folders" });
+      if (result.success) {
+        res.json(createSuccessResponse(
+          result,
+          `Discovered ${result.folderCount || 0} folders successfully`
+        ));
+      } else {
+        throw new ApiError(
+          ErrorCodes.INTERNAL_SERVER_ERROR,
+          'Folder discovery failed',
+          500,
+          result.error || 'Unknown error during folder discovery'
+        );
+      }
+    } catch (error) {
+      handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/discover-folders`, requestId);
     }
+  });
+
+  // Global error handler for unhandled errors
+  app.use((error: any, req: any, res: any, next: any) => {
+    const requestId = `global-error-${Date.now()}`;
+    console.error(`[${requestId}] Unhandled error:`, {
+      error: error.message,
+      stack: error.stack,
+      url: req.url,
+      method: req.method
+    });
+
+    const { statusCode, response } = createErrorResponse(error, requestId);
+    res.status(statusCode).json(response);
   });
 
   const httpServer = createServer(app);
-
   return httpServer;
 }
