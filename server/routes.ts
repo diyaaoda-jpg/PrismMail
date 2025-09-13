@@ -176,6 +176,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Mail routes
+  app.get('/api/mail/:accountId/:folder', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId, folder } = req.params;
+      const { limit = 50, offset = 0 } = req.query;
+      const messages = await storage.getMailMessages(accountId, folder.toUpperCase(), parseInt(limit), parseInt(offset));
+      res.json(messages);
+    } catch (error) {
+      console.error("Error fetching mail:", error);
+      res.status(500).json({ message: "Failed to fetch mail" });
+    }
+  });
+
+  // Fallback route for backwards compatibility
   app.get('/api/mail/:accountId', isAuthenticated, async (req: any, res) => {
     try {
       const { accountId } = req.params;
