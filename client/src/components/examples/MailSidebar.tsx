@@ -15,7 +15,7 @@ export default function MailSidebarExample() {
       <MailSidebar
         selectedFolder="inbox"
         unreadCounts={mockUnreadCounts}
-        onFolderSelect={(folder) => console.log('Selected folder:', folder)}
+        onFolderSelect={(folder, account) => console.log('Selected folder:', folder, account ? `from account ${account}` : 'unified')}
         onCompose={() => console.log('Compose new email')}
         onSearch={(query) => console.log('Search:', query)}
       />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown } from "lucide-react";
+import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -19,26 +19,41 @@ interface MailFolder {
 interface MailSidebarProps {
   selectedFolder?: string;
   selectedAccount?: string;
-  onFolderSelect?: (folderId: string) => void;
+  onFolderSelect?: (folderId: string, accountId?: string) => void;
   onAccountSelect?: (accountId: string) => void;
   onCompose?: () => void;
   onSearch?: (query: string) => void;
   onSettings?: () => void;
   unreadCounts?: Record<string, number>;
+  accountFolderCounts?: Record<string, Record<string, number>>;
   accounts?: Array<{
     id: string;
     name: string;
     protocol: 'IMAP' | 'EWS';
     isActive: boolean;
+    folders?: MailFolder[];
   }>;
 }
 
-const defaultFolders: MailFolder[] = [
+const unifiedFolders: MailFolder[] = [
   { id: 'inbox', name: 'Inbox', icon: Inbox },
-  { id: 'starred', name: 'Starred', icon: Star },
+  { id: 'drafts', name: 'Drafts', icon: FileText },
   { id: 'sent', name: 'Sent', icon: Send },
+  { id: 'deleted', name: 'Deleted Items', icon: Trash },
+];
+
+const defaultAccountFolders: MailFolder[] = [
+  { id: 'inbox', name: 'Inbox', icon: Inbox },
+  { id: 'drafts', name: 'Drafts', icon: FileText },
   { id: 'archive', name: 'Archive', icon: Archive },
-  { id: 'trash', name: 'Trash', icon: Trash },
+  { id: 'sent', name: 'Sent', icon: Send },
+  { id: 'deleted', name: 'Deleted Items', icon: Trash },
+  { id: 'junk', name: 'Junk Email', icon: ShieldAlert },
+  { id: 'conversation', name: 'Conversation History', icon: Mail },
+  { id: 'rss', name: 'RSS Feeds', icon: Rss },
+  { id: 'scheduled', name: 'Scheduled', icon: Clock },
+  { id: 'sync', name: 'Sync Issues', icon: AlertTriangle },
+  { id: 'public', name: 'Subscribed Public Folders', icon: FolderOpen },
 ];
 
 const smartFolders: MailFolder[] = [
@@ -56,14 +71,26 @@ export function MailSidebar({
   onSearch,
   onSettings,
   unreadCounts = {},
+  accountFolderCounts = {},
   accounts = [],
 }: MailSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [accountsExpanded, setAccountsExpanded] = useState(accounts.length > 1);
+  const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
+  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
+  const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
+    accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
+  );
 
-  const handleFolderClick = (folderId: string) => {
-    onFolderSelect?.(folderId);
-    console.log('Selected folder:', folderId);
+  const handleFolderClick = (folderId: string, accountId?: string) => {
+    onFolderSelect?.(folderId, accountId);
+    console.log('Selected folder:', folderId, accountId ? `from account ${accountId}` : 'unified');
+  };
+
+  const handleIndividualAccountToggle = (accountId: string) => {
+    setIndividualAccountsExpanded(prev => ({
+      ...prev,
+      [accountId]: !prev[accountId]
+    }));
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -87,57 +114,72 @@ export function MailSidebar({
     console.log('Settings clicked');
   };
 
-  const renderAccount = (account: { id: string; name: string; protocol: 'IMAP' | 'EWS'; isActive: boolean }) => {
-    const isSelected = selectedAccount === account.id;
+  const renderIndividualAccount = (account: { id: string; name: string; protocol: 'IMAP' | 'EWS'; isActive: boolean; folders?: MailFolder[] }) => {
+    const isExpanded = individualAccountsExpanded[account.id];
+    const accountFolders = account.folders || defaultAccountFolders;
 
     return (
-      <Button
-        key={account.id}
-        variant={isSelected ? "secondary" : "ghost"}
-        className={cn(
-          "w-full justify-start gap-3 mb-1 hover-elevate active-elevate-2",
-          isSelected && "bg-accent text-accent-foreground",
-          !account.isActive && "opacity-60"
-        )}
-        onClick={() => handleAccountSelect(account.id)}
-        data-testid={`button-account-${account.id}`}
-      >
-        <Mail className="h-4 w-4" />
-        <span className="flex-1 text-left truncate">{account.name}</span>
-        <Badge variant="outline" className="ml-auto text-xs">
-          {account.protocol}
-        </Badge>
-        {!account.isActive && (
-          <Badge variant="destructive" className="ml-1 text-xs">
-            Offline
-          </Badge>
-        )}
-      </Button>
+      <div key={account.id} className="mb-4">
+        <Collapsible 
+          open={isExpanded} 
+          onOpenChange={() => handleIndividualAccountToggle(account.id)}
+        >
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              className={cn(
+                "w-full justify-start gap-2 mb-2 text-sm font-medium hover-elevate active-elevate-2",
+                !account.isActive && "opacity-60"
+              )}
+              data-testid={`button-account-toggle-${account.id}`}
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              <Mail className="h-4 w-4" />
+              <span className="flex-1 text-left truncate">{account.name}</span>
+              {!account.isActive && (
+                <Badge variant="destructive" className="ml-1 text-xs">
+                  Offline
+                </Badge>
+              )}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-1">
+            {accountFolders.map(folder => renderFolder(folder, account.id, true))}
+          </CollapsibleContent>
+        </Collapsible>
+      </div>
     );
   };
 
-  const renderFolder = (folder: MailFolder) => {
-    const isSelected = selectedFolder === folder.id;
-    const count = unreadCounts[folder.id] || 0;
+  const renderFolder = (folder: MailFolder, accountId?: string, indent: boolean = false) => {
+    const isSelected = selectedFolder === folder.id && (!accountId || selectedAccount === accountId);
+    const count = accountId ? 
+      accountFolderCounts[accountId]?.[folder.id] || 0 : 
+      unreadCounts[folder.id] || 0;
     const IconComponent = folder.icon;
 
     return (
       <Button
-        key={folder.id}
+        key={`${accountId || 'unified'}-${folder.id}`}
         variant={isSelected ? "secondary" : "ghost"}
         className={cn(
           "w-full justify-start gap-3 mb-1 hover-elevate active-elevate-2",
-          isSelected && "bg-accent text-accent-foreground"
+          isSelected && "bg-accent text-accent-foreground",
+          indent && "ml-4"
         )}
-        onClick={() => handleFolderClick(folder.id)}
-        data-testid={`button-folder-${folder.id}`}
+        onClick={() => handleFolderClick(folder.id, accountId)}
+        data-testid={`button-folder-${accountId ? `${accountId}-` : ''}${folder.id}`}
       >
         <IconComponent className={cn("h-4 w-4", folder.color)} />
         <span className="flex-1 text-left">{folder.name}</span>
         {count > 0 && (
-          <Badge variant="secondary" className="ml-auto text-xs">
-            {count}
-          </Badge>
+          <span className="ml-auto text-xs text-blue-600 dark:text-blue-400 font-medium">
+            {count.toLocaleString()}
+          </span>
         )}
       </Button>
     );
@@ -172,64 +214,69 @@ export function MailSidebar({
 
       <ScrollArea className="flex-1">
         <div className="p-4">
-          {/* Smart Folders */}
+          {/* All Accounts Section */}
           <div className="mb-6">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 tracking-wide">
-              Smart Filters
-            </h3>
-            <div className="space-y-1">
-              {smartFolders.map(renderFolder)}
-            </div>
+            <Collapsible open={allAccountsExpanded} onOpenChange={setAllAccountsExpanded}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start gap-2 mb-3 text-sm font-medium hover-elevate active-elevate-2"
+                  data-testid="button-all-accounts-toggle"
+                >
+                  {allAccountsExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  All Accounts
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-1">
+                {unifiedFolders.map(folder => renderFolder(folder))}
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
           <Separator className="my-4" />
 
-          {/* Default Folders */}
-          <div className="mb-6">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 tracking-wide">
-              Folders
-            </h3>
-            <div className="space-y-1">
-              {defaultFolders.map(renderFolder)}
-            </div>
-          </div>
-
-          <Separator className="my-4" />
-
-          {/* Accounts Section - only show if multiple accounts */}
-          {accounts.length > 1 && (
+          {/* Individual Account Sections */}
+          {accounts.length > 0 && (
             <>
               <div className="mb-6">
-                <Collapsible open={accountsExpanded} onOpenChange={setAccountsExpanded}>
-                  <CollapsibleTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="w-full justify-start gap-1 mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hover-elevate active-elevate-2"
-                      data-testid="button-accounts-toggle"
-                    >
-                      {accountsExpanded ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                      Accounts ({accounts.length})
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="space-y-1">
-                    {accounts.map(renderAccount)}
-                  </CollapsibleContent>
-                </Collapsible>
+                {accounts.map(renderIndividualAccount)}
               </div>
 
               <Separator className="my-4" />
             </>
           )}
 
+          {/* Smart Folders Section */}
+          <div className="mb-6">
+            <Collapsible open={smartFoldersExpanded} onOpenChange={setSmartFoldersExpanded}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start gap-2 mb-3 text-sm font-medium hover-elevate active-elevate-2"
+                  data-testid="button-smart-folders-toggle"
+                >
+                  {smartFoldersExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  Smart Folders
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-1">
+                {smartFolders.map(folder => renderFolder(folder))}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+
+          <Separator className="my-4" />
+
           {/* Account Settings */}
           <div>
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 tracking-wide">
-              Account
-            </h3>
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 hover-elevate active-elevate-2"

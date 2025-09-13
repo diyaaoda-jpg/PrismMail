@@ -548,12 +548,18 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       <MailSidebar
         selectedFolder={selectedFolder}
         selectedAccount={selectedAccount}
-        onFolderSelect={setSelectedFolder}
+        onFolderSelect={(folderId, accountId) => {
+          setSelectedFolder(folderId);
+          if (accountId) {
+            setSelectedAccount(accountId);
+          }
+        }}
         onAccountSelect={setSelectedAccount}
         onCompose={handleCompose}
         onSearch={handleSearch}
         onSettings={handleSettings}
         unreadCounts={mockUnreadCounts}
+        accountFolderCounts={{}}
         accounts={accounts}
       />
 
