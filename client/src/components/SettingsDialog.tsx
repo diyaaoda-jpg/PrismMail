@@ -30,6 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { X, Save, Mail, User, Shield, Palette } from "lucide-react";
+import { ThemeMenu } from "./ThemeMenu";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -199,9 +200,8 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     priorityOnly: false
   });
 
-  // Theme settings
-  const [themeSettings, setThemeSettings] = useState({
-    theme: "light",
+  // Appearance settings (non-theme)
+  const [appearanceSettings, setAppearanceSettings] = useState({
     fontSize: "medium",
     readingModeBackground: "default"
   });
@@ -359,7 +359,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
         account: accountData,
         email: emailPrefs,
         notifications,
-        theme: themeSettings
+        appearance: appearanceSettings
       });
       
       toast({
@@ -993,24 +993,14 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                     </CardHeader>
                     <CardContent className="space-y-6">
                       <div className="space-y-2">
-                        <Label>Theme</Label>
-                        <Select value={themeSettings.theme} onValueChange={(value) => setThemeSettings({ ...themeSettings, theme: value })}>
-                          <SelectTrigger data-testid="select-theme">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="light">Light</SelectItem>
-                            <SelectItem value="dark">Dark</SelectItem>
-                            <SelectItem value="system">System</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <ThemeMenu variant="inline" />
                       </div>
 
                       <Separator />
 
                       <div className="space-y-2">
                         <Label>Font size</Label>
-                        <Select value={themeSettings.fontSize} onValueChange={(value) => setThemeSettings({ ...themeSettings, fontSize: value })}>
+                        <Select value={appearanceSettings.fontSize} onValueChange={(value) => setAppearanceSettings({ ...appearanceSettings, fontSize: value })}>
                           <SelectTrigger data-testid="select-font-size">
                             <SelectValue />
                           </SelectTrigger>
@@ -1026,7 +1016,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
 
                       <div className="space-y-2">
                         <Label>Reading mode background</Label>
-                        <Select value={themeSettings.readingModeBackground} onValueChange={(value) => setThemeSettings({ ...themeSettings, readingModeBackground: value })}>
+                        <Select value={appearanceSettings.readingModeBackground} onValueChange={(value) => setAppearanceSettings({ ...appearanceSettings, readingModeBackground: value })}>
                           <SelectTrigger data-testid="select-reading-background">
                             <SelectValue />
                           </SelectTrigger>

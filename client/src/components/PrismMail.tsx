@@ -1,12 +1,12 @@
 import { useState, useCallback, useEffect } from "react";
-import { BookOpen, Settings } from "lucide-react";
+import { BookOpen, Settings, RefreshCw, X } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemeMenu } from "./ThemeMenu";
 import { MailSidebar } from "./MailSidebar";
 import { EmailListItem, type EmailMessage } from "./EmailListItem";
 import { EmailViewer } from "./EmailViewer";
@@ -123,6 +123,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [composeReplyTo, setComposeReplyTo] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
+  
+  // Inline compose state for replies
+  const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
 
   // Fetch user's accounts
   const { data: accounts = [], isLoading: accountsLoading } = useQuery<AccountConnection[]>({
@@ -411,27 +414,25 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   const handleReply = useCallback((email: EmailMessage) => {
     const replyData = makeReply(email, user?.email);
-    setComposeReplyTo({
+    setInlineComposeDraft({
       to: replyData.to,
       cc: replyData.cc,
       bcc: replyData.bcc,
       subject: replyData.subject,
       body: replyData.body
     });
-    setIsComposeOpen(true);
     console.log('Reply to:', email.subject);
   }, [user?.email]);
 
   const handleReplyAll = useCallback((email: EmailMessage) => {
     const replyAllData = makeReplyAll(email, user?.email);
-    setComposeReplyTo({
+    setInlineComposeDraft({
       to: replyAllData.to,
       cc: replyAllData.cc,
       bcc: replyAllData.bcc,
       subject: replyAllData.subject,
       body: replyAllData.body
     });
-    setIsComposeOpen(true);
     console.log('Reply all to:', email.subject);
   }, [user?.email]);
 
@@ -577,7 +578,21 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <ThemeToggle />
+            {primaryAccount && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => syncMutation.mutate(primaryAccount.id)}
+                disabled={syncMutation.isPending}
+                data-testid="button-sync"
+                className="hover-elevate active-elevate-2"
+              >
+                <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
+                <span className="sr-only">Sync emails</span>
+              </Button>
+            )}
+            
+            <ThemeMenu variant="dropdown" />
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -645,17 +660,58 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
             </ScrollArea>
           </div>
 
-          {/* Email viewer */}
-          <EmailViewer
-            email={selectedEmail}
-            currentUserEmail={user?.email}
-            onReply={handleReply}
-            onReplyAll={handleReplyAll}
-            onForward={handleForward}
-            onArchive={handleArchive}
-            onDelete={handleDelete}
-            onToggleFlagged={(email) => handleToggleFlagged(email.id)}
-          />
+          {/* Email viewer and inline composer */}
+          <div className="flex-1 flex flex-col">
+            <EmailViewer
+              email={selectedEmail}
+              currentUserEmail={user?.email}
+              onReply={handleReply}
+              onReplyAll={handleReplyAll}
+              onForward={handleForward}
+              onArchive={handleArchive}
+              onDelete={handleDelete}
+              onToggleFlagged={(email) => handleToggleFlagged(email.id)}
+            />
+            
+            {/* Inline Composer for Replies */}
+            {inlineComposeDraft && (
+              <div className="border-t bg-card">
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-lg">Reply</h3>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setComposeReplyTo(inlineComposeDraft);
+                          setIsComposeOpen(true);
+                          setInlineComposeDraft(null);
+                        }}
+                        data-testid="button-pop-out-compose"
+                      >
+                        Pop out
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setInlineComposeDraft(null)}
+                        data-testid="button-close-inline-compose"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <ComposeDialog
+                    isOpen={true}
+                    onClose={() => setInlineComposeDraft(null)}
+                    replyTo={inlineComposeDraft}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
