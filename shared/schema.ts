@@ -98,6 +98,10 @@ export const userPrefs = pgTable("user_prefs", {
   listDensity: varchar("list_density").default("comfortable"),
   signatureHtml: text("signature_html"),
   readingMode: boolean("reading_mode").default(false),
+  // Sync settings
+  syncInterval: integer("sync_interval").default(600), // Default 10 minutes (600 seconds)
+  autoSync: boolean("auto_sync").default(true),
+  lastSyncTime: timestamp("last_sync_time"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

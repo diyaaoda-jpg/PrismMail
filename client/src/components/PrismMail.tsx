@@ -171,13 +171,13 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   });
 
-  // Auto-sync when a new account becomes active
+  // Auto-sync when a new account becomes active (only once when account changes)
   useEffect(() => {
-    if (primaryAccount && !syncMutation.isPending && emails.length === 0) {
+    if (primaryAccount && emails.length === 0) {
       console.log('Auto-syncing emails for account:', primaryAccount.name);
       syncMutation.mutate(primaryAccount.id);
     }
-  }, [primaryAccount, emails.length, syncMutation]);
+  }, [primaryAccount?.id]); // Only depend on account ID, not the mutation or emails.length
 
   // Fallback to mock data if no real account or emails available
   const displayEmails = emails.length > 0 ? emails : mockEmails;
