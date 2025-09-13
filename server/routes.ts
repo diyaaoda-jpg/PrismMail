@@ -163,10 +163,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: 'Account settings not found' });
       }
       
-      // Import sync function dynamically
-      const { syncImapEmails } = await import('./emailSync');
-      
       if (account.protocol === 'IMAP') {
+        // Import IMAP sync function
+        const { syncImapEmails } = await import('./emailSync');
+        
         const result = await syncImapEmails(
           accountId,
           encryptedAccount.settingsJson,
@@ -188,8 +188,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         res.json(result);
+      } else if (account.protocol === 'EWS') {
+        // Import EWS sync function
+        const { syncEwsEmails } = await import('./ewsSync');
+        
+        const result = await syncEwsEmails(storage, accountId, folder, limit);
+        
+        if (result.error) {
+          res.status(500).json({
+            success: false,
+            error: result.error,
+            messageCount: result.messageCount
+          });
+        } else {
+          res.json({
+            success: true,
+            messageCount: result.messageCount,
+            lastSync: new Date()
+          });
+        }
       } else {
-        res.status(400).json({ message: 'EWS sync not yet implemented' });
+        res.status(400).json({ message: `Unsupported protocol: ${account.protocol}` });
       }
       
     } catch (error) {

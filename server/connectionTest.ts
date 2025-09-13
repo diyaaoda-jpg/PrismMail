@@ -26,7 +26,6 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
       },
       // Connection timeout
       socketTimeout: 10000,
-      clientTimeout: 10000,
       greetingTimeout: 10000,
     });
 
@@ -79,12 +78,9 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
   try {
     const settings = decryptAccountSettingsWithPassword(settingsJson);
     
-    // For basic EWS testing, we'll try to create an EWS connection
-    // This is a simplified test - in production, you'd use the ews-javascript-api more fully
-    const ExchangeService = require('ews-javascript-api').ExchangeService;
-    const ExchangeVersion = require('ews-javascript-api').ExchangeVersion;
-    const WebCredentials = require('ews-javascript-api').WebCredentials;
-    const Uri = require('ews-javascript-api').Uri;
+    // Dynamic import to avoid require() issues
+    const ewsApi = await import('ews-javascript-api');
+    const { ExchangeService, ExchangeVersion, WebCredentials, Uri, WellKnownFolderName } = ewsApi;
     
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
@@ -94,14 +90,13 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     if (!ewsUrl.startsWith('http')) {
       ewsUrl = (settings.useSSL ? 'https://' : 'http://') + ewsUrl;
     }
-    if (!ewsUrl.includes('/EWS/')) {
-      ewsUrl = ewsUrl + '/EWS/Exchange.asmx';
+    if (!ewsUrl.includes('/EWS/') && !ewsUrl.includes('/ews')) {
+      ewsUrl = ewsUrl.endsWith('/') ? ewsUrl + 'EWS/Exchange.asmx' : ewsUrl + '/EWS/Exchange.asmx';
     }
     
     service.Url = new Uri(ewsUrl);
     
     // Try to get inbox folder to test connection
-    const WellKnownFolderName = require('ews-javascript-api').WellKnownFolderName;
     await service.GetFolder(WellKnownFolderName.Inbox);
 
     return {
