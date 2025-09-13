@@ -96,26 +96,62 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
       settings = decryptAccountSettingsWithPassword(settingsJson);
     }
     
-    // First, try a simple HTTP check to validate the URL
-    const testUrl = settings.host.startsWith('http') ? settings.host : `https://${settings.host}`;
+    // Normalize EWS URL to canonical Exchange endpoint format
+    function normalizeEwsUrl(hostUrl: string): string {
+      let url: URL;
+      try {
+        // If no scheme, prepend https://
+        if (!hostUrl.startsWith('http')) {
+          hostUrl = 'https://' + hostUrl;
+        }
+        url = new URL(hostUrl);
+      } catch {
+        throw new Error('Invalid EWS server URL format');
+      }
+      
+      // Always use the canonical Exchange EWS endpoint
+      return url.origin + '/EWS/Exchange.asmx';
+    }
+
+    const ewsUrl = normalizeEwsUrl(settings.host);
     
+    // Preflight check: Test EWS endpoint and check auth methods
     try {
-      const response = await fetch(testUrl, {
+      const preflightResponse = await fetch(ewsUrl, {
         method: 'GET',
         headers: {
           'User-Agent': 'PrismMail/1.0'
         },
-        // Short timeout for initial connectivity test
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(10000)
       });
       
-      // We expect some response, even if it's an error (401, 404, etc.)
-      // The important thing is that we can reach the server
+      // Check if this looks like an EWS endpoint
+      const contentType = preflightResponse.headers.get('content-type') || '';
+      const wwwAuth = preflightResponse.headers.get('www-authenticate') || '';
+      
+      // If we get HTML instead of XML/SOAP, this isn't the right endpoint
+      if (contentType.includes('text/html') && !contentType.includes('xml')) {
+        throw new Error('EWS endpoint not found - server returned HTML instead of SOAP XML');
+      }
+      
+      // Check authentication methods
+      if (preflightResponse.status === 401) {
+        if (!wwwAuth.toLowerCase().includes('basic')) {
+          if (wwwAuth.toLowerCase().includes('ntlm') || wwwAuth.toLowerCase().includes('negotiate')) {
+            throw new Error('Server requires NTLM/Kerberos authentication - Basic authentication not supported');
+          }
+          throw new Error('Server authentication method not supported');
+        }
+      }
+      
     } catch (fetchError: any) {
       if (fetchError.name === 'AbortError') {
-        throw new Error('Connection timeout - server may be unreachable');
+        throw new Error('EWS endpoint timeout - server may be unreachable');
       }
-      throw new Error(`Cannot reach server: ${fetchError.message}`);
+      if (fetchError.message.includes('EWS endpoint') || fetchError.message.includes('authentication')) {
+        throw fetchError; // Re-throw our custom errors
+      }
+      throw new Error(`Cannot reach EWS endpoint: ${fetchError.message}`);
     }
     
     // Dynamic import to avoid require() issues
@@ -124,14 +160,11 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
-    
-    // Use the URL as provided by user
-    let ewsUrl = settings.host;
-    if (!ewsUrl.startsWith('http')) {
-      ewsUrl = 'https://' + ewsUrl;
-    }
-    
     service.Url = new Uri(ewsUrl);
+    
+    // Enable pre-authentication for better compatibility
+    service.PreAuthenticate = true;
+    service.UserAgent = 'PrismMail/1.0';
     
     // Try to get inbox folder to test connection using correct API method
     const propertySet = new PropertySet(BasePropertySet.IdOnly);
