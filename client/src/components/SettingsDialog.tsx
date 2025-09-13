@@ -54,10 +54,19 @@ const accountFormSchema = z.object({
   name: z.string().min(1, "Account name is required"),
   protocol: z.enum(["IMAP", "EWS"]),
   host: z.string().min(1, "Mail server is required"),
-  port: z.string().min(1, "Port is required"),
+  port: z.string().optional(),
   username: z.string().min(1, "Username is required"),
   password: z.string().min(1, "Password is required"),
   useSSL: z.boolean(),
+}).refine((data) => {
+  // Port is required for IMAP but optional for EWS
+  if (data.protocol === 'IMAP' && (!data.port || data.port.length === 0)) {
+    return false;
+  }
+  return true;
+}, {
+  message: "Port is required for IMAP connections",
+  path: ["port"]
 });
 
 type AccountFormData = z.infer<typeof accountFormSchema>;
