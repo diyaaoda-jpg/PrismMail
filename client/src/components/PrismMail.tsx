@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { BookOpen, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -14,6 +14,9 @@ import { ComposeDialog } from "./ComposeDialog";
 import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { cn } from "@/lib/utils";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface PrismMailProps {
   user?: {
@@ -98,12 +101,19 @@ const mockUnreadCounts = {
   starred: 2
 };
 
+interface AccountConnection {
+  id: string;
+  name: string;
+  protocol: 'IMAP' | 'EWS';
+  isActive: boolean;
+}
+
 export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [selectedFolder, setSelectedFolder] = useState('inbox');
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
-  const [emails, setEmails] = useState<EmailMessage[]>(mockEmails);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const { toast } = useToast();
   
   // Dialog states
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -111,8 +121,69 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [composeReplyTo, setComposeReplyTo] = useState<{to: string; subject: string; body?: string} | undefined>();
 
+  // Fetch user's accounts
+  const { data: accounts = [], isLoading: accountsLoading } = useQuery<AccountConnection[]>({
+    queryKey: ['/api/accounts']
+  });
+
+  // Get the first active account (primary account)
+  const primaryAccount = accounts.find(account => account.isActive);
+
+  // Fetch emails for the primary account
+  const { data: emails = [], isLoading: emailsLoading, refetch: refetchEmails } = useQuery<EmailMessage[]>({
+    queryKey: ['/api/mail', primaryAccount?.id, selectedFolder],
+    enabled: !!primaryAccount,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  // Auto-sync emails when account becomes available
+  const syncMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const response = await fetch(`/api/accounts/${accountId}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folder: 'INBOX', limit: 50 })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Sync failed: ${response.statusText}`);
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Email sync completed",
+        description: "Your emails have been synchronized successfully."
+      });
+      // Refresh the email list
+      refetchEmails();
+    },
+    onError: (error: any) => {
+      console.error('Email sync failed:', error);
+      toast({
+        title: "Email sync failed", 
+        description: error.message || "Failed to synchronize emails",
+        variant: "destructive"
+      });
+    }
+  });
+
+  // Auto-sync when a new account becomes active
+  useEffect(() => {
+    if (primaryAccount && !syncMutation.isPending && emails.length === 0) {
+      console.log('Auto-syncing emails for account:', primaryAccount.name);
+      syncMutation.mutate(primaryAccount.id);
+    }
+  }, [primaryAccount, emails.length, syncMutation]);
+
+  // Fallback to mock data if no real account or emails available
+  const displayEmails = emails.length > 0 ? emails : mockEmails;
+
   // Filter emails based on selected folder and search
-  const filteredEmails = emails.filter(email => {
+  const filteredEmails = displayEmails.filter(email => {
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -142,26 +213,83 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   const handleEmailSelect = useCallback((email: EmailMessage) => {
     setSelectedEmail(email);
-    // Mark as read when selected - todo: remove mock functionality
-    setEmails(prev => prev.map(e => 
-      e.id === email.id ? { ...e, isRead: true } : e
-    ));
+    
+    // Mark as read when selected (only for real emails)
+    if (!email.isRead && primaryAccount && emails.length > 0) {
+      handleToggleRead(email.id);
+    }
     console.log('Selected email:', email.subject);
-  }, []);
+  }, [primaryAccount, emails.length]);
 
-  const handleToggleRead = useCallback((emailId: string) => {
-    setEmails(prev => prev.map(email => 
-      email.id === emailId ? { ...email, isRead: !email.isRead } : email
-    ));
+  const handleToggleRead = useCallback(async (emailId: string) => {
+    if (!primaryAccount) return;
+    
+    // Update optimistically in UI
+    queryClient.setQueryData(['/api/mail', primaryAccount.id, selectedFolder], (oldData: EmailMessage[] | undefined) => {
+      if (!oldData) return [];
+      return oldData.map(email => 
+        email.id === emailId ? { ...email, isRead: !email.isRead } : email
+      );
+    });
+    
+    try {
+      // Update on server (only for real emails)
+      const currentEmail = emails.find(e => e.id === emailId);
+      if (currentEmail && emails.length > 0) {
+        const response = await fetch(`/api/mail/${emailId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ isRead: !currentEmail.isRead })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to update read status');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update read status:', error);
+      // Revert optimistic update on error
+      refetchEmails();
+    }
     console.log('Toggled read status for email:', emailId);
-  }, []);
+  }, [primaryAccount, selectedFolder, emails, refetchEmails]);
 
-  const handleToggleFlagged = useCallback((emailId: string) => {
-    setEmails(prev => prev.map(email => 
-      email.id === emailId ? { ...email, isFlagged: !email.isFlagged } : email
-    ));
+  const handleToggleFlagged = useCallback(async (emailId: string) => {
+    if (!primaryAccount) return;
+    
+    // Update optimistically in UI  
+    queryClient.setQueryData(['/api/mail', primaryAccount.id, selectedFolder], (oldData: EmailMessage[] | undefined) => {
+      if (!oldData) return [];
+      return oldData.map(email => 
+        email.id === emailId ? { ...email, isFlagged: !email.isFlagged } : email
+      );
+    });
+    
+    try {
+      // Update on server (only for real emails)
+      const currentEmail = emails.find(e => e.id === emailId);
+      if (currentEmail && emails.length > 0) {
+        const response = await fetch(`/api/mail/${emailId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ isFlagged: !currentEmail.isFlagged })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to update flagged status');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update flagged status:', error);
+      // Revert optimistic update on error
+      refetchEmails();
+    }
     console.log('Toggled flagged status for email:', emailId);
-  }, []);
+  }, [primaryAccount, selectedFolder, emails, refetchEmails]);
 
   const handleOpenReadingMode = () => {
     if (selectedEmail) {
@@ -256,25 +384,79 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [emails, handleEmailSelect]);
 
-  const handleArchive = useCallback((email: EmailMessage) => {
-    // todo: remove mock functionality
-    setEmails(prev => prev.filter(e => e.id !== email.id));
+  const handleArchive = useCallback(async (email: EmailMessage) => {
+    if (!primaryAccount) return;
+    
     // Clear selection if we archived the currently selected email
     if (selectedEmail?.id === email.id) {
       setSelectedEmail(null);
     }
+    
+    try {
+      // Move to archive folder (only for real emails)
+      if (emails.length > 0) {
+        const response = await fetch(`/api/mail/${email.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ folder: 'ARCHIVE' })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to archive email');
+        }
+      }
+      
+      // Refresh the email list to remove archived email from current view
+      refetchEmails();
+    } catch (error) {
+      console.error('Failed to archive email:', error);
+      toast({
+        title: "Archive failed",
+        description: "Failed to archive the email",
+        variant: "destructive"
+      });
+    }
     console.log('Archived:', email.subject);
-  }, [selectedEmail]);
+  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
 
-  const handleDelete = useCallback((email: EmailMessage) => {
-    // todo: remove mock functionality
-    setEmails(prev => prev.filter(e => e.id !== email.id));
+  const handleDelete = useCallback(async (email: EmailMessage) => {
+    if (!primaryAccount) return;
+    
     // If we deleted the selected email, clear selection
     if (selectedEmail?.id === email.id) {
       setSelectedEmail(null);
     }
+    
+    try {
+      // Move to trash folder (only for real emails)
+      if (emails.length > 0) {
+        const response = await fetch(`/api/mail/${email.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ folder: 'TRASH' })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to delete email');
+        }
+      }
+      
+      // Refresh the email list to remove deleted email from current view
+      refetchEmails();
+    } catch (error) {
+      console.error('Failed to delete email:', error);
+      toast({
+        title: "Delete failed",
+        description: "Failed to delete the email",
+        variant: "destructive"
+      });
+    }
     console.log('Deleted:', email.subject);
-  }, [selectedEmail]);
+  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
 
   const getUserDisplayName = () => {
     if (user?.firstName || user?.lastName) {
