@@ -35,6 +35,7 @@ export interface IStorage {
   // Account connections
   getUserAccountConnections(userId: string): Promise<AccountConnection[]>;
   getAllActiveEwsAccounts(): Promise<AccountConnection[]>;
+  getAllActiveImapAccounts(): Promise<AccountConnection[]>;
   createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection>;
   getAccountConnectionEncrypted(id: string): Promise<{ settingsJson: string } | undefined>;
   updateAccountConnection(id: string, updates: Partial<AccountConnection>): Promise<AccountConnection | undefined>;
@@ -102,6 +103,18 @@ export class DatabaseStorage implements IStorage {
     const accounts = await db.select().from(accountConnections).where(
       and(
         eq(accountConnections.protocol, 'EWS'),
+        eq(accountConnections.isActive, true)
+      )
+    );
+    
+    // Return with encrypted settings for internal use (don't decrypt for security)
+    return accounts;
+  }
+
+  async getAllActiveImapAccounts(): Promise<AccountConnection[]> {
+    const accounts = await db.select().from(accountConnections).where(
+      and(
+        eq(accountConnections.protocol, 'IMAP'),
         eq(accountConnections.isActive, true)
       )
     );

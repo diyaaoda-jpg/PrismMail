@@ -7,6 +7,7 @@ import { testConnection } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
 import { discoverEwsFolders } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
+import { getImapIdleService } from "./imapIdle";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
@@ -237,6 +238,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.error(`Failed to start push subscription for account ${account.id}:`, error);
             }
           }
+          
+          // If IMAP account and successfully connected, start IDLE connection
+          if (result.success && protocol === 'IMAP') {
+            try {
+              const idleService = getImapIdleService(storage);
+              const idleResult = await idleService.startIdleConnection(account.id, 'INBOX');
+              console.log(`IDLE connection result for account ${account.id}:`, idleResult);
+            } catch (error) {
+              console.error(`Failed to start IDLE connection for account ${account.id}:`, error);
+            }
+          }
         })
         .catch(async (error) => {
           console.error('Background connection test failed:', error);
@@ -254,6 +266,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
               await pushService.stopSubscription(account.id);
             } catch (error) {
               console.error(`Failed to stop push subscription for failed account ${account.id}:`, error);
+            }
+          }
+          
+          // Stop IDLE connection for failed IMAP accounts
+          if (protocol === 'IMAP') {
+            try {
+              const idleService = getImapIdleService(storage);
+              await idleService.stopIdleConnection(account.id);
+            } catch (error) {
+              console.error(`Failed to stop IDLE connection for failed account ${account.id}:`, error);
             }
           }
         });
@@ -385,6 +407,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Restart IDLE connection for updated IMAP accounts
+      if (protocol === 'IMAP') {
+        try {
+          const idleService = getImapIdleService(storage);
+          // Stop existing IDLE connection if any
+          await idleService.stopIdleConnection(id);
+          // Start new IDLE connection with updated settings
+          const idleResult = await idleService.startIdleConnection(id, 'INBOX');
+          console.log(`IDLE connection restarted for updated account ${id}:`, idleResult);
+        } catch (error) {
+          console.error(`Failed to restart IDLE connection for updated account ${id}:`, error);
+        }
+      }
+      
       res.json(updatedAccount);
       
     } catch (error: any) {
@@ -419,6 +455,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`Push subscription stopped for deleted account ${id}`);
         } catch (error) {
           console.error(`Failed to stop push subscription for deleted account ${id}:`, error);
+        }
+      }
+      
+      // Stop IDLE connection before deleting IMAP account
+      if (accountToDelete.protocol === 'IMAP') {
+        try {
+          const idleService = getImapIdleService(storage);
+          await idleService.stopIdleConnection(id);
+          console.log(`IDLE connection stopped for deleted account ${id}`);
+        } catch (error) {
+          console.error(`Failed to stop IDLE connection for deleted account ${id}:`, error);
         }
       }
       

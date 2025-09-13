@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { initializeEwsPushNotifications } from "./ewsPushNotifications";
+import { initializeImapIdleService } from "./imapIdle";
 import { storage } from "./storage";
 
 const app = express();
@@ -47,6 +48,14 @@ app.use((req, res, next) => {
     log('EWS push notification service initialized');
   } catch (error) {
     console.error('Failed to initialize EWS push notifications:', error);
+  }
+
+  // Initialize IMAP IDLE service
+  try {
+    await initializeImapIdleService(storage);
+    log('IMAP IDLE service initialized');
+  } catch (error) {
+    console.error('Failed to initialize IMAP IDLE service:', error);
   }
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
