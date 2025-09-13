@@ -714,7 +714,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!account.isActive) {
-        return res.status(400).json({ message: 'Account is not active' });
+        console.error(`Sync failed for account ${accountId}: Account is not active. Account status:`, {
+          id: account.id,
+          name: account.name,
+          protocol: account.protocol,
+          isActive: account.isActive,
+          lastError: account.lastError
+        });
+        return res.status(400).json({ 
+          message: 'Account is not active',
+          accountStatus: {
+            id: account.id,
+            name: account.name,
+            isActive: account.isActive,
+            lastError: account.lastError
+          }
+        });
       }
       
       // Get encrypted account settings
@@ -1168,6 +1183,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         error: error.message || "Failed to send email"
       });
+    }
+  });
+
+  // DEBUG: Manual folder discovery endpoint for testing
+  app.post('/api/accounts/:accountId/discover-folders', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      
+      console.log(`Manual folder discovery requested for account ${accountId}`);
+      
+      // Get encrypted account settings
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        return res.status(404).json({ message: 'Account settings not found' });
+      }
+      
+      // Import folder discovery function
+      const { discoverEwsFolders } = await import('./ewsSync');
+      
+      // Run folder discovery
+      const result = await discoverEwsFolders(accountId, encryptedAccount.settingsJson, storage);
+      
+      console.log(`Folder discovery result for account ${accountId}:`, result);
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error in manual folder discovery:", error);
+      res.status(500).json({ message: error.message || "Failed to discover folders" });
     }
   });
 

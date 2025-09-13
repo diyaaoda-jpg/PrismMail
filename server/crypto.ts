@@ -88,16 +88,10 @@ export function decrypt(data: EncryptedData): string {
 
 /**
  * Encrypts email account settings for secure storage
- * @param settings - The account settings object
+ * @param settings - The account settings object (IMAP or EWS format)
  * @returns Encrypted settings as JSON string
  */
-export function encryptAccountSettings(settings: {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  useSSL: boolean;
-}): string {
+export function encryptAccountSettings(settings: any): string {
   const plaintext = JSON.stringify(settings);
   const encrypted = encrypt(plaintext);
   return JSON.stringify(encrypted);
@@ -108,12 +102,7 @@ export function encryptAccountSettings(settings: {
  * @param encryptedJson - The encrypted settings JSON string
  * @returns The decrypted settings object (WITHOUT the password for security)
  */
-export function decryptAccountSettings(encryptedJson: string): {
-  host: string;
-  port: number;
-  username: string;
-  useSSL: boolean;
-} {
+export function decryptAccountSettings(encryptedJson: string): any {
   try {
     const encryptedData: EncryptedData = JSON.parse(encryptedJson);
     const decryptedJson = decrypt(encryptedData);
@@ -133,13 +122,7 @@ export function decryptAccountSettings(encryptedJson: string): {
  * @param encryptedJson - The encrypted settings JSON string
  * @returns The full decrypted settings object including password
  */
-export function decryptAccountSettingsWithPassword(encryptedJson: string): {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  useSSL: boolean;
-} {
+export function decryptAccountSettingsWithPassword(encryptedJson: string): any {
   try {
     const encryptedData: EncryptedData = JSON.parse(encryptedJson);
     const decryptedJson = decrypt(encryptedData);

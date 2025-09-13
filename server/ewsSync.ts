@@ -92,7 +92,14 @@ export async function discoverEwsFolders(
 ): Promise<{ success: boolean; folderCount: number; error?: string }> {
   try {
     // Get encrypted account settings
+    console.log('EWS folder discovery: Raw encrypted settings length:', settingsJson?.length || 0);
+    console.log('EWS folder discovery: Raw encrypted settings preview:', settingsJson?.substring(0, 100) || 'empty');
     const settings = decryptAccountSettingsWithPassword(settingsJson);
+    console.log('EWS folder discovery: Decrypted settings:', {
+      host: settings?.host || 'undefined',
+      username: settings?.username || 'undefined', 
+      hasPassword: !!(settings?.password)
+    });
     
     // Dynamic import to avoid require() issues
     const ewsApi = await import('ews-javascript-api');
@@ -200,7 +207,14 @@ export async function syncEwsEmails(
     }
 
     // Decrypt account settings
+    console.log('EWS sync: Raw encrypted settings length:', accountData.settingsJson?.length || 0);
+    console.log('EWS sync: Raw encrypted settings preview:', accountData.settingsJson?.substring(0, 100) || 'empty');
     const settings = decryptAccountSettingsWithPassword(accountData.settingsJson);
+    console.log('EWS sync: Decrypted settings:', {
+      host: settings?.host || 'undefined',
+      username: settings?.username || 'undefined',
+      hasPassword: !!(settings?.password)
+    });
     
     // Dynamic import to avoid require() issues
     const ewsApi = await import('ews-javascript-api');
