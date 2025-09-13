@@ -422,8 +422,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           console.log(`Discovering EWS folders for updated account ${id}`);
           
-          // First, discover and sync folders to database with updated settings
-          const folderDiscoveryResult = await discoverEwsFolders(id, settingsJson, storage);
+          // Get encrypted account settings for folder discovery
+          const encryptedAccount = await storage.getAccountConnectionEncrypted(id);
+          if (!encryptedAccount) {
+            throw new Error('Failed to retrieve encrypted account settings for folder discovery');
+          }
+          
+          // First, discover and sync folders to database with encrypted settings
+          const folderDiscoveryResult = await discoverEwsFolders(id, encryptedAccount.settingsJson, storage);
           
           if (folderDiscoveryResult.success) {
             console.log(`Folder discovery successful for updated account ${id}: ${folderDiscoveryResult.folderCount} folders discovered`);
