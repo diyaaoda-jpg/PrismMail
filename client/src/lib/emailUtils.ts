@@ -17,8 +17,20 @@ export interface ReplyOptions {
  * Example: "On Wed, Jan 10, 2025 at 2:30 PM, john@example.com wrote:"
  */
 function formatAttribution(email: EmailMessage): string {
-  // Ensure we have a Date object
-  const date = email.date instanceof Date ? email.date : new Date(email.date);
+  // Ensure we have a valid Date object
+  let date: Date;
+  if (email.date instanceof Date) {
+    date = email.date;
+  } else if (typeof email.date === 'string' || typeof email.date === 'number') {
+    date = new Date(email.date);
+  } else {
+    date = new Date(); // fallback to current date
+  }
+  
+  // Validate the date is valid
+  if (isNaN(date.getTime())) {
+    date = new Date(); // fallback to current date if invalid
+  }
   
   const dateStr = date.toLocaleDateString('en-US', {
     weekday: 'short',
@@ -165,10 +177,25 @@ export function makeForward(email: EmailMessage): ReplyOptions {
     ? email.subject 
     : `Fwd: ${email.subject}`;
 
+  // Ensure we have a valid Date object for formatting
+  let date: Date;
+  if (email.date instanceof Date) {
+    date = email.date;
+  } else if (typeof email.date === 'string' || typeof email.date === 'number') {
+    date = new Date(email.date);
+  } else {
+    date = new Date(); // fallback to current date
+  }
+  
+  // Validate the date is valid
+  if (isNaN(date.getTime())) {
+    date = new Date(); // fallback to current date if invalid
+  }
+
   const forwardHeader = [
     '---------- Forwarded message ---------',
     `From: ${email.from}`,
-    `Date: ${email.date.toLocaleString()}`,
+    `Date: ${date.toLocaleString()}`,
     `Subject: ${email.subject}`,
     `To: ${extractEmail(email.from)}`, // In real implementation, this would be the original recipients
     ''
