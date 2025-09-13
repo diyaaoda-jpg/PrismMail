@@ -49,7 +49,7 @@ async function extractMessageContent(
         if (part.type === 'text' && part.subtype === 'plain') {
           try {
             const content = await client.download(uid, part.part, { uid: true });
-            bodyText = content.toString('utf8').substring(0, 10000);
+            bodyText = content.toString().substring(0, 10000);
             break;
           } catch (e) {
             console.log('Could not fetch text/plain part:', e);
@@ -62,7 +62,7 @@ async function extractMessageContent(
         if (part.type === 'text' && part.subtype === 'html') {
           try {
             const content = await client.download(uid, part.part, { uid: true });
-            bodyHtml = content.toString('utf8').substring(0, 20000);
+            bodyHtml = content.toString().substring(0, 20000);
             break;
           } catch (e) {
             console.log('Could not fetch text/html part:', e);
@@ -74,7 +74,7 @@ async function extractMessageContent(
       if (bodyStructure.type === 'text') {
         try {
           const content = await client.download(uid, '1', { uid: true });
-          const contentStr = content.toString('utf8');
+          const contentStr = content.toString();
           
           if (bodyStructure.subtype === 'html') {
             bodyHtml = contentStr.substring(0, 20000);

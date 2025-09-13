@@ -126,7 +126,7 @@ export function EmailListItem({
             className="text-xs text-muted-foreground shrink-0"
             data-testid={`text-date-${email.id}`}
           >
-            {email.date.toLocaleDateString()}
+            {email.date instanceof Date ? email.date.toLocaleDateString() : new Date(email.date).toLocaleDateString()}
           </span>
         </div>
         

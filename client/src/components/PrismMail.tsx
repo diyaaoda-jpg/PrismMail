@@ -126,6 +126,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     queryKey: ['/api/accounts']
   });
 
+  // Fetch user preferences for auto-sync settings
+  const { data: userPrefs } = useQuery<UserPrefs>({
+    queryKey: ['/api/preferences']
+  });
+
   // Get the first active account (primary account)
   const primaryAccount = accounts.find(account => account.isActive);
 
@@ -178,6 +183,29 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       syncMutation.mutate(primaryAccount.id);
     }
   }, [primaryAccount?.id]); // Only depend on account ID, not the mutation or emails.length
+
+  // Auto-sync scheduling based on user preferences
+  useEffect(() => {
+    if (!userPrefs?.autoSync || !primaryAccount) {
+      return; // No auto-sync if disabled or no primary account
+    }
+
+    const syncInterval = (userPrefs.syncInterval || 600) * 1000; // Convert seconds to milliseconds
+    console.log(`Setting up auto-sync every ${userPrefs.syncInterval || 600} seconds`);
+
+    const intervalId = setInterval(() => {
+      if (primaryAccount?.id) {
+        console.log('Auto-sync triggered for account:', primaryAccount.name);
+        syncMutation.mutate(primaryAccount.id);
+      }
+    }, syncInterval);
+
+    // Cleanup interval on unmount or when dependencies change
+    return () => {
+      console.log('Cleaning up auto-sync interval');
+      clearInterval(intervalId);
+    };
+  }, [userPrefs?.autoSync, userPrefs?.syncInterval, primaryAccount?.id]);
 
   // Fallback to mock data if no real account or emails available
   const displayEmails = emails.length > 0 ? emails : mockEmails;

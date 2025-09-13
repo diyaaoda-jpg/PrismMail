@@ -33,7 +33,7 @@ import { X, Save, Mail, User, Shield, Palette } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAccountConnectionSchema, type AccountConnection } from "@shared/schema";
+import { insertAccountConnectionSchema, type AccountConnection, type UserPrefs } from "@shared/schema";
 import { z } from "zod";
 
 interface SettingsDialogProps {
@@ -69,6 +69,62 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
   const [syncingAccounts, setSyncingAccounts] = useState<Set<string>>(new Set());
+
+  // Manual sync mutation
+  const manualSyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/sync/all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Sync failed: ${response.statusText}`);
+      }
+      
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Manual sync completed",
+        description: `Successfully synced ${data.accountsProcessed} accounts`
+      });
+      // Invalidate all mail queries to refresh the data
+      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
+    },
+    onError: (error: any) => {
+      console.error('Manual sync failed:', error);
+      toast({
+        title: "Manual sync failed", 
+        description: error.message || "Failed to synchronize emails",
+        variant: "destructive"
+      });
+    }
+  });
+
+  // Save preferences mutation
+  const savePreferencesMutation = useMutation({
+    mutationFn: async (prefs: Partial<UserPrefs>) => {
+      return await apiRequest('POST', '/api/preferences', prefs);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Settings saved",
+        description: "Your preferences have been updated successfully."
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/preferences'] });
+    },
+    onError: (error: any) => {
+      console.error('Save preferences failed:', error);
+      toast({
+        title: "Save failed", 
+        description: error.message || "Failed to save settings",
+        variant: "destructive"
+      });
+    }
+  });
   
   // Account form setup with validation
   const accountForm = useForm<AccountFormData>({
@@ -87,6 +143,12 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   // Watch protocol changes to adjust form defaults
   const watchedProtocol = accountForm.watch("protocol");
   
+  // Fetch user preferences from API first
+  const { data: userPrefs, isLoading: prefsLoading } = useQuery<UserPrefs>({ 
+    queryKey: ['/api/preferences'],
+    enabled: isOpen
+  });
+  
   // Update form defaults when protocol changes
   useEffect(() => {
     if (watchedProtocol === 'IMAP') {
@@ -98,7 +160,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       accountForm.setValue('useSSL', true);
     }
   }, [watchedProtocol, accountForm]);
-  
+
   // Account settings
   const [accountData, setAccountData] = useState({
     firstName: user.firstName || "",
@@ -107,7 +169,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     signature: "Best regards,\n" + (user.firstName || "User")
   });
 
-  // Email preferences
+  // Email preferences for form handling
   const [emailPrefs, setEmailPrefs] = useState({
     autoMarkRead: true,
     showPreview: true,
@@ -117,6 +179,17 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     autoSync: true,
     syncInterval: "600" // 10 minutes in seconds
   });
+
+  // Update email preferences when userPrefs changes
+  useEffect(() => {
+    if (userPrefs) {
+      setEmailPrefs(prev => ({
+        ...prev,
+        autoSync: userPrefs.autoSync ?? true,
+        syncInterval: userPrefs.syncInterval?.toString() ?? "600"
+      }));
+    }
+  }, [userPrefs]);
 
   // Notification settings
   const [notifications, setNotifications] = useState({
@@ -783,7 +856,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                         </div>
                         <Switch
                           checked={emailPrefs.autoSync}
-                          onCheckedChange={(checked) => setEmailPrefs({ ...emailPrefs, autoSync: checked })}
+                          onCheckedChange={(checked) => {
+                            const newPrefs = { ...emailPrefs, autoSync: checked };
+                            setEmailPrefs(newPrefs);
+                            savePreferencesMutation.mutate({ 
+                              autoSync: checked 
+                            });
+                          }}
                           data-testid="switch-auto-sync"
                         />
                       </div>
@@ -791,7 +870,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                       {emailPrefs.autoSync && (
                         <div className="flex items-center justify-between">
                           <Label>Sync interval</Label>
-                          <Select value={emailPrefs.syncInterval} onValueChange={(value) => setEmailPrefs({ ...emailPrefs, syncInterval: value })}>
+                          <Select value={emailPrefs.syncInterval} onValueChange={(value) => {
+                            const newPrefs = { ...emailPrefs, syncInterval: value };
+                            setEmailPrefs(newPrefs);
+                            savePreferencesMutation.mutate({ 
+                              syncInterval: parseInt(value) 
+                            });
+                          }}>
                             <SelectTrigger className="w-48" data-testid="select-sync-interval">
                               <SelectValue />
                             </SelectTrigger>
@@ -809,18 +894,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                       <div className="pt-2">
                         <Button
                           variant="outline"
-                          onClick={() => {
-                            // Manual sync functionality - will implement this next
-                            toast({
-                              title: "Manual sync",
-                              description: "Sync functionality will be implemented next"
-                            });
-                          }}
+                          onClick={() => manualSyncMutation.mutate()}
+                          disabled={manualSyncMutation.isPending}
                           data-testid="button-manual-sync"
                           className="w-full"
                         >
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Sync Now
+                          <RefreshCw className={`h-4 w-4 mr-2 ${manualSyncMutation.isPending ? 'animate-spin' : ''}`} />
+                          {manualSyncMutation.isPending ? 'Syncing...' : 'Sync Now'}
                         </Button>
                       </div>
                     </CardContent>
