@@ -85,6 +85,14 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
  */
 // Normalize EWS URL to canonical Exchange endpoint format
 function normalizeEwsUrl(hostUrl: string): string {
+  // Validate input
+  if (!hostUrl || typeof hostUrl !== 'string' || hostUrl.trim().length === 0) {
+    throw new Error('EWS server name cannot be empty. Please enter a valid server name like "mail.example.com"');
+  }
+  
+  // Clean the input
+  hostUrl = hostUrl.trim();
+  
   let url: URL;
   try {
     // If no scheme, prepend https://
@@ -92,8 +100,9 @@ function normalizeEwsUrl(hostUrl: string): string {
       hostUrl = 'https://' + hostUrl;
     }
     url = new URL(hostUrl);
-  } catch {
-    throw new Error('Invalid EWS server name format');
+  } catch (parseError) {
+    console.error('EWS URL parsing failed for input:', hostUrl, 'Error:', parseError);
+    throw new Error(`Invalid EWS server name format: "${hostUrl}". Please enter a valid server name like "mail.example.com"`);
   }
   
   // Always use the canonical Exchange EWS endpoint (force HTTPS)
@@ -113,7 +122,14 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
       settings = decryptAccountSettingsWithPassword(settingsJson);
     }
 
+    console.log('EWS connection test with settings:', { 
+      host: settings.host, 
+      username: settings.username, 
+      hasPassword: !!settings.password 
+    });
+
     const ewsUrl = normalizeEwsUrl(settings.host);
+    console.log('Normalized EWS URL:', ewsUrl);
     
     // Preflight check: Test EWS endpoint and check auth methods
     try {

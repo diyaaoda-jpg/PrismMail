@@ -245,8 +245,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     };
   }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts]);
 
-  // Fallback to mock data if no real account or emails available
-  const displayEmails = emails.length > 0 ? emails : mockEmails;
+  // Show real emails only - no mock data fallback
+  const displayEmails = emails;
 
   // Filter emails based on selected folder and search
   const filteredEmails = displayEmails.filter(email => {
