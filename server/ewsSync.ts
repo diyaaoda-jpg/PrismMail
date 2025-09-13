@@ -3,6 +3,7 @@ import { decryptAccountSettingsWithPassword } from './crypto';
 import { InsertAccountFolder } from '../shared/schema';
 
 export interface EwsSyncResult {
+  success: boolean;
   messageCount: number;
   error?: string;
 }
@@ -336,7 +337,7 @@ export async function syncEwsEmails(
         // Don't fail the sync if folder count update fails
       }
       
-      return { messageCount };
+      return { success: true, messageCount };
 
     } finally {
       // EWS connection doesn't need explicit cleanup like IMAP
@@ -358,6 +359,7 @@ export async function syncEwsEmails(
     }
     
     return {
+      success: false,
       messageCount: 0,
       error: error.message || 'EWS synchronization failed'
     };

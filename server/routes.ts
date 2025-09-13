@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
 import { testConnection } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
 import { discoverEwsFolders } from "./ewsSync";
@@ -228,14 +228,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
             lastError: result.error || null,
           });
           
-          // If EWS account and successfully connected, start push notifications
+          // If EWS account and successfully connected, discover folders first, then start push notifications
           if (result.success && protocol === 'EWS') {
             try {
-              const pushService = getEwsPushService(storage);
-              const subscriptionResult = await pushService.startSubscription(account.id);
-              console.log(`Push subscription result for account ${account.id}:`, subscriptionResult);
+              console.log(`Discovering EWS folders for new account ${account.id}`);
+              
+              // First, discover and sync folders to database
+              const folderDiscoveryResult = await discoverEwsFolders(account.id, encryptedAccount.settingsJson, storage);
+              
+              if (folderDiscoveryResult.success) {
+                console.log(`Folder discovery successful for account ${account.id}: ${folderDiscoveryResult.folderCount} folders discovered`);
+                
+                // Only start push notifications after successful folder discovery
+                const pushService = getEwsPushService(storage);
+                const subscriptionResult = await pushService.startSubscription(account.id);
+                console.log(`Push subscription result for account ${account.id}:`, subscriptionResult);
+              } else {
+                console.error(`Folder discovery failed for account ${account.id}: ${folderDiscoveryResult.error}`);
+                // Update account with folder discovery error but keep it active
+                await storage.updateAccountConnection(account.id, {
+                  lastError: `Folder discovery failed: ${folderDiscoveryResult.error}`
+                });
+              }
             } catch (error) {
-              console.error(`Failed to start push subscription for account ${account.id}:`, error);
+              console.error(`Failed to setup EWS account ${account.id}:`, error);
+              // Update account with setup error
+              await storage.updateAccountConnection(account.id, {
+                lastError: `EWS setup failed: ${(error as Error).message}`
+              });
             }
           }
           
@@ -1016,7 +1036,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Decrypt settings to get SMTP configuration
-      const settings = decryptAccountSettingsWithPassword(encryptedAccount.settingsJson);
+      const settings = decryptAccountSettingsWithPassword(encryptedAccount.settingsJson) as ImapSettings;
       
       if (!settings.smtp) {
         return res.status(500).json({
@@ -1026,7 +1046,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create nodemailer transporter with SMTP settings
-      const transporter = nodemailer.createTransporter({
+      const transporter = nodemailer.createTransport({
         host: settings.smtp.host,
         port: settings.smtp.port,
         secure: settings.smtp.secure,
@@ -1034,8 +1054,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           user: settings.smtp.username,
           pass: settings.smtp.password
         },
-        timeout: 30000,
-        connectionTimeout: 30000
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 30000
       });
 
       // Verify SMTP connection
