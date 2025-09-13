@@ -83,6 +83,23 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
  * @param settingsJson - Settings JSON (plain text for testing, encrypted for saved accounts)
  * @returns Connection test result
  */
+// Normalize EWS URL to canonical Exchange endpoint format
+function normalizeEwsUrl(hostUrl: string): string {
+  let url: URL;
+  try {
+    // If no scheme, prepend https://
+    if (!hostUrl.startsWith('http')) {
+      hostUrl = 'https://' + hostUrl;
+    }
+    url = new URL(hostUrl);
+  } catch {
+    throw new Error('Invalid EWS server name format');
+  }
+  
+  // Always use the canonical Exchange EWS endpoint (force HTTPS)
+  return url.origin + '/EWS/Exchange.asmx';
+}
+
 export async function testEwsConnection(settingsJson: string): Promise<ConnectionTestResult> {
   try {
     // For connection testing, the settingsJson is plain text
@@ -94,23 +111,6 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     } catch {
       // If that fails, try to decrypt (for saved accounts)
       settings = decryptAccountSettingsWithPassword(settingsJson);
-    }
-    
-    // Normalize EWS URL to canonical Exchange endpoint format
-    function normalizeEwsUrl(hostUrl: string): string {
-      let url: URL;
-      try {
-        // If no scheme, prepend https://
-        if (!hostUrl.startsWith('http')) {
-          hostUrl = 'https://' + hostUrl;
-        }
-        url = new URL(hostUrl);
-      } catch {
-        throw new Error('Invalid EWS server URL format');
-      }
-      
-      // Always use the canonical Exchange EWS endpoint
-      return url.origin + '/EWS/Exchange.asmx';
     }
 
     const ewsUrl = normalizeEwsUrl(settings.host);

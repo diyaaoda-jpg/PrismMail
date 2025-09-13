@@ -47,16 +47,30 @@ export async function syncEwsEmails(
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
     
-    // Set EWS URL
-    let ewsUrl = settings.host;
-    if (!ewsUrl.startsWith('http')) {
-      ewsUrl = (settings.useSSL ? 'https://' : 'http://') + ewsUrl;
-    }
-    if (!ewsUrl.includes('/EWS/')) {
-      ewsUrl = ewsUrl.endsWith('/') ? ewsUrl + 'EWS/Exchange.asmx' : ewsUrl + '/EWS/Exchange.asmx';
+    // Normalize EWS URL to canonical Exchange endpoint format
+    function normalizeEwsUrl(hostUrl: string): string {
+      let url: URL;
+      try {
+        // If no scheme, prepend https://
+        if (!hostUrl.startsWith('http')) {
+          hostUrl = 'https://' + hostUrl;
+        }
+        url = new URL(hostUrl);
+      } catch {
+        throw new Error('Invalid EWS server name format');
+      }
+      
+      // Always use the canonical Exchange EWS endpoint (force HTTPS)
+      return url.origin + '/EWS/Exchange.asmx';
     }
     
+    // Use canonical EWS URL normalization
+    const ewsUrl = normalizeEwsUrl(settings.host);
     service.Url = new Uri(ewsUrl);
+    
+    // Enable pre-authentication for better compatibility
+    service.PreAuthenticate = true;
+    service.UserAgent = 'PrismMail/1.0';
 
     try {
       // Get the inbox folder

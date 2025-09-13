@@ -619,17 +619,17 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                     name="host"
                                     render={({ field }) => (
                                       <FormItem>
-                                        <FormLabel>
-                                          {watchedProtocol === 'EWS' ? 'Exchange Server URL' : 'Mail Server'}
+                                        <FormLabel data-testid={watchedProtocol === 'EWS' ? 'label-server-name' : 'label-mail-server'}>
+                                          {watchedProtocol === 'EWS' ? 'Server Name' : 'Mail Server'}
                                         </FormLabel>
                                         <FormControl>
                                           <Input
                                             placeholder={
                                               watchedProtocol === 'EWS' 
-                                                ? "https://mail.example.com/ews" 
+                                                ? "mail.server.org" 
                                                 : "imap.gmail.com"
                                             }
-                                            data-testid="input-host"
+                                            data-testid={watchedProtocol === 'EWS' ? 'input-server-name' : 'input-host'}
                                             {...field}
                                           />
                                         </FormControl>
@@ -723,9 +723,9 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                               )}
                               
                               {watchedProtocol === 'EWS' && (
-                                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
-                                  <strong>Exchange Web Services (EWS)</strong> uses secure HTTPS connections by default. 
-                                  No additional port or SSL configuration required.
+                                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md" data-testid="text-ews-help">
+                                  <strong>Exchange Web Services (EWS)</strong> - Just enter your server name. 
+                                  We'll automatically use HTTPS and the correct EWS path (/EWS/Exchange.asmx).
                                 </div>
                               )}
                               
