@@ -19,7 +19,7 @@ import {
   type InsertUserPrefs,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { encryptAccountSettings, decryptAccountSettings } from "./crypto";
 
 // modify the interface with any CRUD methods
@@ -171,7 +171,9 @@ export class DatabaseStorage implements IStorage {
       whereCondition = and(eq(mailIndex.accountId, accountId), eq(mailIndex.folder, folder))!;
     }
     
-    return await db.select().from(mailIndex).where(whereCondition).limit(limit).offset(offset);
+    return await db.select().from(mailIndex).where(whereCondition)
+      .orderBy(sql`${mailIndex.date} DESC NULLS LAST`)
+      .limit(limit).offset(offset);
   }
 
   async createMailMessage(message: InsertMailMessage): Promise<MailMessage> {

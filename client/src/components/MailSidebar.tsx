@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap } from "lucide-react";
+import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 interface MailFolder {
@@ -17,10 +18,18 @@ interface MailFolder {
 
 interface MailSidebarProps {
   selectedFolder?: string;
+  selectedAccount?: string;
   onFolderSelect?: (folderId: string) => void;
+  onAccountSelect?: (accountId: string) => void;
   onCompose?: () => void;
   onSearch?: (query: string) => void;
   unreadCounts?: Record<string, number>;
+  accounts?: Array<{
+    id: string;
+    name: string;
+    protocol: 'IMAP' | 'EWS';
+    isActive: boolean;
+  }>;
 }
 
 const defaultFolders: MailFolder[] = [
@@ -39,12 +48,16 @@ const smartFolders: MailFolder[] = [
 
 export function MailSidebar({
   selectedFolder = 'inbox',
+  selectedAccount,
   onFolderSelect,
+  onAccountSelect,
   onCompose,
   onSearch,
   unreadCounts = {},
+  accounts = [],
 }: MailSidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [accountsExpanded, setAccountsExpanded] = useState(accounts.length > 1);
 
   const handleFolderClick = (folderId: string) => {
     onFolderSelect?.(folderId);
@@ -60,6 +73,40 @@ export function MailSidebar({
   const handleCompose = () => {
     onCompose?.();
     console.log('Compose clicked');
+  };
+
+  const handleAccountSelect = (accountId: string) => {
+    onAccountSelect?.(accountId);
+    console.log('Selected account:', accountId);
+  };
+
+  const renderAccount = (account: { id: string; name: string; protocol: 'IMAP' | 'EWS'; isActive: boolean }) => {
+    const isSelected = selectedAccount === account.id;
+
+    return (
+      <Button
+        key={account.id}
+        variant={isSelected ? "secondary" : "ghost"}
+        className={cn(
+          "w-full justify-start gap-3 mb-1 hover-elevate active-elevate-2",
+          isSelected && "bg-accent text-accent-foreground",
+          !account.isActive && "opacity-60"
+        )}
+        onClick={() => handleAccountSelect(account.id)}
+        data-testid={`button-account-${account.id}`}
+      >
+        <Mail className="h-4 w-4" />
+        <span className="flex-1 text-left truncate">{account.name}</span>
+        <Badge variant="outline" className="ml-auto text-xs">
+          {account.protocol}
+        </Badge>
+        {!account.isActive && (
+          <Badge variant="destructive" className="ml-1 text-xs">
+            Offline
+          </Badge>
+        )}
+      </Button>
+    );
   };
 
   const renderFolder = (folder: MailFolder) => {
@@ -141,6 +188,35 @@ export function MailSidebar({
           </div>
 
           <Separator className="my-4" />
+
+          {/* Accounts Section - only show if multiple accounts */}
+          {accounts.length > 1 && (
+            <>
+              <div className="mb-6">
+                <Collapsible open={accountsExpanded} onOpenChange={setAccountsExpanded}>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-1 mb-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hover-elevate active-elevate-2"
+                      data-testid="button-accounts-toggle"
+                    >
+                      {accountsExpanded ? (
+                        <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3" />
+                      )}
+                      Accounts ({accounts.length})
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-1">
+                    {accounts.map(renderAccount)}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+
+              <Separator className="my-4" />
+            </>
+          )}
 
           {/* Account Settings */}
           <div>

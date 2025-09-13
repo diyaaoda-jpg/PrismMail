@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
   user?: {
@@ -91,7 +92,7 @@ const mockEmails: EmailMessage[] = [
     snippet: 'We detected a login attempt from an unrecognized device. Please verify this was you or secure your account immediately.',
     folder: 'INBOX'
   }
-];
+].sort((a, b) => b.date.getTime() - a.date.getTime()); // Sort newest first
 
 const mockUnreadCounts = {
   inbox: 3,
@@ -110,6 +111,7 @@ interface AccountConnection {
 
 export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [selectedFolder, setSelectedFolder] = useState('inbox');
+  const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -131,8 +133,25 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     queryKey: ['/api/preferences']
   });
 
-  // Get the first active account (primary account)
-  const primaryAccount = accounts.find(account => account.isActive);
+  // Auto-select account on load with IMAP preference
+  useEffect(() => {
+    if (accounts.length > 0 && !selectedAccount) {
+      // Prefer IMAP accounts over EWS for auto-sync
+      const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
+                               accounts.find(account => account.isActive) ||
+                               accounts[0];
+      
+      if (preferredAccount) {
+        setSelectedAccount(preferredAccount.id);
+        console.log('Auto-selected account (IMAP preferred):', preferredAccount.name, preferredAccount.protocol);
+      }
+    }
+  }, [accounts, selectedAccount]);
+
+  // Get the selected account or fall back to first active account
+  const primaryAccount = accounts.find(account => account.id === selectedAccount) ||
+                         accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
+                         accounts.find(account => account.isActive);
 
   // Fetch emails for the primary account
   const { data: emails = [], isLoading: emailsLoading, refetch: refetchEmails } = useQuery<EmailMessage[]>({
@@ -179,25 +198,40 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   // Auto-sync when a new account becomes active (only once when account changes)
   useEffect(() => {
     if (primaryAccount && emails.length === 0) {
-      console.log('Auto-syncing emails for account:', primaryAccount.name);
+      console.log('Auto-syncing emails for account:', primaryAccount.name, `(${primaryAccount.protocol})`);
       syncMutation.mutate(primaryAccount.id);
     }
   }, [primaryAccount?.id]); // Only depend on account ID, not the mutation or emails.length
 
-  // Auto-sync scheduling based on user preferences
+  // Auto-sync scheduling based on user preferences - prefer IMAP accounts
   useEffect(() => {
-    if (!userPrefs?.autoSync || !primaryAccount) {
-      return; // No auto-sync if disabled or no primary account
+    if (!userPrefs?.autoSync) {
+      return; // No auto-sync if disabled
+    }
+
+    // Get all active accounts, prioritizing IMAP
+    const activeAccounts = accounts.filter(account => account.isActive);
+    const imapAccounts = activeAccounts.filter(account => account.protocol === 'IMAP');
+    const ewsAccounts = activeAccounts.filter(account => account.protocol === 'EWS');
+    
+    // Prioritize IMAP accounts for auto-sync
+    const accountsToSync = imapAccounts.length > 0 ? imapAccounts : ewsAccounts;
+    
+    if (accountsToSync.length === 0) {
+      return; // No active accounts to sync
     }
 
     const syncInterval = (userPrefs.syncInterval || 600) * 1000; // Convert seconds to milliseconds
-    console.log(`Setting up auto-sync every ${userPrefs.syncInterval || 600} seconds`);
+    console.log(`Setting up auto-sync every ${userPrefs.syncInterval || 600} seconds for ${accountsToSync.length} accounts (IMAP preferred)`);
 
     const intervalId = setInterval(() => {
-      if (primaryAccount?.id) {
-        console.log('Auto-sync triggered for account:', primaryAccount.name);
-        syncMutation.mutate(primaryAccount.id);
-      }
+      // Sync accounts in priority order (IMAP first)
+      accountsToSync.forEach((account, index) => {
+        setTimeout(() => {
+          console.log('Auto-sync triggered for account:', account.name, `(${account.protocol})`);
+          syncMutation.mutate(account.id);
+        }, index * 2000); // Stagger syncs by 2 seconds to avoid overwhelming the server
+      });
     }, syncInterval);
 
     // Cleanup interval on unmount or when dependencies change
@@ -205,7 +239,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       console.log('Cleaning up auto-sync interval');
       clearInterval(intervalId);
     };
-  }, [userPrefs?.autoSync, userPrefs?.syncInterval, primaryAccount?.id]);
+  }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts]);
 
   // Fallback to mock data if no real account or emails available
   const displayEmails = emails.length > 0 ? emails : mockEmails;
@@ -503,10 +537,13 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       {/* Sidebar */}
       <MailSidebar
         selectedFolder={selectedFolder}
+        selectedAccount={selectedAccount}
         onFolderSelect={setSelectedFolder}
+        onAccountSelect={setSelectedAccount}
         onCompose={handleCompose}
         onSearch={handleSearch}
         unreadCounts={mockUnreadCounts}
+        accounts={accounts}
       />
 
       {/* Main content area */}
