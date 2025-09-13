@@ -7,6 +7,25 @@ export interface EwsSyncResult {
 }
 
 /**
+ * Normalize EWS URL to canonical Exchange endpoint format
+ */
+function normalizeEwsUrl(hostUrl: string): string {
+  let url: URL;
+  try {
+    // If no scheme, prepend https://
+    if (!hostUrl.startsWith('http')) {
+      hostUrl = 'https://' + hostUrl;
+    }
+    url = new URL(hostUrl);
+  } catch {
+    throw new Error('Invalid EWS server name format');
+  }
+  
+  // Always use the canonical Exchange EWS endpoint (force HTTPS)
+  return url.origin + '/EWS/Exchange.asmx';
+}
+
+/**
  * Synchronize emails from Exchange Web Services
  * @param storage - Storage interface
  * @param accountId - Account ID to sync
@@ -40,29 +59,13 @@ export async function syncEwsEmails(
       WellKnownFolderName, 
       ItemView, 
       PropertySet, 
-      BasePropertySet 
+      BasePropertySet,
+      Folder
     } = ewsApi;
 
     // Create Exchange service
     const service = new ExchangeService(ExchangeVersion.Exchange2013);
     service.Credentials = new WebCredentials(settings.username, settings.password);
-    
-    // Normalize EWS URL to canonical Exchange endpoint format
-    function normalizeEwsUrl(hostUrl: string): string {
-      let url: URL;
-      try {
-        // If no scheme, prepend https://
-        if (!hostUrl.startsWith('http')) {
-          hostUrl = 'https://' + hostUrl;
-        }
-        url = new URL(hostUrl);
-      } catch {
-        throw new Error('Invalid EWS server name format');
-      }
-      
-      // Always use the canonical Exchange EWS endpoint (force HTTPS)
-      return url.origin + '/EWS/Exchange.asmx';
-    }
     
     // Use canonical EWS URL normalization
     const ewsUrl = normalizeEwsUrl(settings.host);
@@ -74,7 +77,7 @@ export async function syncEwsEmails(
 
     try {
       // Get the inbox folder
-      const inboxFolder = await service.GetFolder(WellKnownFolderName.Inbox);
+      const inboxFolder = await Folder.Bind(service, WellKnownFolderName.Inbox);
       
       // Create item view to limit results
       const itemView = new ItemView(limit);
@@ -112,14 +115,14 @@ export async function syncEwsEmails(
             sender: extractSenderFromEws(item),
             recipients: extractRecipientsFromEws(item),
             date: item.DateTimeReceived ? new Date(item.DateTimeReceived.toString()) : new Date(),
-            isRead: item.IsRead || false,
-            isImportant: item.Importance === 'High',
+            isRead: (item as any).IsRead || false,
+            isImportant: (item as any).Importance?.toString() === 'High',
             hasAttachments: item.HasAttachments || false,
             flags: extractFlagsFromEws(item),
-            priority: calculatePriority(item.Importance, item.Sender?.Name),
+            priority: calculatePriority((item as any).Importance, (item as any).From?.Name),
             snippet: item.Preview || extractSnippetFromBody(item.Body?.Text),
             bodyContent: item.Body?.Text || '',
-            bodyType: item.Body?.BodyType === 'HTML' ? 'html' : 'text'
+            bodyType: (item as any).Body?.BodyType?.toString() === 'HTML' ? 'html' : 'text'
           };
 
           // Save to database
@@ -189,14 +192,13 @@ async function messageExists(storage: IStorage, accountId: string, folder: strin
  * Extract sender information from EWS item
  */
 function extractSenderFromEws(item: any): string {
-  if (item.Sender?.Name && item.Sender?.Address) {
-    return `${item.Sender.Name} <${item.Sender.Address}>`;
-  } else if (item.Sender?.Address) {
-    return item.Sender.Address;
-  } else if (item.From?.Name && item.From?.Address) {
+  // EWS uses From property for sender information
+  if (item.From?.Name && item.From?.Address) {
     return `${item.From.Name} <${item.From.Address}>`;
   } else if (item.From?.Address) {
     return item.From.Address;
+  } else if (item.From?.Name) {
+    return item.From.Name;
   }
   return 'Unknown Sender';
 }
@@ -231,11 +233,11 @@ function extractFlagsFromEws(item: any): string[] {
     flags.push('Seen');
   }
   
-  if (item.IsFlagged) {
+  if (item.Flag?.FlagStatus === 'Flagged') {
     flags.push('Flagged');
   }
   
-  if (item.Importance === 'High') {
+  if (item.Importance?.toString() === 'High') {
     flags.push('Important');
   }
   
@@ -249,13 +251,14 @@ function extractFlagsFromEws(item: any): string[] {
 /**
  * Calculate email priority based on importance and sender
  */
-function calculatePriority(importance?: string, senderName?: string): number {
+function calculatePriority(importance?: any, senderName?: string): number {
   let priority = 0;
   
   // Base priority on importance
-  if (importance === 'High') {
+  const importanceStr = importance?.toString();
+  if (importanceStr === 'High') {
     priority = 2;
-  } else if (importance === 'Low') {
+  } else if (importanceStr === 'Low') {
     priority = 0;
   } else {
     priority = 1; // Normal importance
