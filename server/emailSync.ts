@@ -91,17 +91,17 @@ async function visitBodyStructure(
     for (const child of node.childNodes) {
       await visitBodyStructure(client, uid, child, result);
     }
-  } else if (node.type === 'text' && node.part) {
+  } else if (node.type && node.part) {
     // Text part - try to download content
     try {
       const { content } = await client.download(uid, node.part, { uid: true });
       const buffer = await streamToBuffer(content);
       const text = decodeBody(buffer, node.encoding, node.parameters?.charset);
       
-      if (node.subtype === 'plain' && !result.bodyText) {
+      if (node.type === 'text/plain' && !result.bodyText) {
         result.bodyText = text.substring(0, 10000);
         console.log(`Downloaded text/plain part ${node.part} for UID ${uid}: ${text.length} chars`);
-      } else if (node.subtype === 'html' && !result.bodyHtml) {
+      } else if (node.type === 'text/html' && !result.bodyHtml) {
         result.bodyHtml = text.substring(0, 20000);
         console.log(`Downloaded text/html part ${node.part} for UID ${uid}: ${text.length} chars`);
       }
