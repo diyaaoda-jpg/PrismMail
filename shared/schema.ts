@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, varchar, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -60,7 +60,10 @@ export const mailIndex = pgTable("mail_index", {
   bodyText: text("body_text"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => [
+  // Unique constraint to prevent duplicate messages
+  unique("unique_message_per_account_folder").on(table.accountId, table.folder, table.messageId),
+]);
 
 // Priority rules for auto-classification
 export const priorityRules = pgTable("priority_rules", {

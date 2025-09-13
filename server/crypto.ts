@@ -1,22 +1,30 @@
-import { randomBytes, createCipherGCM, createDecipherGCM } from "crypto";
+import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
 
 const ALGORITHM = "aes-256-gcm";
 
-// Generate or get encryption key from environment
+// Get encryption key from environment - required for security
 function getEncryptionKey(): Buffer {
   const keyFromEnv = process.env.ENCRYPTION_KEY;
   
-  if (keyFromEnv) {
-    return Buffer.from(keyFromEnv, "hex");
+  if (!keyFromEnv) {
+    const suggestionKey = randomBytes(32).toString("hex");
+    console.error("❌ ENCRYPTION_KEY environment variable is required!");
+    console.error("   Set this environment variable to secure your email credentials:");
+    console.error(`   export ENCRYPTION_KEY=${suggestionKey}`);
+    console.error("   Without this key, the application cannot securely store passwords.");
+    throw new Error("ENCRYPTION_KEY environment variable is required for secure operation");
   }
   
-  // Generate a new key for development
-  const newKey = randomBytes(32);
-  console.warn("⚠️  ENCRYPTION_KEY not found in environment. Generated temporary key:", newKey.toString("hex"));
-  console.warn("⚠️  Add ENCRYPTION_KEY to your environment for persistent encryption:");
-  console.warn(`   export ENCRYPTION_KEY=${newKey.toString("hex")}`);
-  
-  return newKey;
+  try {
+    const key = Buffer.from(keyFromEnv, "hex");
+    if (key.length !== 32) {
+      throw new Error("ENCRYPTION_KEY must be exactly 32 bytes (64 hex characters)");
+    }
+    return key;
+  } catch (error) {
+    console.error("❌ Invalid ENCRYPTION_KEY format:", error);
+    throw new Error("ENCRYPTION_KEY must be a valid 64-character hex string");
+  }
 }
 
 const ENCRYPTION_KEY = getEncryptionKey();
@@ -35,7 +43,7 @@ export interface EncryptedData {
 export function encrypt(plaintext: string): EncryptedData {
   try {
     const iv = randomBytes(16);
-    const cipher = createCipherGCM(ALGORITHM, ENCRYPTION_KEY);
+    const cipher = createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
     
     cipher.setAAD(Buffer.from("prismmail-credentials"));
     
@@ -62,7 +70,8 @@ export function encrypt(plaintext: string): EncryptedData {
  */
 export function decrypt(data: EncryptedData): string {
   try {
-    const decipher = createDecipherGCM(ALGORITHM, ENCRYPTION_KEY);
+    const iv = Buffer.from(data.iv, "hex");
+    const decipher = createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
     
     decipher.setAuthTag(Buffer.from(data.tag, "hex"));
     decipher.setAAD(Buffer.from("prismmail-credentials"));
@@ -149,7 +158,7 @@ export function decryptAccountSettingsWithPassword(encryptedJson: string): {
 export function validateEncryptedData(encryptedJson: string): boolean {
   try {
     const encryptedData: EncryptedData = JSON.parse(encryptedJson);
-    decrypt(encryptedData.encrypted);
+    decrypt(encryptedData);
     return true;
   } catch {
     return false;

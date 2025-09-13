@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Plus, Trash2, Server } from "lucide-react";
+import { AlertCircle, Plus, Trash2, Server, RefreshCw } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
+  const [syncingAccounts, setSyncingAccounts] = useState<Set<string>>(new Set());
   
   // Account form setup with validation
   const accountForm = useForm<AccountFormData>({
@@ -177,6 +178,49 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
 
   const handleDeleteAccount = (accountId: string) => {
     setDeleteAccountId(accountId);
+  };
+
+  const handleSyncAccount = async (accountId: string) => {
+    setSyncingAccounts(prev => new Set(prev).add(accountId));
+    
+    try {
+      const response = await fetch(`/api/accounts/${accountId}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ folder: 'INBOX', limit: 25 })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to sync account');
+      }
+      
+      const result = await response.json();
+      
+      toast({
+        title: "Sync Completed",
+        description: `Successfully synced ${result.messageCount || 0} messages`
+      });
+      
+      // Invalidate accounts query to refresh the UI
+      queryClient.invalidateQueries({ queryKey: ['/api/accounts'] });
+      
+    } catch (error: any) {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to sync account",
+        variant: "destructive"
+      });
+    } finally {
+      setSyncingAccounts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(accountId);
+        return newSet;
+      });
+    }
   };
 
   const confirmDeleteAccount = () => {
@@ -362,6 +406,19 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                 <Badge variant={account.isActive ? "default" : "secondary"}>
                                   {account.isActive ? "Connected" : "Disconnected"}
                                 </Badge>
+                                {account.isActive && (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => handleSyncAccount(account.id)}
+                                    disabled={syncingAccounts.has(account.id)}
+                                    className="text-xs px-2 py-1 h-7"
+                                    data-testid={`button-sync-account-${account.id}`}
+                                  >
+                                    <RefreshCw className={`h-3 w-3 mr-1 ${syncingAccounts.has(account.id) ? 'animate-spin' : ''}`} />
+                                    {syncingAccounts.has(account.id) ? 'Syncing...' : 'Sync'}
+                                  </Button>
+                                )}
                                 <Button 
                                   variant="ghost" 
                                   size="icon" 

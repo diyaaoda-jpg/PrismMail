@@ -56,8 +56,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create the account first
       const account = await storage.createAccountConnection(accountData);
       
+      // Get encrypted settings for connection testing
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(account.id);
+      if (!encryptedAccount) {
+        throw new Error('Failed to retrieve account for connection testing');
+      }
+      
       // Test the connection in the background
-      testConnection(accountData.protocol as 'IMAP' | 'EWS', account.settingsJson)
+      testConnection(accountData.protocol as 'IMAP' | 'EWS', encryptedAccount.settingsJson)
         .then(async (result) => {
           // Update the account with connection test results
           await storage.updateAccountConnection(account.id, {
@@ -130,6 +136,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating message:", error);
       res.status(500).json({ message: "Failed to update message" });
+    }
+  });
+
+  // Email synchronization routes
+  app.post('/api/accounts/:accountId/sync', isAuthenticated, async (req: any, res) => {
+    try {
+      const { accountId } = req.params;
+      const { folder = 'INBOX', limit = 25 } = req.body;
+      
+      // Verify account belongs to the authenticated user
+      const accounts = await storage.getUserAccountConnections(req.user.claims.sub);
+      const account = accounts.find((a: any) => a.id === accountId);
+      
+      if (!account) {
+        return res.status(404).json({ message: 'Account not found' });
+      }
+      
+      if (!account.isActive) {
+        return res.status(400).json({ message: 'Account is not active' });
+      }
+      
+      // Get encrypted account settings
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        return res.status(404).json({ message: 'Account settings not found' });
+      }
+      
+      // Import sync function dynamically
+      const { syncImapEmails } = await import('./emailSync');
+      
+      if (account.protocol === 'IMAP') {
+        const result = await syncImapEmails(
+          accountId,
+          encryptedAccount.settingsJson,
+          storage,
+          { folder, limit }
+        );
+        
+        // Update account sync status
+        if (!result.success && result.error) {
+          await storage.updateAccountConnection(accountId, { 
+            lastError: result.error,
+            lastChecked: result.lastSync
+          });
+        } else {
+          await storage.updateAccountConnection(accountId, { 
+            lastError: null,
+            lastChecked: result.lastSync
+          });
+        }
+        
+        res.json(result);
+      } else {
+        res.status(400).json({ message: 'EWS sync not yet implemented' });
+      }
+      
+    } catch (error) {
+      console.error("Error syncing account:", error);
+      res.status(500).json({ message: "Failed to sync account" });
+    }
+  });
+
+  // Sync all accounts for the authenticated user
+  app.post('/api/sync/all', isAuthenticated, async (req: any, res) => {
+    try {
+      // Import sync function dynamically
+      const { syncAllUserAccounts } = await import('./emailSync');
+      
+      const results = await syncAllUserAccounts(req.user.claims.sub, storage);
+      
+      res.json({
+        success: true,
+        accountsProcessed: results.length,
+        results
+      });
+      
+    } catch (error) {
+      console.error("Error syncing all accounts:", error);
+      res.status(500).json({ message: "Failed to sync accounts" });
     }
   });
 

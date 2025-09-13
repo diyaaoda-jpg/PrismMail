@@ -32,6 +32,7 @@ export interface IStorage {
   // Account connections
   getUserAccountConnections(userId: string): Promise<AccountConnection[]>;
   createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection>;
+  getAccountConnectionEncrypted(id: string): Promise<{ settingsJson: string } | undefined>;
   updateAccountConnection(id: string, updates: Partial<AccountConnection>): Promise<AccountConnection | undefined>;
   deleteAccountConnection(id: string): Promise<void>;
   // Mail operations
@@ -151,6 +152,11 @@ export class DatabaseStorage implements IStorage {
       ...result,
       settingsJson: JSON.stringify(decryptAccountSettings(result.settingsJson))
     };
+  }
+
+  async getAccountConnectionEncrypted(id: string): Promise<{ settingsJson: string } | undefined> {
+    const [account] = await db.select({ settingsJson: accountConnections.settingsJson }).from(accountConnections).where(eq(accountConnections.id, id));
+    return account;
   }
 
   async deleteAccountConnection(id: string): Promise<void> {
