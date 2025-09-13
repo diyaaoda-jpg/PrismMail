@@ -461,11 +461,18 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   };
 
   const onSubmitAccount = (data: AccountFormData) => {
-    if (editAccountId) {
+    // Validate that editAccountId corresponds to an existing account
+    const isValidEdit = editAccountId && accounts.some(account => account.id === editAccountId);
+    
+    if (isValidEdit) {
       // We're editing an existing account
       updateAccountMutation.mutate({ accountId: editAccountId, accountData: data });
     } else {
-      // We're adding a new account
+      // We're adding a new account (or editAccountId is stale)
+      if (editAccountId && !isValidEdit) {
+        console.warn(`Invalid editAccountId ${editAccountId} - treating as new account creation`);
+        setEditAccountId(null); // Clear stale ID
+      }
       createAccountMutation.mutate(data);
     }
   };
@@ -607,7 +614,11 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                           </CardDescription>
                         </div>
                         <Button 
-                          onClick={() => setShowAddAccount(true)}
+                          onClick={() => {
+                            setShowAddAccount(true);
+                            setEditAccountId(null); // Clear any stale edit state
+                            accountForm.reset(); // Reset form to defaults
+                          }}
                           className="hover-elevate active-elevate-2"
                           data-testid="button-add-account"
                         >
