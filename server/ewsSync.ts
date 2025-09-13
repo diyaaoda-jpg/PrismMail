@@ -209,15 +209,44 @@ function extractSenderFromEws(item: any): string {
 function extractRecipientsFromEws(item: any): string {
   const recipients: string[] = [];
   
-  // Add To recipients
-  if (item.ToRecipients) {
-    for (const recipient of item.ToRecipients) {
-      if (recipient.Name && recipient.Address) {
-        recipients.push(`${recipient.Name} <${recipient.Address}>`);
-      } else if (recipient.Address) {
-        recipients.push(recipient.Address);
+  try {
+    // Add To recipients
+    if (item.ToRecipients && Array.isArray(item.ToRecipients)) {
+      for (const recipient of item.ToRecipients) {
+        if (recipient?.Name && recipient?.Address) {
+          recipients.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          recipients.push(recipient.Address);
+        }
+      }
+    } else if (item.ToRecipients && typeof item.ToRecipients === 'object' && item.ToRecipients.Address) {
+      // Handle single recipient case
+      if (item.ToRecipients.Name && item.ToRecipients.Address) {
+        recipients.push(`${item.ToRecipients.Name} <${item.ToRecipients.Address}>`);
+      } else if (item.ToRecipients.Address) {
+        recipients.push(item.ToRecipients.Address);
       }
     }
+    
+    // Add CC recipients  
+    if (item.CcRecipients && Array.isArray(item.CcRecipients)) {
+      for (const recipient of item.CcRecipients) {
+        if (recipient?.Name && recipient?.Address) {
+          recipients.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          recipients.push(recipient.Address);
+        }
+      }
+    } else if (item.CcRecipients && typeof item.CcRecipients === 'object' && item.CcRecipients.Address) {
+      // Handle single recipient case
+      if (item.CcRecipients.Name && item.CcRecipients.Address) {
+        recipients.push(`${item.CcRecipients.Name} <${item.CcRecipients.Address}>`);
+      } else if (item.CcRecipients.Address) {
+        recipients.push(item.CcRecipients.Address);
+      }
+    }
+  } catch (error) {
+    console.warn('Error extracting recipients from EWS item:', error);
   }
   
   return recipients.join(', ') || 'Unknown Recipients';
