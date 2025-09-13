@@ -320,19 +320,50 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
 
   const updateAccountMutation = useMutation({
     mutationFn: async ({ accountId, accountData }: { accountId: string; accountData: AccountFormData }) => {
-      // Prepare settings for update
-      const settingsJson = JSON.stringify({
-        host: accountData.host,
-        port: accountData.protocol === 'IMAP' ? 993 : undefined,
-        username: accountData.username,
-        password: accountData.password,
-        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
+      // Test connection first, just like create mutation
+      const testResponse = await fetch('/api/accounts/test-connection', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          protocol: accountData.protocol,
+          host: accountData.host,
+          port: accountData.protocol === 'IMAP' ? '993' : undefined,
+          username: accountData.username,
+          password: accountData.password,
+          useSSL: accountData.protocol === 'IMAP' ? true : undefined,
+          // Include SMTP settings for IMAP accounts (CRITICAL FIX)
+          enableCustomSmtp: accountData.enableCustomSmtp,
+          smtpHost: accountData.smtpHost,
+          smtpPort: accountData.smtpPort,
+          smtpSecure: accountData.smtpSecure,
+          smtpUsername: accountData.smtpUsername,
+          smtpPassword: accountData.smtpPassword,
+        })
       });
       
+      if (!testResponse.ok) {
+        const error = await testResponse.json();
+        throw new Error(error.message || 'Connection test failed');
+      }
+      
+      // If test successful, update account - backend handles settingsJson construction
       return await apiRequest('PUT', `/api/accounts/${accountId}`, {
         name: accountData.name,
         protocol: accountData.protocol,
-        settingsJson
+        host: accountData.host,
+        username: accountData.username,
+        password: accountData.password,
+        useSSL: accountData.protocol === 'IMAP' ? true : undefined,
+        // Include SMTP settings for IMAP accounts
+        enableCustomSmtp: accountData.enableCustomSmtp,
+        smtpHost: accountData.smtpHost,
+        smtpPort: accountData.smtpPort,
+        smtpSecure: accountData.smtpSecure,
+        smtpUsername: accountData.smtpUsername,
+        smtpPassword: accountData.smtpPassword,
       });
     },
     onSuccess: () => {
@@ -388,6 +419,24 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       accountForm.setValue('username', settings.username || '');
       accountForm.setValue('password', ''); // Don't pre-fill password for security
       accountForm.setValue('useSSL', settings.useSSL ?? true);
+      
+      // CRITICAL FIX: Pre-fill SMTP settings for IMAP accounts
+      if (account.protocol === 'IMAP' && settings.smtp) {
+        accountForm.setValue('enableCustomSmtp', !!settings.smtp);
+        accountForm.setValue('smtpHost', settings.smtp.host || '');
+        accountForm.setValue('smtpPort', settings.smtp.port?.toString() || '');
+        accountForm.setValue('smtpSecure', settings.smtp.secure ?? false);
+        accountForm.setValue('smtpUsername', settings.smtp.username || '');
+        accountForm.setValue('smtpPassword', ''); // Don't pre-fill SMTP password for security
+      } else if (account.protocol === 'IMAP') {
+        // Default SMTP values for IMAP accounts without custom SMTP
+        accountForm.setValue('enableCustomSmtp', false);
+        accountForm.setValue('smtpHost', '');
+        accountForm.setValue('smtpPort', '');
+        accountForm.setValue('smtpSecure', false);
+        accountForm.setValue('smtpUsername', '');
+        accountForm.setValue('smtpPassword', '');
+      }
       
       // Enter edit mode
       setEditAccountId(account.id);
