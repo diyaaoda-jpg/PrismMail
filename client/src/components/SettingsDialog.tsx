@@ -113,7 +113,9 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
     showPreview: true,
     compactView: false,
     emailsPerPage: "25",
-    defaultFolder: "inbox"
+    defaultFolder: "inbox",
+    autoSync: true,
+    syncInterval: "600" // 10 minutes in seconds
   });
 
   // Notification settings
@@ -565,7 +567,6 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                                           <Input
                                             placeholder="993"
                                             data-testid="input-port"
-                                            value="993"
                                             disabled
                                             {...field}
                                           />
@@ -757,6 +758,70 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Sync Settings */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4" />
+                        Sync Settings
+                      </CardTitle>
+                      <CardDescription>
+                        Configure how often emails are synchronized from your accounts
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label className="text-base">Auto-sync emails</Label>
+                          <p className="text-sm text-muted-foreground">
+                            Automatically sync emails in the background
+                          </p>
+                        </div>
+                        <Switch
+                          checked={emailPrefs.autoSync}
+                          onCheckedChange={(checked) => setEmailPrefs({ ...emailPrefs, autoSync: checked })}
+                          data-testid="switch-auto-sync"
+                        />
+                      </div>
+
+                      {emailPrefs.autoSync && (
+                        <div className="flex items-center justify-between">
+                          <Label>Sync interval</Label>
+                          <Select value={emailPrefs.syncInterval} onValueChange={(value) => setEmailPrefs({ ...emailPrefs, syncInterval: value })}>
+                            <SelectTrigger className="w-48" data-testid="select-sync-interval">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="300">5 minutes</SelectItem>
+                              <SelectItem value="600">10 minutes</SelectItem>
+                              <SelectItem value="900">15 minutes</SelectItem>
+                              <SelectItem value="1800">30 minutes</SelectItem>
+                              <SelectItem value="3600">1 hour</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <div className="pt-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            // Manual sync functionality - will implement this next
+                            toast({
+                              title: "Manual sync",
+                              description: "Sync functionality will be implemented next"
+                            });
+                          }}
+                          data-testid="button-manual-sync"
+                          className="w-full"
+                        >
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Sync Now
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
