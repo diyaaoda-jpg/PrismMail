@@ -419,11 +419,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const pushService = getEwsPushService(storage);
           // Stop existing subscription if any
           await pushService.stopSubscription(id);
-          // Start new subscription with updated settings
-          const subscriptionResult = await pushService.startSubscription(id);
-          console.log(`Push subscription restarted for updated account ${id}:`, subscriptionResult);
+          
+          console.log(`Discovering EWS folders for updated account ${id}`);
+          
+          // First, discover and sync folders to database with updated settings
+          const folderDiscoveryResult = await discoverEwsFolders(id, settingsJson, storage);
+          
+          if (folderDiscoveryResult.success) {
+            console.log(`Folder discovery successful for updated account ${id}: ${folderDiscoveryResult.folderCount} folders discovered`);
+            
+            // Only start push notifications after successful folder discovery
+            const subscriptionResult = await pushService.startSubscription(id);
+            console.log(`Push subscription restarted for updated account ${id}:`, subscriptionResult);
+          } else {
+            console.error(`Folder discovery failed for updated account ${id}: ${folderDiscoveryResult.error}`);
+            // Update account with folder discovery error but keep it active
+            await storage.updateAccountConnection(id, {
+              lastError: `Folder discovery failed: ${folderDiscoveryResult.error}`
+            });
+          }
         } catch (error) {
           console.error(`Failed to restart push subscription for updated account ${id}:`, error);
+          // Update account with error
+          await storage.updateAccountConnection(id, {
+            lastError: `EWS update failed: ${(error as Error).message}`
+          });
         }
       }
       
