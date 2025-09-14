@@ -298,10 +298,18 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       }
     }
 
-    // Folder filter
+    // Folder filter - map logical folders to actual stored folder names
     switch (selectedFolder) {
       case 'inbox':
-        return email.folder === 'INBOX';
+        return email.folder === 'INBOX' || email.folder === 'inbox';
+      case 'sent':
+        return email.folder === 'SentItems' || email.folder === 'Sent';
+      case 'drafts':
+        return email.folder === 'Drafts';
+      case 'deleted':
+        return email.folder === 'DeletedItems' || email.folder === 'Trash';
+      case 'spam':
+        return email.folder === 'JunkEmail' || email.folder === 'Spam';
       case 'starred':
         return email.isFlagged;
       case 'unread':

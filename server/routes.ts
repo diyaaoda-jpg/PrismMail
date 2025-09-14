@@ -998,7 +998,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Map common folder names to protocol-specific names
         let mappedFolder = folder as string;
-        console.log(`[${requestId}] Debug - Original folder: ${folder}, Account protocol: ${account.protocol}`);
         if (account.protocol === 'EWS') {
           const ewsFolderMap: Record<string, string> = {
             'sent': 'SentItems',
@@ -1021,11 +1020,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
           mappedFolder = imapFolderMap[folder.toLowerCase()] || folder as string;
         }
-        console.log(`[${requestId}] Debug - Mapped folder: ${mappedFolder}`);
-        console.log(`[${requestId}] Debug - Calling storage.getMailMessages(${accountId}, ${mappedFolder}, ${limitNum}, ${offsetNum})`);
         
         messages = await storage.getMailMessages(accountId as string, mappedFolder, limitNum, offsetNum);
-        console.log(`[${requestId}] Debug - Retrieved ${messages.length} messages from storage`);
       } else {
         // Legacy: get all messages for user across accounts (fallback for unified view)
         messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
