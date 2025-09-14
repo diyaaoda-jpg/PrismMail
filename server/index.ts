@@ -79,7 +79,7 @@ app.use(express.urlencoded({ extended: false }));
       console.log(`WebSocket authentication success: ${user.email} (${userId})`);
       return {
         userId: user.id,
-        userEmail: user.email
+        userEmail: user.email ?? undefined
       };
     } catch (error) {
       console.error('WebSocket authentication error:', error);

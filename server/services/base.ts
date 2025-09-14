@@ -187,7 +187,7 @@ export class ServiceContainer {
   async healthCheckAll(): Promise<Record<string, any>> {
     const results: Record<string, any> = {};
     
-    for (const [name, service] of this.services.entries()) {
+    for (const [name, service] of Array.from(this.services.entries())) {
       try {
         const health = await service.healthCheck();
         results[name] = {

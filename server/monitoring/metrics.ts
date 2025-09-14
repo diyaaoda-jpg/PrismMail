@@ -391,6 +391,205 @@ export class EmailMetrics {
 }
 
 // Initialize global metrics collector
+/**
+ * Prometheus metrics exporter
+ */
+export class PrometheusExporter {
+  /**
+   * Export metrics in Prometheus format
+   */
+  static exportMetrics(): string {
+    const allMetrics = metrics.getAllMetrics();
+    const aggregated = metrics.getAggregatedMetrics();
+    const systemMetrics = metrics.getSystemMetrics();
+    const timestamp = Date.now();
+    
+    let output = '# HELP prismmail_info Application information\n';
+    output += '# TYPE prismmail_info gauge\n';
+    output += `prismmail_info{version="${systemMetrics.version}",environment="${config.server.nodeEnv}"} 1 ${timestamp}\n\n`;
+    
+    // System metrics
+    output += this.exportSystemMetrics(systemMetrics, timestamp);
+    
+    // Application metrics
+    output += this.exportApplicationMetrics(aggregated, timestamp);
+    
+    // HTTP metrics
+    output += this.exportHttpMetrics(allMetrics, timestamp);
+    
+    // Database metrics
+    output += this.exportDatabaseMetrics(allMetrics, timestamp);
+    
+    // Email metrics
+    output += this.exportEmailMetrics(allMetrics, timestamp);
+    
+    return output;
+  }
+  
+  private static exportSystemMetrics(systemMetrics: any, timestamp: number): string {
+    let output = '';
+    
+    // Memory metrics
+    output += '# HELP prismmail_memory_heap_used_bytes Memory heap used in bytes\n';
+    output += '# TYPE prismmail_memory_heap_used_bytes gauge\n';
+    output += `prismmail_memory_heap_used_bytes ${systemMetrics.memory.heapUsed} ${timestamp}\n`;
+    
+    output += '# HELP prismmail_memory_heap_total_bytes Memory heap total in bytes\n';
+    output += '# TYPE prismmail_memory_heap_total_bytes gauge\n';
+    output += `prismmail_memory_heap_total_bytes ${systemMetrics.memory.heapTotal} ${timestamp}\n`;
+    
+    // CPU metrics
+    output += '# HELP prismmail_cpu_usage_seconds CPU usage in seconds\n';
+    output += '# TYPE prismmail_cpu_usage_seconds counter\n';
+    output += `prismmail_cpu_usage_seconds{mode="user"} ${systemMetrics.cpu.user / 1000000} ${timestamp}\n`;
+    output += `prismmail_cpu_usage_seconds{mode="system"} ${systemMetrics.cpu.system / 1000000} ${timestamp}\n`;
+    
+    // Uptime
+    output += '# HELP prismmail_uptime_seconds Application uptime in seconds\n';
+    output += '# TYPE prismmail_uptime_seconds gauge\n';
+    output += `prismmail_uptime_seconds ${systemMetrics.uptime} ${timestamp}\n\n`;
+    
+    return output;
+  }
+  
+  private static exportApplicationMetrics(aggregated: any, timestamp: number): string {
+    let output = '';
+    
+    // Export all aggregated metrics
+    for (const [name, data] of Object.entries(aggregated)) {
+      const safeName = name.replace(/[^a-zA-Z0-9_]/g, '_');
+      const metricData = data as any;
+      
+      if (metricData.type === 'counter') {
+        output += `# HELP prismmail_${safeName}_total Total count\n`;
+        output += `# TYPE prismmail_${safeName}_total counter\n`;
+        output += `prismmail_${safeName}_total ${metricData.total} ${timestamp}\n`;
+        
+        output += `# HELP prismmail_${safeName}_rate_per_second Rate per second\n`;
+        output += `# TYPE prismmail_${safeName}_rate_per_second gauge\n`;
+        output += `prismmail_${safeName}_rate_per_second ${metricData.rate} ${timestamp}\n`;
+      } else if (metricData.type === 'gauge') {
+        output += `# HELP prismmail_${safeName} Current gauge value\n`;
+        output += `# TYPE prismmail_${safeName} gauge\n`;
+        output += `prismmail_${safeName} ${metricData.current} ${timestamp}\n`;
+      } else if (metricData.type === 'histogram' || metricData.type === 'timer') {
+        output += `# HELP prismmail_${safeName}_duration_seconds Duration in seconds\n`;
+        output += `# TYPE prismmail_${safeName}_duration_seconds histogram\n`;
+        output += `prismmail_${safeName}_duration_seconds{quantile="0.5"} ${(metricData.p50 || 0) / 1000} ${timestamp}\n`;
+        output += `prismmail_${safeName}_duration_seconds{quantile="0.9"} ${(metricData.p90 || 0) / 1000} ${timestamp}\n`;
+        output += `prismmail_${safeName}_duration_seconds{quantile="0.95"} ${(metricData.p95 || 0) / 1000} ${timestamp}\n`;
+        output += `prismmail_${safeName}_duration_seconds{quantile="0.99"} ${(metricData.p99 || 0) / 1000} ${timestamp}\n`;
+        output += `prismmail_${safeName}_duration_seconds_count ${metricData.count} ${timestamp}\n`;
+        output += `prismmail_${safeName}_duration_seconds_sum ${(metricData.avg * metricData.count) / 1000} ${timestamp}\n`;
+      }
+    }
+    
+    return output + '\n';
+  }
+  
+  private static exportHttpMetrics(allMetrics: any, timestamp: number): string {
+    let output = '';
+    
+    // HTTP request metrics
+    if (allMetrics.http_requests_total) {
+      output += '# HELP prismmail_http_requests_total Total HTTP requests\n';
+      output += '# TYPE prismmail_http_requests_total counter\n';
+      
+      const httpMetrics = allMetrics.http_requests_total;
+      const methodCounts: Record<string, number> = {};
+      
+      httpMetrics.forEach((entry: MetricEntry) => {
+        const method = entry.labels?.method || 'unknown';
+        methodCounts[method] = (methodCounts[method] || 0) + entry.value;
+      });
+      
+      for (const [method, count] of Object.entries(methodCounts)) {
+        output += `prismmail_http_requests_total{method="${method}"} ${count} ${timestamp}\n`;
+      }
+    }
+    
+    return output + '\n';
+  }
+  
+  private static exportDatabaseMetrics(allMetrics: any, timestamp: number): string {
+    let output = '';
+    
+    // Database connection pool metrics
+    if (allMetrics.db_connection_pool_total) {
+      const latest = allMetrics.db_connection_pool_total[allMetrics.db_connection_pool_total.length - 1];
+      output += '# HELP prismmail_db_connections_total Database connection pool size\n';
+      output += '# TYPE prismmail_db_connections_total gauge\n';
+      output += `prismmail_db_connections_total ${latest.value} ${timestamp}\n`;
+    }
+    
+    // Database query metrics
+    if (allMetrics.db_queries_total) {
+      output += '# HELP prismmail_db_queries_total Total database queries\n';
+      output += '# TYPE prismmail_db_queries_total counter\n';
+      
+      const dbMetrics = allMetrics.db_queries_total;
+      const operationCounts: Record<string, { success: number; failed: number }> = {};
+      
+      dbMetrics.forEach((entry: MetricEntry) => {
+        const operation = entry.labels?.operation || 'unknown';
+        const success = entry.labels?.success === 'true';
+        
+        if (!operationCounts[operation]) {
+          operationCounts[operation] = { success: 0, failed: 0 };
+        }
+        
+        if (success) {
+          operationCounts[operation].success += entry.value;
+        } else {
+          operationCounts[operation].failed += entry.value;
+        }
+      });
+      
+      for (const [operation, counts] of Object.entries(operationCounts)) {
+        output += `prismmail_db_queries_total{operation="${operation}",status="success"} ${counts.success} ${timestamp}\n`;
+        output += `prismmail_db_queries_total{operation="${operation}",status="failed"} ${counts.failed} ${timestamp}\n`;
+      }
+    }
+    
+    return output + '\n';
+  }
+  
+  private static exportEmailMetrics(allMetrics: any, timestamp: number): string {
+    let output = '';
+    
+    // Email sync metrics
+    if (allMetrics.email_syncs_total) {
+      output += '# HELP prismmail_email_syncs_total Total email sync operations\n';
+      output += '# TYPE prismmail_email_syncs_total counter\n';
+      
+      const emailMetrics = allMetrics.email_syncs_total;
+      const protocolCounts: Record<string, { success: number; failed: number }> = {};
+      
+      emailMetrics.forEach((entry: MetricEntry) => {
+        const protocol = entry.labels?.protocol || 'unknown';
+        const success = entry.labels?.success === 'true';
+        
+        if (!protocolCounts[protocol]) {
+          protocolCounts[protocol] = { success: 0, failed: 0 };
+        }
+        
+        if (success) {
+          protocolCounts[protocol].success += entry.value;
+        } else {
+          protocolCounts[protocol].failed += entry.value;
+        }
+      });
+      
+      for (const [protocol, counts] of Object.entries(protocolCounts)) {
+        output += `prismmail_email_syncs_total{protocol="${protocol}",status="success"} ${counts.success} ${timestamp}\n`;
+        output += `prismmail_email_syncs_total{protocol="${protocol}",status="failed"} ${counts.failed} ${timestamp}\n`;
+      }
+    }
+    
+    return output + '\n';
+  }
+}
+
 export const metrics = new MetricsCollector();
 
 // Register default health checks

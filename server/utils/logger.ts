@@ -65,15 +65,94 @@ class Logger {
   }
 
   private formatLogEntry(entry: LogEntry): string {
-    const timestamp = entry.timestamp.toISOString();
-    const level = LogLevel[entry.level];
-    const context = entry.context ? ` | ${JSON.stringify(entry.context)}` : '';
-    const duration = entry.duration ? ` | ${entry.duration}ms` : '';
-    const requestId = entry.requestId ? ` | req:${entry.requestId}` : '';
-    const userId = entry.userId ? ` | user:${entry.userId}` : '';
-    const error = entry.error ? ` | error:${entry.error.message}` : '';
+    // Use structured JSON logging for production
+    const logObject = {
+      timestamp: entry.timestamp.toISOString(),
+      level: LogLevel[entry.level],
+      message: entry.message,
+      ...(entry.requestId && { requestId: entry.requestId }),
+      ...(entry.userId && { userId: this.sanitizeUserId(entry.userId) }),
+      ...(entry.duration && { duration: entry.duration }),
+      ...(entry.context && { context: this.sanitizeContext(entry.context) }),
+      ...(entry.error && { 
+        error: {
+          message: entry.error.message,
+          name: entry.error.name,
+          stack: config.server.nodeEnv === 'development' ? entry.error.stack : undefined
+        }
+      }),
+      ...(entry.metadata && { metadata: this.sanitizeContext(entry.metadata) })
+    };
+
+    return JSON.stringify(logObject);
+  }
+
+  /**
+   * Sanitize user ID to remove PII while keeping ability to track
+   */
+  private sanitizeUserId(userId: string): string {
+    // Hash the user ID to remove PII but maintain tracking capability
+    const crypto = require('crypto');
+    return crypto.createHash('sha256').update(userId).digest('hex').substring(0, 12);
+  }
+
+  /**
+   * Sanitize context object to remove PII
+   */
+  private sanitizeContext(context: Record<string, any>): Record<string, any> {
+    const sanitized: Record<string, any> = {};
     
-    return `[${timestamp}] ${level}: ${entry.message}${requestId}${userId}${duration}${context}${error}`;
+    for (const [key, value] of Object.entries(context)) {
+      // Remove common PII fields
+      if (this.isPIIField(key)) {
+        // Keep field but mask value
+        sanitized[key] = this.maskPII(String(value));
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = this.sanitizeContext(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+    
+    return sanitized;
+  }
+
+  /**
+   * Check if field contains PII
+   */
+  private isPIIField(fieldName: string): boolean {
+    const piiFields = [
+      'email', 'userEmail', 'username', 'name', 'firstName', 'lastName',
+      'phone', 'phoneNumber', 'address', 'ip', 'userAgent', 'password',
+      'host', 'server', 'hostname'
+    ];
+    
+    return piiFields.some(pii => 
+      fieldName.toLowerCase().includes(pii.toLowerCase())
+    );
+  }
+
+  /**
+   * Mask PII data while preserving some structure for debugging
+   */
+  private maskPII(value: string): string {
+    if (!value || value.length === 0) return '[empty]';
+    
+    // For email addresses, show domain but mask local part
+    if (value.includes('@')) {
+      const [local, domain] = value.split('@');
+      return `${local.substring(0, 2)}***@${domain}`;
+    }
+    
+    // For IP addresses, mask last octet
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(value)) {
+      const parts = value.split('.');
+      return `${parts[0]}.${parts[1]}.${parts[2]}.***`;
+    }
+    
+    // For other values, show first 2 characters
+    if (value.length <= 4) return '***';
+    return `${value.substring(0, 2)}***`;
   }
 
   private writeLog(entry: LogEntry): void {
@@ -346,7 +425,7 @@ export async function timeOperation<T>(
  */
 export function requestLoggingMiddleware(req: any, res: any, next: any): void {
   const startTime = Date.now();
-  const requestId = req.headers['x-request-id'] || Math.random().toString(36).substring(2);
+  const requestId = req.headers['x-request-id'] || `req_${Math.random().toString(36).substring(2)}`;
   
   // Add request ID to request object
   req.requestId = requestId;
@@ -354,24 +433,29 @@ export function requestLoggingMiddleware(req: any, res: any, next: any): void {
   // Create child logger for this request
   req.logger = logger.child({ requestId });
 
-  // Log request start
+  // Log request start with sanitized data
   req.logger.info(`${req.method} ${req.path} started`, {
     method: req.method,
     path: req.path,
-    userAgent: req.headers['user-agent'],
-    ip: req.ip,
+    userAgent: req.headers['user-agent'], // This will be sanitized by the logger
+    ip: req.ip, // This will be sanitized by the logger
+    contentLength: req.headers['content-length'],
+    origin: req.headers['origin']
   });
 
   // Hook into response finish event
   res.on('finish', () => {
     const duration = Date.now() - startTime;
     const statusCode = res.statusCode;
+    const responseSize = res.get('Content-Length');
     
     req.logger.info(`${req.method} ${req.path} completed`, {
       method: req.method,
       path: req.path,
       statusCode,
       duration,
+      responseSize,
+      success: statusCode < 400
     });
 
     // Record performance metric

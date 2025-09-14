@@ -39,6 +39,11 @@ const SecurityConfigSchema = z.object({
   enableHelmet: z.boolean().default(true),
   enableCSRF: z.boolean().default(true),
   encryptionKey: z.string().min(32, 'ENCRYPTION_KEY must be at least 32 characters'),
+  enableDistributedRateLimit: z.boolean().default(false),
+  redisUrl: z.string().optional(),
+  redisPassword: z.string().optional(),
+  redisMaxRetries: z.coerce.number().min(0).max(10).default(3),
+  redisTimeout: z.coerce.number().min(1000).max(10000).default(5000),
 });
 
 const ServerConfigSchema = z.object({
@@ -137,6 +142,11 @@ function loadConfig(): AppConfig {
       enableHelmet: process.env.ENABLE_HELMET !== 'false',
       enableCSRF: process.env.ENABLE_CSRF !== 'false',
       encryptionKey: process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET,
+      enableDistributedRateLimit: process.env.ENABLE_DISTRIBUTED_RATE_LIMIT === 'true',
+      redisUrl: process.env.REDIS_URL,
+      redisPassword: process.env.REDIS_PASSWORD,
+      redisMaxRetries: process.env.REDIS_MAX_RETRIES,
+      redisTimeout: process.env.REDIS_TIMEOUT,
     },
     server: {
       port: process.env.PORT,

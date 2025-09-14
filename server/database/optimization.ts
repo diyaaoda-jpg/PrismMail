@@ -192,14 +192,61 @@ class DatabaseManager {
   async close(): Promise<void> {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = undefined;
     }
     
     try {
+      // Set a timeout for draining connections
+      const drainTimeout = 30000; // 30 seconds
+      const drainPromise = this.drainConnections();
+      const timeoutPromise = new Promise<void>((_, reject) => {
+        setTimeout(() => reject(new Error('Connection drain timeout')), drainTimeout);
+      });
+      
+      // Wait for either drain completion or timeout
+      await Promise.race([drainPromise, timeoutPromise]);
+      
       await this.pool.end();
       logger.info('Database connections closed gracefully');
     } catch (error) {
       logger.error('Error closing database connections', { error: error as Error });
+      // Force close if graceful shutdown fails
+      try {
+        await this.pool.end();
+      } catch (forceError) {
+        logger.error('Force close also failed', { error: forceError as Error });
+      }
     }
+  }
+
+  /**
+   * Drain active connections by waiting for them to finish
+   */
+  private async drainConnections(): Promise<void> {
+    const maxWaitTime = 30000; // 30 seconds
+    const checkInterval = 500; // 500ms
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      const stats = this.getPoolStats();
+      
+      // If no active connections (only idle connections), we can close
+      if (stats.totalCount === stats.idleCount) {
+        logger.info('All connections drained successfully', stats);
+        return;
+      }
+      
+      logger.debug('Waiting for connections to drain', {
+        total: stats.totalCount,
+        idle: stats.idleCount,
+        waiting: stats.waitingCount,
+        active: stats.totalCount - stats.idleCount
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+    }
+    
+    logger.warn('Connection drain timeout reached, forcing close');
   }
 }
 

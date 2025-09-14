@@ -161,27 +161,56 @@ export class ArchitectureIntegration {
   }
 
   /**
-   * Setup security middleware
+   * Setup comprehensive security middleware
    */
   private async setupSecurity(): Promise<void> {
-    logger.info('Setting up security middleware...');
+    logger.info('Setting up production-grade security middleware...');
 
-    // Security headers (early in middleware chain)
+    // Import all security middleware
+    const { 
+      globalTimeout, 
+      enforceCompression, 
+      strictCors, 
+      enhancedBodyLimits,
+      authRateLimiter,
+      composeRateLimiter,
+      apiRateLimiter
+    } = await import('../middleware/security.js');
+
+    // 1. Global request timeout (early in chain)
+    this.app.use(globalTimeout());
+
+    // 2. Compression enforcement
+    this.app.use(enforceCompression());
+
+    // 3. Strict CORS configuration
+    this.app.use(strictCors());
+
+    // 4. Security headers with strict CSP (early in middleware chain)
     this.app.use(securityHeaders());
 
-    // Request size limiting
-    this.app.use(limitRequestSize(10 * 1024 * 1024)); // 10MB limit
+    // 5. Enhanced body size limiting per route type
+    this.app.use(enhancedBodyLimits());
 
-    // XSS protection
+    // 6. XSS protection
     this.app.use(XSSProtection.middleware());
 
-    // Rate limiting for all routes
+    // 7. Route-specific rate limiting
+    // Auth endpoints - very strict
+    this.app.use('/api/auth', authRateLimiter.middleware());
+    this.app.use('/api/login', authRateLimiter.middleware());
+    
+    // Compose endpoints - moderate
+    this.app.use('/api/mail/send', composeRateLimiter.middleware());
+    this.app.use('/api/compose', composeRateLimiter.middleware());
+    
+    // General API endpoints
+    this.app.use('/api', apiRateLimiter.middleware());
+    
+    // Global rate limiting as fallback
     this.app.use(rateLimiter.middleware());
 
-    // Add more specific rate limiting for API routes
-    this.app.use('/api', rateLimiter.middleware());
-
-    logger.info('Security middleware setup completed');
+    logger.info('Production-grade security middleware setup completed');
   }
 
   /**
@@ -247,19 +276,52 @@ export class ArchitectureIntegration {
       }
     });
 
-    // Metrics endpoint (for monitoring systems like Prometheus)
-    if (config.performance.enableProfiling) {
-      this.app.get('/metrics', (req, res) => {
-        const allMetrics = metrics.getAllMetrics();
-        const aggregated = metrics.getAggregatedMetrics();
-        const system = metrics.getSystemMetrics();
+    // Prometheus metrics endpoint
+    this.app.get('/metrics', (req, res) => {
+      try {
+        // Return Prometheus format if requested
+        if (req.headers.accept?.includes('text/plain') || req.query.format === 'prometheus') {
+          const { PrometheusExporter } = require('../monitoring/metrics.js');
+          const prometheusMetrics = PrometheusExporter.exportMetrics();
+          res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+          res.send(prometheusMetrics);
+        } else {
+          // Return JSON format for internal monitoring
+          const allMetrics = metrics.getAllMetrics();
+          const aggregated = metrics.getAggregatedMetrics();
+          const system = metrics.getSystemMetrics();
 
-        res.json({
-          raw: allMetrics,
-          aggregated,
-          system,
-          timestamp: new Date(),
-        });
+          res.json({
+            raw: config.performance.enableProfiling ? allMetrics : null,
+            aggregated,
+            system,
+            timestamp: new Date(),
+          });
+        }
+      } catch (error) {
+        logger.error('Error generating metrics', { error: error as Error });
+        res.status(500).json({ error: 'Failed to generate metrics' });
+      }
+    });
+
+    // Internal metrics endpoint for debugging
+    if (config.performance.enableProfiling) {
+      this.app.get('/metrics/debug', async (req, res) => {
+        try {
+          const healthStatus = await metrics.getHealthStatus();
+          const serviceHealth = await serviceContainer.healthCheckAll();
+          const rateLimiterStatus = rateLimiter.getStatus();
+          
+          res.json({
+            health: healthStatus,
+            services: serviceHealth,
+            rateLimiter: rateLimiterStatus,
+            timestamp: new Date(),
+          });
+        } catch (error) {
+          logger.error('Error generating debug metrics', { error: error as Error });
+          res.status(500).json({ error: 'Failed to generate debug metrics' });
+        }
       });
     }
 
@@ -274,22 +336,54 @@ export class ArchitectureIntegration {
       logger.info(`Received ${signal}, initiating graceful shutdown...`);
       
       try {
-        // Shutdown services
+        // 1. Stop accepting new connections
+        logger.info('Stopping new request acceptance...');
+        
+        // 2. Shutdown rate limiter intervals
+        logger.info('Cleaning up rate limiter intervals...');
+        rateLimiter.shutdown();
+        
+        // 3. Shutdown services (existing email sync, websockets, etc.)
+        logger.info('Shutting down services...');
         await serviceContainer.shutdownAll();
         
-        // Close database connections
+        // 4. Close database connections gracefully
+        logger.info('Draining database connections...');
         await dbManager.close();
         
-        logger.info('Graceful shutdown completed');
-        process.exit(0);
+        // 5. Give final log before exit
+        logger.info('Graceful shutdown completed successfully');
+        
+        // Small delay to ensure logs are flushed
+        setTimeout(() => process.exit(0), 100);
       } catch (error) {
         logger.error('Error during graceful shutdown', { error: error as Error });
-        process.exit(1);
+        
+        // Force shutdown after timeout
+        setTimeout(() => {
+          logger.error('Force shutdown due to timeout');
+          process.exit(1);
+        }, 5000);
       }
     };
 
+    // Handle both SIGTERM (container orchestrators) and SIGINT (ctrl+c)
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
+    // Handle uncaught exceptions gracefully
+    process.on('uncaughtException', (error) => {
+      logger.error('Uncaught exception, shutting down...', { error });
+      gracefulShutdown('UNCAUGHT_EXCEPTION');
+    });
+    
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled rejection, shutting down...', { 
+        reason: reason instanceof Error ? reason.message : String(reason),
+        promise: String(promise)
+      });
+      gracefulShutdown('UNHANDLED_REJECTION');
+    });
   }
 
   /**
