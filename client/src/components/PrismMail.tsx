@@ -185,8 +185,10 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     staleTime: 1000 * 60 * 2, // 2 minutes
   });
 
-  // Extract emails array from API response (handles {success: true, data: [...]} format)
-  const emails: EmailMessage[] = emailResponse?.success ? emailResponse.data : [];
+  // Extract emails with tolerant parsing - handle both wrapped {success,data} and raw array formats
+  const emails: EmailMessage[] = Array.isArray(emailResponse) 
+    ? emailResponse 
+    : (emailResponse?.success && Array.isArray(emailResponse.data) ? emailResponse.data : []);
 
   // Auto-sync emails when account becomes available
   const syncMutation = useMutation({
