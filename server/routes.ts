@@ -1021,7 +1021,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mappedFolder = imapFolderMap[folder.toLowerCase()] || folder as string;
         }
         
+        console.log(`[${requestId}] API Debug - accountId: ${accountId}, originalFolder: ${folder}, mappedFolder: ${mappedFolder}, protocol: ${account.protocol}`);
         messages = await storage.getMailMessages(accountId as string, mappedFolder, limitNum, offsetNum);
+        console.log(`[${requestId}] API Debug - Found ${messages.length} messages for account ${accountId}, folder ${mappedFolder}`);
       } else {
         // Legacy: get all messages for user across accounts (fallback for unified view)
         messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
