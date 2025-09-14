@@ -638,27 +638,57 @@ export async function syncAllUserAccounts(
         // Get encrypted settings for this account
         const encryptedAccount = await storage.getAccountConnectionEncrypted(account.id);
         if (encryptedAccount) {
-          const result = await syncImapEmails(
-            account.id,
-            encryptedAccount.settingsJson,
-            storage,
-            { folder: 'INBOX', limit: 25 } // Start with inbox, 25 recent messages
-          );
+          // Sync multiple important folders for IMAP
+          const foldersToSync = ['INBOX', 'Sent', 'Sent Items', 'Drafts'];
+          let overallSuccess = true;
+          let lastError: string | null = null;
+          let totalMessageCount = 0;
           
-          results.push({ accountId: account.id, result });
+          for (const folder of foldersToSync) {
+            try {
+              console.log(`Syncing IMAP folder: ${folder} for account ${account.name}`);
+              const result = await syncImapEmails(
+                account.id,
+                encryptedAccount.settingsJson,
+                storage,
+                { folder, limit: 25 }
+              );
+              
+              if (result.success) {
+                totalMessageCount += result.messageCount || 0;
+                console.log(`Successfully synced ${result.messageCount || 0} messages from ${folder}`);
+              } else {
+                console.log(`Failed to sync folder ${folder}: ${result.error}`);
+                if (folder === 'INBOX') {
+                  // INBOX failure is critical
+                  overallSuccess = false;
+                  lastError = result.error || `Failed to sync ${folder}`;
+                }
+                // Non-INBOX failures are logged but don't fail the whole sync
+              }
+            } catch (error) {
+              console.log(`Error syncing folder ${folder}: ${(error as Error).message}`);
+              if (folder === 'INBOX') {
+                overallSuccess = false;
+                lastError = `Failed to sync ${folder}: ${(error as Error).message}`;
+              }
+            }
+          }
+          
+          const combinedResult: SyncResult = {
+            success: overallSuccess,
+            messageCount: totalMessageCount,
+            lastSync: new Date(),
+            error: lastError
+          };
+          
+          results.push({ accountId: account.id, result: combinedResult });
           
           // Update account sync status
-          if (!result.success && result.error) {
-            await storage.updateAccountConnection(account.id, { 
-              lastError: result.error,
-              lastChecked: result.lastSync
-            });
-          } else {
-            await storage.updateAccountConnection(account.id, { 
-              lastError: null,
-              lastChecked: result.lastSync
-            });
-          }
+          await storage.updateAccountConnection(account.id, { 
+            lastError: lastError,
+            lastChecked: combinedResult.lastSync
+          });
         }
       } else if (account.protocol === 'EWS') {
         console.log(`Starting EWS sync for account: ${account.name} (${account.id})`);
@@ -687,39 +717,61 @@ export async function syncAllUserAccounts(
               console.log(`Using existing ${existingFolders.length} folders for account ${account.id}`);
             }
             
-            // Now sync emails from inbox
+            // Now sync emails from multiple folders
             console.log(`Syncing EWS emails for account ${account.id}`);
-            const result = await syncEwsEmails(
-              storage,
-              account.id,
-              'INBOX', // Start with inbox
-              25 // 25 recent messages
-            );
+            const foldersToSync = ['INBOX', 'SentItems', 'Drafts'];
+            let overallSuccess = true;
+            let lastError: string | null = null;
+            let totalMessageCount = 0;
             
-            console.log(`EWS sync completed for account ${account.id}: ${result.success ? 'success' : 'failed'}, ${result.messageCount || 0} messages`);
+            for (const folder of foldersToSync) {
+              try {
+                console.log(`Syncing EWS folder: ${folder} for account ${account.name}`);
+                const result = await syncEwsEmails(
+                  storage,
+                  account.id,
+                  folder,
+                  25
+                );
+                
+                if (result.success) {
+                  totalMessageCount += result.messageCount || 0;
+                  console.log(`Successfully synced ${result.messageCount || 0} messages from ${folder}`);
+                } else {
+                  console.log(`Failed to sync folder ${folder}: ${result.error}`);
+                  if (folder === 'INBOX') {
+                    // INBOX failure is critical
+                    overallSuccess = false;
+                    lastError = result.error || `Failed to sync ${folder}`;
+                  }
+                  // Non-INBOX failures are logged but don't fail the whole sync
+                }
+              } catch (error) {
+                console.log(`Error syncing folder ${folder}: ${(error as Error).message}`);
+                if (folder === 'INBOX') {
+                  overallSuccess = false;
+                  lastError = `Failed to sync ${folder}: ${(error as Error).message}`;
+                }
+              }
+            }
+            
+            console.log(`EWS sync completed for account ${account.id}: ${overallSuccess ? 'success' : 'failed'}, ${totalMessageCount} messages total`);
             
             results.push({ 
               accountId: account.id, 
               result: {
-                success: result.success,
-                error: result.error,
-                lastSync: result.lastSync,
-                messageCount: result.messageCount
+                success: overallSuccess,
+                error: lastError,
+                lastSync: new Date(),
+                messageCount: totalMessageCount
               }
             });
             
             // Update account sync status
-            if (!result.success && result.error) {
-              await storage.updateAccountConnection(account.id, { 
-                lastError: result.error,
-                lastChecked: result.lastSync
-              });
-            } else {
-              await storage.updateAccountConnection(account.id, { 
-                lastError: null,
-                lastChecked: result.lastSync
-              });
-            }
+            await storage.updateAccountConnection(account.id, { 
+              lastError: lastError,
+              lastChecked: new Date()
+            });
           } catch (error: any) {
             console.error(`EWS sync failed for account ${account.id}:`, error);
             results.push({
