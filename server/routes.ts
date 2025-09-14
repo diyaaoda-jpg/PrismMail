@@ -96,7 +96,7 @@ function createErrorResponse(
   requestId?: string
 ): { statusCode: number; response: ApiErrorResponse } {
   let statusCode = 500;
-  let code = ErrorCodes.INTERNAL_SERVER_ERROR;
+  let code: string = ErrorCodes.INTERNAL_SERVER_ERROR;
   let message = 'An unexpected error occurred';
   let details: string | undefined;
   let field: string | undefined;
@@ -1023,7 +1023,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        transporter = nodemailer.createTransporter({
+        transporter = nodemailer.createTransport({
           host: smtpSettings.host,
           port: smtpSettings.port || 587,
           secure: smtpSettings.secure || false,
@@ -1071,9 +1071,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cc: emailRequest.cc,
         bcc: emailRequest.bcc,
         subject: emailRequest.subject,
-        text: emailRequest.textContent,
-        html: emailRequest.htmlContent,
-        replyTo: emailRequest.replyTo,
+        text: emailRequest.body,
+        html: emailRequest.bodyHtml,
+        replyTo: undefined,
         attachments: emailRequest.attachments?.map(att => ({
           filename: att.filename,
           content: Buffer.from(att.content, 'base64'),
@@ -1113,13 +1113,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         cc: emailRequest.cc || null,
         bcc: emailRequest.bcc || null,
         subject: emailRequest.subject,
-        textContent: emailRequest.textContent || null,
-        htmlContent: emailRequest.htmlContent || null,
+        textContent: emailRequest.body || null,
+        htmlContent: emailRequest.bodyHtml || null,
         folder: 'Sent',
         flags: ['\\Seen'],
         date: new Date(),
         size: JSON.stringify(mailOptions).length,
-        replyTo: emailRequest.replyTo || null,
+        replyTo: null,
         attachments: emailRequest.attachments || []
       };
 
@@ -1134,7 +1134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response: SendEmailResponse = {
         success: true,
         messageId: sendResult.messageId,
-        message: 'Email sent successfully'
+        sentAt: new Date()
       };
 
       res.json(createSuccessResponse(response, 'Email sent successfully'));

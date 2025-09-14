@@ -347,6 +347,7 @@ export type ValidatedAccountConnection = z.infer<typeof enhancedAccountConnectio
 
 // Email composition schemas and types
 export const sendEmailRequestSchema = z.object({
+  accountId: z.string().min(1, "Account ID is required"),
   to: z.string().email("Please enter a valid email address"),
   cc: z.string().optional(),
   bcc: z.string().optional(),
