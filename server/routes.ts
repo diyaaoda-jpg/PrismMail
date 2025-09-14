@@ -12,6 +12,28 @@ import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
 
+/**
+ * Map folder types to icon names for frontend display
+ */
+function getFolderIcon(folderType: string): string {
+  switch (folderType.toLowerCase()) {
+    case 'inbox':
+      return 'Inbox';
+    case 'sent':
+      return 'Send';
+    case 'drafts':
+      return 'FileText';
+    case 'deleted':
+      return 'Trash';
+    case 'archive':
+      return 'Archive';
+    case 'spam':
+      return 'ShieldAlert';
+    default:
+      return 'Folder';
+  }
+}
+
 // Standardized error response interface
 interface ApiErrorResponse {
   success: false;
@@ -301,7 +323,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const accounts = await storage.getUserAccountConnections(userId);
-      res.json(createSuccessResponse(accounts, `Retrieved ${accounts.length} email accounts`));
+      
+      // Enhance accounts with folder information for sidebar display
+      const accountsWithFolders = await Promise.all(
+        accounts.map(async (account) => {
+          try {
+            // Get discovered folders for this account
+            const accountFolders = await storage.getAccountFolders(account.id);
+            
+            // Transform to MailSidebar folder format
+            const folders = accountFolders.map(folder => {
+              // Map folder type to icon name
+              let iconName = 'Folder';
+              switch (folder.folderType.toLowerCase()) {
+                case 'inbox':
+                  iconName = 'Inbox';
+                  break;
+                case 'sent':
+                  iconName = 'Send';
+                  break;
+                case 'drafts':
+                  iconName = 'FileText';
+                  break;
+                case 'deleted':
+                  iconName = 'Trash';
+                  break;
+                case 'archive':
+                  iconName = 'Archive';
+                  break;
+                case 'spam':
+                  iconName = 'ShieldAlert';
+                  break;
+              }
+              
+              return {
+                id: folder.folderType,
+                name: folder.displayName,
+                icon: iconName,
+                count: folder.unreadCount || 0
+              };
+            });
+            
+            return {
+              ...account,
+              folders: folders.length > 0 ? folders : undefined
+            };
+          } catch (error) {
+            console.error(`Error fetching folders for account ${account.id}:`, error);
+            return account; // Return account without folders if there's an error
+          }
+        })
+      );
+      
+      res.json(createSuccessResponse(accountsWithFolders, `Retrieved ${accountsWithFolders.length} email accounts with folder information`));
     } catch (error) {
       handleApiError(error, res, 'GET /api/accounts', requestId);
     }

@@ -199,6 +199,11 @@ export class DatabaseStorage implements IStorage {
     await db.delete(accountConnections).where(eq(accountConnections.id, id));
   }
 
+  // Account folder operations
+  async getAccountFolders(accountId: string): Promise<AccountFolder[]> {
+    return await db.select().from(accountFolders).where(eq(accountFolders.accountId, accountId));
+  }
+
   // Mail operations
   async getMailMessages(accountId: string, folder?: string, limit = 50, offset = 0): Promise<MailMessage[]> {
     let whereCondition = eq(mailIndex.accountId, accountId);
