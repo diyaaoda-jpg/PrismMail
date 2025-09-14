@@ -162,11 +162,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     accounts.find(account => account.isActive)
   ) : undefined;
 
-  // Fetch emails - use unified API for "All Accounts" or specific account API for individual accounts
+  // Fetch emails - use unified API for "All Accounts" or general mail API with folder param for individual accounts
   const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
     queryKey: selectedAccount === '' 
       ? ['/api/mail/unified', selectedFolder]
-      : ['/api/mail', primaryAccount?.id, selectedFolder],
+      : ['/api/mail', selectedFolder],
+    queryFn: ({ queryKey }) => {
+      const [endpoint, folder] = queryKey;
+      if (endpoint === '/api/mail/unified') {
+        return fetch(`${endpoint}/${folder}`).then(res => res.json());
+      } else {
+        // For individual account view, pass the accountId parameter
+        const accountId = primaryAccount?.id;
+        const url = `${endpoint}?folder=${folder}&accountId=${accountId}`;
+        return fetch(url).then(res => res.json());
+      }
+    },
     enabled: selectedAccount === '' || !!primaryAccount,
     staleTime: 1000 * 60 * 5, // 5 minutes
   });

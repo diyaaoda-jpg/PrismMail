@@ -954,7 +954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const requestId = `mail-list-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
-      const { folder = 'INBOX', limit = 25, offset = 0 } = req.query;
+      const { accountId, folder = 'INBOX', limit = 25, offset = 0 } = req.query;
       
       // Validate query parameters
       const limitNum = parseInt(limit as string);
@@ -980,10 +980,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      const messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
+      // If accountId is provided, get messages for that specific account
+      // Otherwise, get messages across all user's accounts (legacy behavior)
+      let messages;
+      if (accountId) {
+        // Verify user owns this account
+        const userAccounts = await storage.getUserAccountConnections(userId);
+        const account = userAccounts.find(acc => acc.id === accountId);
+        if (!account) {
+          throw new ApiError(
+            ErrorCodes.FORBIDDEN_ERROR,
+            'Account not found or not owned by user',
+            403,
+            `Account ${accountId} not found or not accessible`
+          );
+        }
+        
+        messages = await storage.getMailMessages(accountId as string, folder as string, limitNum, offsetNum);
+      } else {
+        // Legacy: get all messages for user across accounts (fallback for unified view)
+        messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
+      }
+      
       res.json(createSuccessResponse(
         messages,
-        `Retrieved ${messages.length} messages from ${folder}`
+        `Retrieved ${messages.length} messages from ${folder}${accountId ? ` (account ${accountId})` : ''}`
       ));
     } catch (error) {
       handleApiError(error, res, 'GET /api/mail', requestId);
