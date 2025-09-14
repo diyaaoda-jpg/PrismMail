@@ -204,7 +204,11 @@ export class DatabaseStorage implements IStorage {
     let whereCondition = eq(mailIndex.accountId, accountId);
     
     if (folder) {
-      whereCondition = and(eq(mailIndex.accountId, accountId), eq(mailIndex.folder, folder))!;
+      // Use case-insensitive folder matching to handle INBOX vs inbox
+      whereCondition = and(
+        eq(mailIndex.accountId, accountId), 
+        sql`UPPER(${mailIndex.folder}) = UPPER(${folder})`
+      )!;
     }
     
     return await db.select().from(mailIndex).where(whereCondition)
