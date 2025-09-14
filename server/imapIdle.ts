@@ -585,7 +585,7 @@ class ImapIdleService {
       
       // Attempt reconnection if not shutting down
       if (!this.isShuttingDown && manager && manager.reconnectAttempts < manager.maxReconnectAttempts) {
-        this.scheduleReconnection(connectionKey, 5000); // 5 second delay
+        this.scheduleReconnection(manager, 'connection closed'); // Use manager object and reason string
       }
     });
 
@@ -666,7 +666,7 @@ class ImapIdleService {
   /**
    * Schedule reconnection for a folder connection
    */
-  private scheduleReconnection(connectionKey: string, delay: number): void {
+  private scheduleFolderReconnection(connectionKey: string, delay: number): void {
     const manager = this.folderConnections.get(connectionKey);
     if (!manager || manager.reconnectScheduled || this.isShuttingDown) {
       return;
@@ -1047,7 +1047,8 @@ class ImapIdleService {
     }
 
     // Detect ECONNREFUSED errors and apply immediate cooldown
-    if (reason.includes('ECONNREFUSED') || manager.lastError?.includes('ECONNREFUSED')) {
+    if ((typeof reason === 'string' && reason.includes('ECONNREFUSED')) || 
+        (typeof manager.lastError === 'string' && manager.lastError.includes('ECONNREFUSED'))) {
       console.warn(`Account ${manager.accountId} has unreachable host (ECONNREFUSED) - applying immediate 15-minute cooldown`);
       manager.cooldownUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
       manager.reconnectAttempts = manager.maxReconnectAttempts; // Prevent further attempts

@@ -283,7 +283,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts]);
 
   // Show real emails only - no mock data fallback
-  const displayEmails = emails;
+  const displayEmails = Array.isArray(emails) ? emails : [];
 
   // Filter emails based on selected folder and search
   const filteredEmails = displayEmails.filter(email => {
