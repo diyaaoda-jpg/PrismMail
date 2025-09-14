@@ -12,41 +12,36 @@ import { storage } from "./storage";
 import { emailEventEmitter, EMAIL_EVENTS } from "./events";
 import { getSession } from "./replitAuth";
 
+// Production-grade architecture imports
+import { ArchitectureIntegration, BackwardCompatibility } from "./integration/index.js";
+import { config } from "./config/index.js";
+import { logger } from "./utils/logger.js";
+import { metrics, EmailMetrics } from "./monitoring/metrics.js";
+
 const app = express();
-app.use(express.json());
+
+// Initialize production-grade architecture
+const architectureIntegration = new ArchitectureIntegration(app);
+
+// Basic middleware (before architecture integration)
+app.use(express.json({ limit: config.performance.requestTimeout ? '10mb' : '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
-
 (async () => {
+  try {
+    // Initialize production-grade architecture foundation
+    await architectureIntegration.initialize();
+    
+    // Ensure backward compatibility
+    BackwardCompatibility.ensureWebSocketCompatibility();
+    BackwardCompatibility.ensureEmailSyncCompatibility();
+    BackwardCompatibility.ensureUICompatibility();
+    
+    logger.info('Production-grade architecture successfully integrated');
+  } catch (error) {
+    logger.error('Failed to initialize production-grade architecture', { error: error as Error });
+    process.exit(1);
+  }
   const server = await registerRoutes(app);
   
   // Interface for authenticated WebSocket connections
