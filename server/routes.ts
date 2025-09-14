@@ -11,6 +11,8 @@ import { getEwsPushService } from "./ewsPushNotifications";
 import { getImapIdleService } from "./imapIdle";
 import { priorityEngine } from "./services/priorityEngine";
 import { backgroundJobService } from "./services/backgroundJobs";
+import { ewsSendService } from "./services/ewsSendService";
+import { messageFormatter } from "./services/messageFormatter";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
@@ -1120,22 +1122,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // Configure transport for the account protocol
-      let transporter: nodemailer.Transporter;
+      let sendResult: any;
+      let messageId: string;
       
       if (account.protocol === 'EWS') {
-        throw new ApiError(
-          ErrorCodes.EMAIL_SEND_FAILED,
-          'Email sending via EWS is not yet supported',
-          501,
-          'EWS email sending functionality is under development',
-          undefined,
-          [
-            'Use an IMAP account for sending emails',
-            'Contact support for EWS sending updates'
-          ]
+        // Use EWS to send email directly
+        console.log(`[${requestId}] Using EWS to send email`);
+        
+        // Format the message content using the message formatter
+        const formattedMessage = messageFormatter.formatMessage(emailRequest.body);
+        
+        // Prepare enhanced email request with formatted content
+        const enhancedEmailRequest: SendEmailRequest = {
+          ...emailRequest,
+          body: formattedMessage.text,
+          bodyHtml: formattedMessage.html || undefined
+        };
+        
+        // Send via EWS service
+        const ewsResult = await ewsSendService.sendEmail(
+          encryptedAccount.settingsJson,
+          enhancedEmailRequest
         );
+        
+        if (!ewsResult.success) {
+          throw new ApiError(
+            ErrorCodes.EMAIL_SEND_FAILED,
+            'Failed to send email via EWS',
+            500,
+            ewsResult.error || 'EWS email sending failed',
+            undefined,
+            ewsResult.details?.suggestion ? [ewsResult.details.suggestion] : [
+              'Check your EWS server connection',
+              'Verify your Exchange credentials are correct',
+              'Ensure you have permission to send emails'
+            ]
+          );
+        }
+        
+        sendResult = {
+          messageId: ewsResult.messageId,
+          accepted: [emailRequest.to],
+          rejected: [],
+          response: 'EWS email sent successfully'
+        };
+        messageId = ewsResult.messageId || `ews-${Date.now()}`;
+        
+        console.log(`[${requestId}] EWS email sent successfully: ${messageId}`);
+        
       } else if (account.protocol === 'IMAP') {
+        // Configure SMTP transport for IMAP accounts
+        console.log(`[${requestId}] Using SMTP to send email`);
+        
         // Use SMTP settings from account configuration
         const smtpSettings = accountSettings.smtp;
         if (!smtpSettings || !smtpSettings.host) {
@@ -1179,6 +1217,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ]
           );
         }
+        
+        // Configure SMTP transporter
+        const transporter = nodemailer.createTransport({
+          host: smtpSettings.host,
+          port: smtpSettings.port || 587,
+          secure: smtpSettings.secure || false,
+          auth: {
+            user: smtpSettings.username || accountSettings.username,
+            pass: smtpSettings.password || accountSettings.password,
+          },
+          connectionTimeout: 30000,
+          greetingTimeout: 30000,
+          socketTimeout: 30000,
+        });
+
+        // Verify SMTP connection
+        try {
+          await transporter.verify();
+          console.log(`[${requestId}] SMTP connection verified`);
+        } catch (error: any) {
+          console.error(`[${requestId}] SMTP verification failed:`, error);
+          throw new ApiError(
+            ErrorCodes.SMTP_CONNECTION_FAILED,
+            'SMTP connection failed',
+            500,
+            `Cannot connect to SMTP server: ${error.message}`,
+            undefined,
+            [
+              'Check SMTP server settings in account configuration',
+              'Verify SMTP credentials are correct',
+              'Ensure SMTP server is reachable'
+            ]
+          );
+        }
+        
+        // Prepare email message for SMTP
+        const mailOptions = {
+          from: `"${account.name}" <${accountSettings.username}>`,
+          to: emailRequest.to,
+          cc: emailRequest.cc,
+          bcc: emailRequest.bcc,
+          subject: emailRequest.subject,
+          text: emailRequest.body,
+          html: emailRequest.bodyHtml,
+          replyTo: undefined,
+          attachments: emailRequest.attachments?.map(att => ({
+            filename: att.filename,
+            content: Buffer.from(att.content, 'base64'),
+            contentType: att.contentType
+          }))
+        };
+
+        // Send the email via SMTP
+        try {
+          sendResult = await transporter.sendMail(mailOptions);
+          messageId = sendResult.messageId;
+          console.log(`[${requestId}] SMTP email sent successfully: ${messageId}`);
+        } catch (error: any) {
+          console.error(`[${requestId}] Failed to send SMTP email:`, error);
+          throw new ApiError(
+            ErrorCodes.EMAIL_SEND_FAILED,
+            'Failed to send email',
+            500,
+            `Email sending failed: ${error.message}`,
+            undefined,
+            [
+              'Check your internet connection',
+              'Verify recipient email addresses are correct',
+              'Ensure account SMTP settings are valid',
+              'Try sending the email again'
+            ]
+          );
+        }
+        
       } else {
         throw new ApiError(
           ErrorCodes.UNSUPPORTED_PROTOCOL,
@@ -1188,51 +1300,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // Prepare email message
-      const mailOptions = {
-        from: `"${account.name}" <${accountSettings.username}>`,
-        to: emailRequest.to,
-        cc: emailRequest.cc,
-        bcc: emailRequest.bcc,
-        subject: emailRequest.subject,
-        text: emailRequest.body,
-        html: emailRequest.bodyHtml,
-        replyTo: undefined,
-        attachments: emailRequest.attachments?.map(att => ({
-          filename: att.filename,
-          content: Buffer.from(att.content, 'base64'),
-          contentType: att.contentType
-        }))
-      };
-
-      // Send the email
-      let sendResult: any;
-      try {
-        sendResult = await transporter.sendMail(mailOptions);
-        console.log(`[${requestId}] Email sent successfully:`, sendResult.messageId);
-      } catch (error: any) {
-        console.error(`[${requestId}] Failed to send email:`, error);
-        throw new ApiError(
-          ErrorCodes.EMAIL_SEND_FAILED,
-          'Failed to send email',
-          500,
-          `Email sending failed: ${error.message}`,
-          undefined,
-          [
-            'Check your internet connection',
-            'Verify recipient email addresses are correct',
-            'Ensure account SMTP settings are valid',
-            'Try sending the email again'
-          ]
-        );
-      }
-
       // Store sent email in database for record keeping
       const sentEmailData = {
         userId,
         accountId: emailRequest.accountId,
-        messageId: sendResult.messageId || `sent-${Date.now()}`,
-        from: mailOptions.from,
+        messageId: messageId || `sent-${Date.now()}`,
+        from: `"${account.name}" <${accountSettings.username}>`,
         to: emailRequest.to,
         cc: emailRequest.cc || null,
         bcc: emailRequest.bcc || null,
@@ -1242,7 +1315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         folder: 'Sent',
         flags: ['\\Seen'],
         date: new Date(),
-        size: JSON.stringify(mailOptions).length,
+        size: (emailRequest.body || '').length + (emailRequest.bodyHtml || '').length,
         replyTo: null,
         attachments: emailRequest.attachments || []
       };
@@ -1257,7 +1330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const response: SendEmailResponse = {
         success: true,
-        messageId: sendResult.messageId,
+        messageId: messageId,
         sentAt: new Date()
       };
 

@@ -189,7 +189,7 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
       throw new Error('Missing required settings: host, username, or password');
     }
     
-    console.log(`IMAP connection test starting for ${settings.host}:${settings.port}`);
+    console.log('IMAP connection test starting');
     
     // Enhanced IMAP client configuration with better timeout handling
     const client = new ImapFlow({
@@ -212,16 +212,8 @@ export async function testImapConnection(settingsJson: string): Promise<Connecti
       }
     });
     
-    // Add connection event listeners for better diagnostics
-    client.on('connect', () => {
-      networkInfo.tcpConnected = true;
-      console.log('IMAP TCP connection established');
-    });
-    
-    client.on('secure', () => {
-      networkInfo.sslHandshake = true;
-      console.log('IMAP SSL handshake completed');
-    });
+    // Note: ImapFlow doesn't expose 'connect' and 'secure' events
+    // Network info will be updated after successful connection
     
     // Phase 1: DNS Resolution and TCP Connection
     console.log('Phase 1: Connecting to IMAP server...');
@@ -311,7 +303,7 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
       
       // Check if it's encrypted format (has encrypted, iv, tag fields)
       if (parsed.encrypted && parsed.iv && parsed.tag) {
-        console.log('Decrypting EWS account settings...');
+        console.log('Processing encrypted account settings...');
         settings = decryptAccountSettingsWithPassword(settingsJson);
       } else {
         // It's plain JSON settings
@@ -320,7 +312,7 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
     } catch (parseError) {
       // If JSON parsing fails, try direct decryption
       try {
-        console.log('Attempting direct decryption of EWS settings...');
+        console.log('Processing account settings...');
         settings = decryptAccountSettingsWithPassword(settingsJson);
       } catch (decryptError) {
         console.error('Failed to parse/decrypt EWS settings:', parseError, decryptError);
@@ -339,10 +331,10 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
       throw new Error('Missing required settings: host, username, or password');
     }
     
-    console.log(`EWS connection test starting for ${settings.host}`);
+    console.log('EWS connection test starting');
     
     const ewsUrl = normalizeEwsUrl(settings.host);
-    console.log('Normalized EWS URL:', ewsUrl);
+    console.log('EWS URL normalized for connection test');
     
     // Phase 1: EWS endpoint discovery and basic connectivity
     console.log('Phase 1: Testing EWS endpoint...');
@@ -493,7 +485,7 @@ export async function testSmtpConnection(settingsJson: string): Promise<Connecti
     console.log(`SMTP connection test starting for ${smtpHost}:${smtpPort} (secure: ${smtpSecure})`);
     
     // Enhanced nodemailer configuration
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       host: smtpHost,
       port: smtpPort,
       secure: smtpSecure, // true for 465, false for other ports
@@ -505,14 +497,8 @@ export async function testSmtpConnection(settingsJson: string): Promise<Connecti
       connectionTimeout: 15000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
-      // Add event logging for diagnostics
-      debug: false, // Disable verbose debug output
-      logger: {
-        debug: () => {}, // Silent debug
-        info: (info: any) => console.log('SMTP Info:', info),
-        warn: (info: any) => console.warn('SMTP Warning:', info),
-        error: (info: any) => console.error('SMTP Error:', info)
-      }
+      // Debug configuration
+      debug: false
     });
     
     // Phase 1: Connection and authentication test

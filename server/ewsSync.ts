@@ -312,6 +312,8 @@ export async function syncEwsEmails(
             hasAttachments: item.HasAttachments || false,
             flags: extractFlagsFromEws(item),
             priority: calculatePriority((item as any).Importance, (item as any).From?.Name),
+            autoPriority: calculatePriority((item as any).Importance, (item as any).From?.Name), // Auto-calculated priority
+            priorityScore: calculatePriorityScore((item as any).Importance, (item as any).From?.Name), // Detailed scoring 0-100
             snippet: item.Preview || extractSnippetFromBody(item.Body?.Text),
             bodyContent: item.Body?.Text || '',
             bodyType: (item as any).Body?.BodyType?.toString() === 'HTML' ? 'html' : 'text'
@@ -524,6 +526,30 @@ function calculatePriority(importance?: any, senderName?: string): number {
   // For now, just return the importance-based priority
   
   return Math.min(priority, 3); // Cap at 3 stars
+}
+
+/**
+ * Calculate detailed priority score (0-100) based on various factors
+ */
+function calculatePriorityScore(importance?: any, senderName?: string): number {
+  let score = 50; // Base score (normal importance)
+  
+  // Adjust based on importance
+  const importanceStr = importance?.toString();
+  if (importanceStr === 'High') {
+    score += 30; // High importance adds 30 points
+  } else if (importanceStr === 'Low') {
+    score -= 20; // Low importance subtracts 20 points
+  }
+  
+  // Could add more sophisticated scoring factors here:
+  // - VIP status
+  // - Keyword matching
+  // - Time-based factors
+  // - Thread context
+  
+  // Ensure score stays within 0-100 range
+  return Math.max(0, Math.min(100, score));
 }
 
 /**

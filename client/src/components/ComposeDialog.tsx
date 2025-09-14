@@ -237,7 +237,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo, mo
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
+      const response = await apiRequest('POST', '/api/mail/send', emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
