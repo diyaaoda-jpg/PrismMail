@@ -355,10 +355,13 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   });
 
   // Account connections API with proper typing
-  const { data: accounts = [], isLoading: accountsLoading } = useQuery<AccountConnection[]>({
+  const { data: accountsData, isLoading: accountsLoading } = useQuery<AccountConnection[]>({
     queryKey: ['/api/accounts'],
     enabled: isOpen
   });
+  
+  // Ensure accounts is always an array to prevent runtime errors
+  const accounts = Array.isArray(accountsData) ? accountsData : [];
 
   // Enhanced connection test with detailed progress and error handling
   const testConnectionMutation = useMutation({
