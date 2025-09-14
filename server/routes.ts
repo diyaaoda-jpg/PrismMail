@@ -4,8 +4,8 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
-import { discoverImapFolders, appendSentEmailToFolder } from "./emailSync";
-import { discoverEwsFolders } from "./ewsSync";
+import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
+import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
 import { getImapIdleService } from "./imapIdle";
 import { z } from "zod";
@@ -1373,6 +1373,154 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/discover-folders`, requestId);
+    }
+  });
+
+  // Email sync endpoints - CRITICAL MISSING ROUTES
+  app.post('/api/sync/all', isAuthenticated, async (req: any, res) => {
+    const requestId = `sync-all-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      console.log(`[${requestId}] Starting sync for all accounts for user ${userId}`);
+      
+      const results = await syncAllUserAccounts(userId, storage);
+      
+      console.log(`[${requestId}] Sync completed for ${results.length} accounts`);
+      
+      res.json(createSuccessResponse(
+        results,
+        `Synchronization completed for ${results.length} accounts`
+      ));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/sync/all', requestId);
+    }
+  });
+
+  app.post('/api/accounts/:accountId/sync', isAuthenticated, async (req: any, res) => {
+    const requestId = `sync-account-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const accountId = req.params.accountId;
+      const { folder = 'INBOX', limit = 50 } = req.body;
+      
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      if (!accountId) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Account ID is required',
+          400,
+          'Account ID parameter is missing'
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      if (!account.isActive) {
+        throw new ApiError(
+          ErrorCodes.INVALID_ACCOUNT_STATE,
+          'Cannot sync inactive account',
+          400,
+          'The account is not active and cannot be synchronized'
+        );
+      }
+
+      console.log(`[${requestId}] Starting sync for account ${accountId} (${account.protocol})`);
+
+      // Get encrypted account settings
+      const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
+      if (!encryptedAccount) {
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to retrieve account settings',
+          500
+        );
+      }
+
+      let result: any;
+      
+      if (account.protocol === 'EWS') {
+        // For EWS, check if folders exist first, discover if needed
+        const existingFolders = await storage.getAccountFolders(accountId);
+        if (existingFolders.length === 0) {
+          console.log(`[${requestId}] Discovering folders for EWS account before sync`);
+          const folderResult = await discoverEwsFolders(accountId, encryptedAccount.settingsJson, storage);
+          if (!folderResult.success) {
+            throw new ApiError(
+              ErrorCodes.INTERNAL_SERVER_ERROR,
+              'Folder discovery failed',
+              500,
+              folderResult.error || 'Could not discover EWS folders'
+            );
+          }
+        }
+        
+        result = await syncEwsEmails(storage, accountId, folder, limit);
+      } else if (account.protocol === 'IMAP') {
+        result = await syncImapEmails(accountId, encryptedAccount.settingsJson, storage, { folder, limit });
+      } else {
+        throw new ApiError(
+          ErrorCodes.UNSUPPORTED_PROTOCOL,
+          'Sync not supported for this protocol',
+          400,
+          `Protocol "${account.protocol}" does not support synchronization`
+        );
+      }
+
+      console.log(`[${requestId}] Sync completed for account ${accountId}: ${result.success ? 'success' : 'failed'}`);
+
+      if (result.success) {
+        // Update account sync status
+        await storage.updateAccountConnection(accountId, {
+          lastError: null,
+          lastChecked: result.lastSync || new Date()
+        });
+
+        res.json(createSuccessResponse(
+          result,
+          `Account synchronized successfully. ${result.messageCount || 0} messages processed.`
+        ));
+      } else {
+        // Update account with error
+        await storage.updateAccountConnection(accountId, {
+          lastError: result.error || 'Sync failed',
+          lastChecked: result.lastSync || new Date()
+        });
+
+        throw new ApiError(
+          ErrorCodes.INTERNAL_SERVER_ERROR,
+          'Synchronization failed',
+          500,
+          result.error || 'Unknown error during synchronization'
+        );
+      }
+    } catch (error) {
+      handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/sync`, requestId);
     }
   });
 
