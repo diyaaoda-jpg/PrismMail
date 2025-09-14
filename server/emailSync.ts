@@ -661,37 +661,80 @@ export async function syncAllUserAccounts(
           }
         }
       } else if (account.protocol === 'EWS') {
+        console.log(`Starting EWS sync for account: ${account.name} (${account.id})`);
+        
         // Get encrypted settings for this account
         const encryptedAccount = await storage.getAccountConnectionEncrypted(account.id);
         if (encryptedAccount) {
-          const { syncEwsEmails } = await import('./ewsSync.js');
-          const result = await syncEwsEmails(
-            storage,
-            account.id,
-            'INBOX', // Start with inbox
-            25 // 25 recent messages
-          );
-          
-          results.push({ 
-            accountId: account.id, 
-            result: {
-              success: result.success,
-              error: result.error,
-              lastSync: result.lastSync,
-              messageCount: result.messageCount
+          try {
+            const { syncEwsEmails, discoverEwsFolders } = await import('./ewsSync.js');
+            
+            // First, discover folders if not already done
+            const existingFolders = await storage.getAccountFolders(account.id);
+            if (existingFolders.length === 0) {
+              console.log(`Discovering EWS folders for account ${account.id}`);
+              const folderResult = await discoverEwsFolders(
+                account.id,
+                encryptedAccount.settingsJson,
+                storage
+              );
+              console.log(`EWS folder discovery result: ${folderResult.success ? 'success' : 'failed'}, ${folderResult.folderCount} folders`);
+              
+              if (!folderResult.success) {
+                throw new Error(folderResult.error || 'Failed to discover EWS folders');
+              }
+            } else {
+              console.log(`Using existing ${existingFolders.length} folders for account ${account.id}`);
             }
-          });
-          
-          // Update account sync status
-          if (!result.success && result.error) {
-            await storage.updateAccountConnection(account.id, { 
-              lastError: result.error,
-              lastChecked: result.lastSync
+            
+            // Now sync emails from inbox
+            console.log(`Syncing EWS emails for account ${account.id}`);
+            const result = await syncEwsEmails(
+              storage,
+              account.id,
+              'INBOX', // Start with inbox
+              25 // 25 recent messages
+            );
+            
+            console.log(`EWS sync completed for account ${account.id}: ${result.success ? 'success' : 'failed'}, ${result.messageCount || 0} messages`);
+            
+            results.push({ 
+              accountId: account.id, 
+              result: {
+                success: result.success,
+                error: result.error,
+                lastSync: result.lastSync,
+                messageCount: result.messageCount
+              }
             });
-          } else {
+            
+            // Update account sync status
+            if (!result.success && result.error) {
+              await storage.updateAccountConnection(account.id, { 
+                lastError: result.error,
+                lastChecked: result.lastSync
+              });
+            } else {
+              await storage.updateAccountConnection(account.id, { 
+                lastError: null,
+                lastChecked: result.lastSync
+              });
+            }
+          } catch (error: any) {
+            console.error(`EWS sync failed for account ${account.id}:`, error);
+            results.push({
+              accountId: account.id,
+              result: {
+                success: false,
+                error: error.message || 'EWS sync failed',
+                lastSync: new Date(),
+              }
+            });
+            
+            // Update account with error
             await storage.updateAccountConnection(account.id, { 
-              lastError: null,
-              lastChecked: result.lastSync
+              lastError: error.message || 'EWS sync failed',
+              lastChecked: new Date()
             });
           }
         }
