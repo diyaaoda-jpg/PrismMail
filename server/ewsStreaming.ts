@@ -1,6 +1,7 @@
 import { IStorage } from './storage';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { syncEwsEmails } from './ewsSync';
+import { emailEventEmitter, EMAIL_EVENTS } from './events';
 
 export interface EwsStreamingManager {
   accountId: string;
@@ -297,6 +298,16 @@ class EwsStreamingService {
           setImmediate(async () => {
             try {
               await syncEwsEmails(this.storage, accountId, folderName);
+              
+              // Emit event for real-time frontend updates
+              emailEventEmitter.emit(EMAIL_EVENTS.EMAIL_SYNCED, {
+                accountId,
+                folder: folderName,
+                eventCount: folderEventList.length,
+                events: folderEventList.map(e => e.eventType),
+                timestamp: new Date().toISOString()
+              });
+              
             } catch (error) {
               console.error(`Error syncing EWS folder ${folderName} for account ${accountId}:`, error);
             }

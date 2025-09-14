@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
@@ -140,6 +141,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     queryKey: ['/api/preferences']
   });
 
+  // WebSocket connection for real-time email updates
+  const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
+
   // Auto-select account on load with IMAP preference
   useEffect(() => {
     if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
@@ -154,6 +158,28 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       }
     }
   }, [accounts, selectedAccount]);
+
+  // Listen for WebSocket messages and refresh emails automatically
+  useEffect(() => {
+    if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
+      console.log('🔔 Real-time email update received:', wsMessage.type, wsMessage.data);
+      
+      // Show a subtle notification to user
+      if (wsMessage.type === 'emailReceived') {
+        toast({
+          title: "New email received",
+          description: "Your inbox has been updated automatically.",
+          duration: 3000,
+        });
+      }
+      
+      // Automatically refresh the email list
+      refetchEmails();
+      
+      // Also invalidate the unified counts to update badges
+      queryClient.invalidateQueries({ queryKey: ['/api/mail/unified-counts'] });
+    }
+  }, [wsMessage, refetchEmails, toast]);
 
   // Get the selected account or fall back to first active account - with array safety
   const primaryAccount = accounts.length > 0 ? (
