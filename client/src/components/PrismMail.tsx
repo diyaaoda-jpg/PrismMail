@@ -128,12 +128,12 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
 
   // Fetch user's accounts - ensure it's always an array
-  const { data: accountsData, isLoading: accountsLoading } = useQuery<AccountConnection[]>({
+  const { data: accountsResponse, isLoading: accountsLoading } = useQuery({
     queryKey: ['/api/accounts']
   });
   
-  // Ensure accounts is always an array to prevent runtime errors
-  const accounts = Array.isArray(accountsData) ? accountsData : [];
+  // Extract accounts from API response wrapper and ensure it's always an array
+  const accounts = Array.isArray(accountsResponse?.data) ? accountsResponse.data : [];
 
   // Fetch user preferences for auto-sync settings
   const { data: userPrefs } = useQuery<UserPrefs>({

@@ -155,7 +155,34 @@ export function MailSidebar({
     const count = accountId ? 
       accountFolderCounts[accountId]?.[folder.id] || 0 : 
       unreadCounts[folder.id] || 0;
-    const IconComponent = folder.icon;
+    
+    // Handle icon mapping - convert string icon names to React components
+    let IconComponent = folder.icon;
+    if (typeof folder.icon === 'string') {
+      switch (folder.icon) {
+        case 'Inbox':
+          IconComponent = Inbox;
+          break;
+        case 'Send':
+          IconComponent = Send;
+          break;
+        case 'FileText':
+          IconComponent = FileText;
+          break;
+        case 'Trash':
+          IconComponent = Trash;
+          break;
+        case 'Archive':
+          IconComponent = Archive;
+          break;
+        case 'ShieldAlert':
+          IconComponent = ShieldAlert;
+          break;
+        default:
+          IconComponent = FolderOpen;
+          break;
+      }
+    }
 
     return (
       <Button
