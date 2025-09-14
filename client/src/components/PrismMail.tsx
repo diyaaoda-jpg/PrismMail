@@ -166,7 +166,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
     queryKey: selectedAccount === '' 
       ? ['/api/mail/unified', selectedFolder]
-      : ['/api/mail', selectedFolder],
+      : ['/api/mail', selectedFolder, selectedAccount],
     queryFn: ({ queryKey }) => {
       const [endpoint, folder] = queryKey;
       if (endpoint === '/api/mail/unified') {
