@@ -1326,8 +1326,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch messages from all accounts in parallel
       const messagePromises = accounts.map(async (account) => {
         try {
-          console.log(`[${requestId}] Fetching messages for account ${account.id} (${account.name}), folder: ${folder}`);
-          const messages = await storage.getMailMessages(account.id, folder, Number(limit), Number(offset));
+          // Map common folder names to protocol-specific names for each account
+          let mappedFolder = folder;
+          if (account.protocol === 'EWS') {
+            const ewsFolderMap: Record<string, string> = {
+              'sent': 'SentItems',
+              'drafts': 'Drafts', 
+              'deleted': 'DeletedItems',
+              'trash': 'DeletedItems',
+              'spam': 'JunkEmail',
+              'junk': 'JunkEmail',
+              'archive': 'Archive'
+            };
+            mappedFolder = ewsFolderMap[folder.toLowerCase()] || folder;
+          } else if (account.protocol === 'IMAP') {
+            const imapFolderMap: Record<string, string> = {
+              'sent': 'Sent',
+              'drafts': 'Drafts',
+              'deleted': 'Trash', 
+              'trash': 'Trash',
+              'spam': 'Spam',
+              'junk': 'Spam'
+            };
+            mappedFolder = imapFolderMap[folder.toLowerCase()] || folder;
+          }
+          
+          console.log(`[${requestId}] Fetching messages for account ${account.id} (${account.name}), folder: ${folder} → ${mappedFolder}`);
+          const messages = await storage.getMailMessages(account.id, mappedFolder, Number(limit), Number(offset));
           console.log(`[${requestId}] Found ${messages.length} messages for account ${account.id}`);
           
           // Add account info to each message for frontend display
