@@ -143,17 +143,32 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   // WebSocket connection for real-time email updates
   const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
+  
+  // Debug WebSocket state
+  console.log('DEBUG: Component render - wsConnected:', wsConnected, 'wsMessage:', wsMessage);
 
-  // Test toast notification on component mount
+  // Test toast notification immediately
   useEffect(() => {
-    setTimeout(() => {
+    console.log('DEBUG: Test toast effect running');
+    toast({
+      title: "🧪 Immediate Test",
+      description: "If you see this, the toast system works!",
+      duration: 8000,
+    });
+  }, []);
+
+  // ANOTHER test with timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      console.log('DEBUG: Timer toast firing');
       toast({
-        title: "🧪 Test Notification",
-        description: "This is a test to verify the toast system is working.",
-        duration: 3000,
+        title: "⏰ Timer Test",
+        description: "This is the timer test notification",
+        duration: 8000,
       });
-    }, 2000);
-  }, [toast]);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Auto-select account on load with IMAP preference
   useEffect(() => {
