@@ -698,8 +698,15 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       });
       
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to sync account');
+        let errorMessage = 'Failed to sync account';
+        try {
+          const error = await response.json();
+          errorMessage = error.message || errorMessage;
+        } catch {
+          // If JSON parsing fails, use response status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
       
       const result = await response.json();
