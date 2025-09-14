@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle } from "lucide-react";
+import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle, Users, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -52,9 +52,10 @@ const defaultAccountFolders: MailFolder[] = [
 ];
 
 const smartFolders: MailFolder[] = [
-  { id: 'focus', name: 'Focus', icon: Zap, color: 'text-chart-3' },
-  { id: 'unread', name: 'Unread', icon: Filter, color: 'text-accent' },
-  { id: 'priority', name: 'High Priority', icon: Star, color: 'text-destructive' },
+  { id: 'focus', name: 'Focus', icon: Sparkles, color: 'text-[hsl(var(--priority-high))]' },
+  { id: 'unread', name: 'Unread', icon: Filter, color: 'text-[hsl(var(--status-unread))]' },
+  { id: 'priority', name: 'High Priority', icon: AlertTriangle, color: 'text-[hsl(var(--priority-critical))]' },
+  { id: 'flagged', name: 'Flagged', icon: Star, color: 'text-[hsl(var(--status-flagged))]' },
 ];
 
 export function MailSidebar({
@@ -208,27 +209,35 @@ export function MailSidebar({
   };
 
   return (
-    <div className="w-64 bg-sidebar border-r flex flex-col h-full">
-      {/* Header with compose button */}
-      <div className="p-4 border-b">
+    <div className="w-64 bg-gradient-to-b from-sidebar to-sidebar/95 border-r border-border/60 flex flex-col h-full backdrop-blur-sm">
+      {/* Enhanced Header with compose button */}
+      <div className="p-6 border-b border-border/40 bg-gradient-to-r from-sidebar/50 to-sidebar/30 backdrop-blur-sm">
         <Button 
           onClick={handleCompose}
-          className="w-full mb-4 hover-elevate active-elevate-2"
+          className={cn(
+            "w-full mb-5 font-semibold text-white shadow-lg h-11",
+            "bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary/80",
+            "transition-all duration-200 hover:shadow-xl hover:scale-[1.02]"
+          )}
           data-testid="button-compose"
         >
-          <Plus className="h-4 w-4 mr-2" />
-          Compose
+          <Plus className="h-5 w-5 mr-3" />
+          Compose Mail
         </Button>
         
-        {/* Search */}
-        <form onSubmit={handleSearch} className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        {/* Enhanced Search */}
+        <form onSubmit={handleSearch} className="relative group">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-accent" />
           <Input
             type="search"
-            placeholder="Search mail..."
+            placeholder="Search emails..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            className={cn(
+              "pl-10 pr-4 h-10 transition-all duration-200 bg-background/60 backdrop-blur-sm",
+              "border-border/60 focus:border-accent/60 focus:ring-1 focus:ring-accent/20",
+              "hover:bg-background/80"
+            )}
             data-testid="input-search"
           />
         </form>

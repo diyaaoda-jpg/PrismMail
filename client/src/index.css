@@ -4,79 +4,91 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE */
+/* LIGHT MODE - Modern Professional Palette */
 :root {
-  --button-outline: rgba(0,0,0, .10);
-  --badge-outline: rgba(0,0,0, .05);
+  --button-outline: rgba(0,0,0, .12);
+  --badge-outline: rgba(0,0,0, .08);
 
   /* Automatic computation of border around primary / danger buttons */
-  --opaque-button-border-intensity: -8; /* In terms of percentages */
+  --opaque-button-border-intensity: -6; /* In terms of percentages */
 
   /* Backgrounds applied on top of other backgrounds when hovered/active */
-  --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .08);
+  --elevate-1: rgba(0,0,0, .04);
+  --elevate-2: rgba(0,0,0, .09);
 
-  --background: 240 5% 96%;
-
-  --foreground: 240 6% 10%;
-
-  --border: 240 4% 88%;
-
-  --card: 240 5% 94%;
-
-  --card-foreground: 240 6% 10%;
-
-  --card-border: 240 4% 86%;
-
-  --sidebar: 240 5% 92%;
-
-  --sidebar-foreground: 240 6% 10%;
-
-  --sidebar-border: 240 4% 84%;
-
-  --sidebar-primary: 240 6% 10%;
-
-  --sidebar-primary-foreground: 240 5% 96%;
-
-  --sidebar-accent: 240 5% 88%;
-
-  --sidebar-accent-foreground: 240 6% 10%;
-
-  --sidebar-ring: 240 6% 10%;
-
-  --popover: 240 5% 90%;
-
-  --popover-foreground: 240 6% 10%;
-
-  --popover-border: 240 4% 82%;
-
-  --primary: 240 6% 10%;
-
-  --primary-foreground: 240 5% 96%;
-
-  --secondary: 240 5% 86%;
-
-  --secondary-foreground: 240 6% 10%;
-
-  --muted: 240 4% 90%;
-
-  --muted-foreground: 240 6% 45%;
-
-  --accent: 217 91% 90%;
-
-  --accent-foreground: 217 91% 25%;
-
-  --destructive: 355 85% 55%;
-
-  --destructive-foreground: 355 85% 95%;
-
-  --input: 240 4% 82%;
-  --ring: 240 6% 10%;
-  --chart-1: 217 91% 60%;
-  --chart-2: 142 76% 36%;
-  --chart-3: 15 85% 55%;
-  --chart-4: 45 85% 60%;
-  --chart-5: 355 85% 55%;
+  /* Core neutrals with refined contrast */
+  --background: 240 8% 98%;
+  --foreground: 240 8% 8%;
+  
+  /* Subtle borders and dividers */
+  --border: 240 6% 90%;
+  
+  /* Card system with enhanced hierarchy */
+  --card: 240 8% 96%;
+  --card-foreground: 240 8% 10%;
+  --card-border: 240 6% 88%;
+  
+  /* Professional sidebar styling */
+  --sidebar: 240 8% 94%;
+  --sidebar-foreground: 240 8% 12%;
+  --sidebar-border: 240 6% 86%;
+  --sidebar-primary: 240 8% 14%;
+  --sidebar-primary-foreground: 240 8% 98%;
+  --sidebar-accent: 240 8% 88%;
+  --sidebar-accent-foreground: 240 8% 16%;
+  --sidebar-ring: 240 8% 14%;
+  
+  /* Enhanced popovers */
+  --popover: 240 8% 95%;
+  --popover-foreground: 240 8% 12%;
+  --popover-border: 240 6% 84%;
+  
+  /* Strong primary system */
+  --primary: 240 8% 14%;
+  --primary-foreground: 240 8% 98%;
+  
+  /* Refined secondary palette */
+  --secondary: 240 6% 88%;
+  --secondary-foreground: 240 8% 16%;
+  
+  /* Improved muted system */
+  --muted: 240 6% 92%;
+  --muted-foreground: 240 6% 50%;
+  
+  /* Professional blue accent */
+  --accent: 217 85% 92%;
+  --accent-foreground: 217 85% 20%;
+  
+  /* Clear destructive colors */
+  --destructive: 355 78% 58%;
+  --destructive-foreground: 355 78% 98%;
+  
+  /* Form inputs */
+  --input: 240 6% 86%;
+  --ring: 240 8% 14%;
+  
+  /* Enhanced chart colors for priority system */
+  --chart-1: 217 85% 62%; /* Primary blue */
+  --chart-2: 142 70% 42%; /* Success green */
+  --chart-3: 24 85% 58%;  /* Warning orange */
+  --chart-4: 45 90% 65%;  /* Attention amber */
+  --chart-5: 355 78% 58%; /* Critical red */
+  
+  /* Email-specific priority colors */
+  --priority-low: 200 30% 75%;
+  --priority-normal: 217 85% 62%;
+  --priority-high: 24 85% 58%;
+  --priority-critical: 355 78% 58%;
+  
+  /* Status indicators */
+  --status-unread: 217 85% 55%;
+  --status-flagged: 45 90% 65%;
+  --status-archived: 200 30% 65%;
+  
+  /* Professional gradients */
+  --gradient-primary: linear-gradient(135deg, hsl(217 85% 62%) 0%, hsl(240 8% 14%) 100%);
+  --gradient-accent: linear-gradient(135deg, hsl(217 85% 92%) 0%, hsl(217 85% 85%) 100%);
+  --gradient-card: linear-gradient(180deg, hsl(240 8% 97%) 0%, hsl(240 8% 95%) 100%);
 
   --font-sans: Inter, sans-serif;
   --font-serif: Georgia, serif;
@@ -124,77 +136,90 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/* DARK MODE - Modern Professional Dark Palette */
 .dark {
-  --button-outline: rgba(255,255,255, .10);
-  --badge-outline: rgba(255,255,255, .05);
+  --button-outline: rgba(255,255,255, .12);
+  --badge-outline: rgba(255,255,255, .08);
 
-  --opaque-button-border-intensity: 9;  /* In terms of percentages */
+  --opaque-button-border-intensity: 8;  /* In terms of percentages */
 
   /* Backgrounds applied on top of other backgrounds when hovered/active */
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  --elevate-1: rgba(255,255,255, .05);
+  --elevate-2: rgba(255,255,255, .10);
 
-  --background: 240 4% 8%;
-
-  --foreground: 240 5% 88%;
-
-  --border: 240 5% 18%;
-
-  --card: 240 4% 12%;
-
-  --card-foreground: 240 5% 88%;
-
-  --card-border: 240 5% 20%;
-
-  --sidebar: 240 5% 15%;
-
-  --sidebar-foreground: 240 5% 88%;
-
-  --sidebar-border: 240 5% 22%;
-
-  --sidebar-primary: 240 5% 88%;
-
-  --sidebar-primary-foreground: 240 4% 8%;
-
-  --sidebar-accent: 240 5% 20%;
-
-  --sidebar-accent-foreground: 240 5% 88%;
-
-  --sidebar-ring: 240 5% 88%;
-
-  --popover: 240 5% 18%;
-
-  --popover-foreground: 240 5% 88%;
-
-  --popover-border: 240 5% 25%;
-
-  --primary: 240 5% 88%;
-
-  --primary-foreground: 240 4% 8%;
-
-  --secondary: 240 5% 22%;
-
-  --secondary-foreground: 240 5% 88%;
-
-  --muted: 240 4% 16%;
-
-  --muted-foreground: 240 5% 65%;
-
-  --accent: 217 91% 20%;
-
-  --accent-foreground: 217 91% 85%;
-
-  --destructive: 355 85% 35%;
-
-  --destructive-foreground: 355 85% 95%;
-
-  --input: 240 5% 25%;
-  --ring: 240 5% 88%;
-  --chart-1: 217 91% 75%;
-  --chart-2: 142 76% 55%;
-  --chart-3: 15 85% 70%;
-  --chart-4: 45 85% 75%;
-  --chart-5: 355 85% 70%;
+  /* Core dark neutrals with refined contrast */
+  --background: 240 8% 6%;
+  --foreground: 240 8% 92%;
+  
+  /* Subtle dark borders */
+  --border: 240 6% 18%;
+  
+  /* Enhanced dark card system */
+  --card: 240 8% 10%;
+  --card-foreground: 240 8% 90%;
+  --card-border: 240 6% 22%;
+  
+  /* Professional dark sidebar */
+  --sidebar: 240 8% 12%;
+  --sidebar-foreground: 240 8% 88%;
+  --sidebar-border: 240 6% 20%;
+  --sidebar-primary: 240 8% 86%;
+  --sidebar-primary-foreground: 240 8% 6%;
+  --sidebar-accent: 240 8% 18%;
+  --sidebar-accent-foreground: 240 8% 84%;
+  --sidebar-ring: 240 8% 86%;
+  
+  /* Enhanced dark popovers */
+  --popover: 240 8% 14%;
+  --popover-foreground: 240 8% 88%;
+  --popover-border: 240 6% 26%;
+  
+  /* Strong dark primary */
+  --primary: 240 8% 86%;
+  --primary-foreground: 240 8% 6%;
+  
+  /* Refined dark secondary */
+  --secondary: 240 6% 20%;
+  --secondary-foreground: 240 8% 84%;
+  
+  /* Improved dark muted */
+  --muted: 240 6% 16%;
+  --muted-foreground: 240 6% 62%;
+  
+  /* Professional dark accent */
+  --accent: 217 85% 22%;
+  --accent-foreground: 217 85% 88%;
+  
+  /* Clear dark destructive */
+  --destructive: 355 78% 45%;
+  --destructive-foreground: 355 78% 95%;
+  
+  /* Dark form inputs */
+  --input: 240 6% 24%;
+  --ring: 240 8% 86%;
+  
+  /* Enhanced dark chart colors */
+  --chart-1: 217 85% 72%; /* Primary blue */
+  --chart-2: 142 70% 58%; /* Success green */
+  --chart-3: 24 85% 68%;  /* Warning orange */
+  --chart-4: 45 90% 75%;  /* Attention amber */
+  --chart-5: 355 78% 65%; /* Critical red */
+  
+  /* Dark email-specific priority colors */
+  --priority-low: 200 30% 65%;
+  --priority-normal: 217 85% 72%;
+  --priority-high: 24 85% 68%;
+  --priority-critical: 355 78% 65%;
+  
+  /* Dark status indicators */
+  --status-unread: 217 85% 65%;
+  --status-flagged: 45 90% 75%;
+  --status-archived: 200 30% 55%;
+  
+  /* Professional dark gradients */
+  --gradient-primary: linear-gradient(135deg, hsl(217 85% 72%) 0%, hsl(240 8% 86%) 100%);
+  --gradient-accent: linear-gradient(135deg, hsl(217 85% 22%) 0%, hsl(217 85% 32%) 100%);
+  --gradient-card: linear-gradient(180deg, hsl(240 8% 11%) 0%, hsl(240 8% 9%) 100%);
 
   --shadow-2xs: 0px 2px 0px 0px hsl(240 5% 25% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(240 5% 25% / 0.00);
