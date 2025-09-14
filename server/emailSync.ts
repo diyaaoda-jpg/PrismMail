@@ -661,16 +661,40 @@ export async function syncAllUserAccounts(
           }
         }
       } else if (account.protocol === 'EWS') {
-        // TODO: Implement EWS sync
-        console.log('EWS sync not yet implemented');
-        results.push({
-          accountId: account.id,
-          result: {
-            success: false,
-            error: 'EWS sync not yet implemented',
-            lastSync: new Date(),
+        // Get encrypted settings for this account
+        const encryptedAccount = await storage.getAccountConnectionEncrypted(account.id);
+        if (encryptedAccount) {
+          const { syncEwsEmails } = await import('./ewsSync.js');
+          const result = await syncEwsEmails(
+            storage,
+            account.id,
+            'INBOX', // Start with inbox
+            25 // 25 recent messages
+          );
+          
+          results.push({ 
+            accountId: account.id, 
+            result: {
+              success: result.success,
+              error: result.error,
+              lastSync: result.lastSync,
+              messageCount: result.messageCount
+            }
+          });
+          
+          // Update account sync status
+          if (!result.success && result.error) {
+            await storage.updateAccountConnection(account.id, { 
+              lastError: result.error,
+              lastChecked: result.lastSync
+            });
+          } else {
+            await storage.updateAccountConnection(account.id, { 
+              lastError: null,
+              lastChecked: result.lastSync
+            });
           }
-        });
+        }
       }
     }
     
