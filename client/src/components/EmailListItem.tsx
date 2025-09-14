@@ -18,6 +18,13 @@ export interface EmailMessage {
   bodyHtml?: string;
   bodyText?: string;
   folder: string;
+  // Enhanced priority system fields
+  autoPriority?: number;
+  priorityScore?: number;
+  prioritySource?: string;
+  isVip?: boolean;
+  isInFocus?: boolean;
+  ruleId?: string;
 }
 
 interface EmailListItemProps {
@@ -171,6 +178,9 @@ export function EmailListItem({
             >
               {email.from.replace(/@.*$/, '')}
             </span>
+            {email.isVip && (
+              <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" data-testid={`icon-vip-${email.id}`} />
+            )}
             {priorityInfo.icon && (
               <priorityInfo.icon className={cn("h-3.5 w-3.5 shrink-0", priorityInfo.iconColor)} />
             )}

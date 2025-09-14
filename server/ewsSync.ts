@@ -1,6 +1,8 @@
 import { IStorage } from './storage';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { InsertAccountFolder } from '../shared/schema';
+import { PriorityEngine } from './services/priorityEngine';
+import { distributedJobService } from './services/distributedJobs';
 
 export interface EwsSyncResult {
   success: boolean;
@@ -316,10 +318,29 @@ export async function syncEwsEmails(
           };
 
           // Save to database
-          await storage.createMailMessage(emailData);
+          const savedEmail = await storage.createMailMessage(emailData);
           messageCount++;
           
           console.log(`Saved EWS message: ${emailData.subject}`);
+          
+          // Event-driven priority scoring via distributed jobs
+          if (savedEmail?.id) {
+            try {
+              // Queue priority scoring with high priority for immediate processing
+              await distributedJobService.queuePriorityScoring(
+                savedEmail.id, 
+                accountId, 
+                'sync-context', // Worker will resolve userId from accountId
+                { priority: 'high' }
+              );
+              
+              console.log(`Queued priority job for newly synced EWS email ${savedEmail.id}`);
+              
+            } catch (priorityError) {
+              console.error(`Failed to queue priority job for EWS email ${savedEmail.id}:`, priorityError);
+              // Continue processing - priority calculation failure shouldn't stop sync
+            }
+          }
           
         } catch (error) {
           console.error(`Error processing EWS message ${item.Id?.UniqueId}:`, error);

@@ -2,6 +2,8 @@ import { ImapFlow } from 'imapflow';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { IStorage } from './storage';
 import { InsertMailMessage, InsertAccountFolder } from '../shared/schema';
+import { PriorityEngine } from './services/priorityEngine';
+import { distributedJobService } from './services/distributedJobs';
 
 export interface SyncResult {
   success: boolean;
@@ -538,10 +540,30 @@ export async function syncImapEmails(
           };
           
           // Store in database
-          await storage.createMailMessage(emailData);
+          const savedEmail = await storage.createMailMessage(emailData);
           syncedCount++;
           
           console.log(`Synced message: ${emailData.subject} from ${emailData.from}`);
+          
+          // Event-driven priority scoring with fallback to distributed jobs
+          if (savedEmail?.id) {
+            try {
+              // Queue priority scoring with high priority for immediate processing
+              // The distributed job system will handle userId lookup from accountId
+              await distributedJobService.queuePriorityScoring(
+                savedEmail.id, 
+                accountId, 
+                'sync-context', // Placeholder - worker will resolve userId from accountId
+                { priority: 'high' } // High priority for newly synced emails
+              );
+              
+              console.log(`Queued priority job for newly synced email ${savedEmail.id}`);
+              
+            } catch (priorityError) {
+              console.error(`Failed to queue priority job for email ${savedEmail.id}:`, priorityError);
+              // Continue processing - priority calculation failure shouldn't stop sync
+            }
+          }
           
         } catch (messageError) {
           console.error(`Error processing message ${uid}:`, messageError);
@@ -679,7 +701,7 @@ export async function syncAllUserAccounts(
             success: overallSuccess,
             messageCount: totalMessageCount,
             lastSync: new Date(),
-            error: lastError
+            error: lastError ?? undefined
           };
           
           results.push({ accountId: account.id, result: combinedResult });
@@ -761,7 +783,7 @@ export async function syncAllUserAccounts(
               accountId: account.id, 
               result: {
                 success: overallSuccess,
-                error: lastError,
+                error: lastError ?? undefined,
                 lastSync: new Date(),
                 messageCount: totalMessageCount
               }

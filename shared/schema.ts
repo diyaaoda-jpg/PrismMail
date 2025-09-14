@@ -39,7 +39,7 @@ export const accountConnections = pgTable("account_connections", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Mail message index
+// Enhanced Mail message index
 export const mailIndex = pgTable("mail_index", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
@@ -54,7 +54,17 @@ export const mailIndex = pgTable("mail_index", {
   hasAttachments: boolean("has_attachments").default(false),
   isRead: boolean("is_read").default(false),
   isFlagged: boolean("is_flagged").default(false),
-  priority: integer("priority").default(0), // 0-3 star rating
+  priority: integer("priority").default(0), // 0-3 manual priority rating
+  autoPriority: integer("auto_priority").default(0), // 0-3 auto-calculated priority
+  prioritySource: varchar("priority_source", {
+    enum: ["manual", "rule", "vip", "thread", "auto"]
+  }).default("auto"), // How the priority was assigned
+  ruleId: varchar("rule_id").references(() => priorityRules.id), // Rule that assigned priority
+  isVip: boolean("is_vip").default(false), // Is sender a VIP contact
+  priorityScore: integer("priority_score").default(0), // Detailed scoring (0-100)
+  priorityFactors: jsonb("priority_factors"), // JSON with priority calculation details
+  responseTime: integer("response_time"), // Time to respond in seconds (for analytics)
+  isInFocus: boolean("is_in_focus").default(false), // Should show in focus mode
   snippet: text("snippet"),
   bodyHtml: text("body_html"),
   bodyText: text("body_text"),
@@ -63,31 +73,54 @@ export const mailIndex = pgTable("mail_index", {
 }, (table) => [
   // Unique constraint to prevent duplicate messages
   unique("unique_message_per_account_folder").on(table.accountId, table.folder, table.messageId),
+  // Index for efficient priority and focus filtering
+  index("idx_mail_priority").on(table.accountId, table.priority, table.isInFocus),
+  index("idx_mail_vip").on(table.isVip, table.date),
 ]);
 
-// Priority rules for auto-classification
+// Enhanced Priority rules for auto-classification
 export const priorityRules = pgTable("priority_rules", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
   name: varchar("name").notNull(),
+  description: text("description"), // User-friendly description of what the rule does
   conditionsJson: text("conditions_json").notNull(), // JSON with from, subject, etc conditions
   priority: integer("priority").notNull(), // 0-3
   colorTag: varchar("color_tag"),
   isActive: boolean("is_active").default(true),
+  executionOrder: integer("execution_order").default(0), // Order of rule execution
+  matchCount: integer("match_count").default(0), // Track how many emails this rule has matched
+  lastMatched: timestamp("last_matched"), // When this rule last matched an email
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// VIP contacts
+// Enhanced VIP contacts
 export const vipContacts = pgTable("vip_contacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   email: varchar("email").notNull(),
   name: varchar("name"),
-  priority: integer("priority").default(3), // Auto-priority for VIPs
+  organization: varchar("organization"), // Company or group name
+  title: varchar("title"), // Job title or role
+  vipGroup: varchar("vip_group", { 
+    enum: ["executive", "client", "family", "team", "vendor", "custom"] 
+  }).default("custom"),
+  priority: integer("priority").default(3), // Auto-priority for VIPs (1-3)
+  colorTag: varchar("color_tag"), // Custom color for VIP identification
+  notes: text("notes"), // Optional notes about the VIP
+  interactionCount: integer("interaction_count").default(0), // Email interaction frequency
+  lastInteraction: timestamp("last_interaction"), // Last email exchange
+  photoUrl: varchar("photo_url"), // Profile photo URL
+  isActive: boolean("is_active").default(true), // Can temporarily disable VIP status
   createdAt: timestamp("created_at").defaultNow(),
-});
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Unique constraint to prevent duplicate VIP entries per user
+  unique("unique_vip_per_user").on(table.userId, table.email),
+]);
 
-// User preferences
+// Enhanced User preferences
 export const userPrefs = pgTable("user_prefs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
@@ -98,6 +131,14 @@ export const userPrefs = pgTable("user_prefs", {
   listDensity: varchar("list_density").default("comfortable"),
   signatureHtml: text("signature_html"),
   readingMode: boolean("reading_mode").default(false),
+  // Priority and Focus Mode settings
+  focusModeEnabled: boolean("focus_mode_enabled").default(false),
+  focusMinPriority: integer("focus_min_priority").default(2), // Minimum priority to show in focus mode
+  focusShowVipOnly: boolean("focus_show_vip_only").default(false),
+  focusShowUnreadOnly: boolean("focus_show_unread_only").default(false),
+  autoPriorityEnabled: boolean("auto_priority_enabled").default(true),
+  priorityNotifications: boolean("priority_notifications").default(true), // Notifications for high-priority emails
+  vipNotificationsEnabled: boolean("vip_notifications_enabled").default(true),
   // Sync settings
   syncInterval: integer("sync_interval").default(600), // Default 10 minutes (600 seconds)
   autoSync: boolean("auto_sync").default(true),
@@ -105,6 +146,26 @@ export const userPrefs = pgTable("user_prefs", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// Priority analytics for insights and optimization
+export const priorityAnalytics = pgTable("priority_analytics", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").references(() => accountConnections.id, { onDelete: "cascade" }),
+  metricType: varchar("metric_type", {
+    enum: ["priority_distribution", "focus_time", "response_time", "rule_effectiveness", "vip_interactions"]
+  }).notNull(),
+  metricData: jsonb("metric_data").notNull(), // JSON data specific to metric type
+  aggregationPeriod: varchar("aggregation_period", {
+    enum: ["daily", "weekly", "monthly"]
+  }).notNull(),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Index for efficient querying by user and time period
+  index("idx_analytics_user_period").on(table.userId, table.metricType, table.periodStart),
+]);
 
 // Account folders catalog
 export const accountFolders = pgTable("account_folders", {
@@ -130,10 +191,82 @@ export const accountFolders = pgTable("account_folders", {
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertMailIndexSchema = createInsertSchema(mailIndex).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertPriorityRuleSchema = createInsertSchema(priorityRules).omit({ id: true, createdAt: true });
-export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id: true, createdAt: true });
+export const insertPriorityRuleSchema = createInsertSchema(priorityRules).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPriorityAnalyticsSchema = createInsertSchema(priorityAnalytics).omit({ id: true, createdAt: true });
+
+// Update schemas for PUT operations (partial updates allowed)
+export const updatePriorityRuleSchema = createInsertSchema(priorityRules)
+  .omit({ id: true, createdAt: true, updatedAt: true, accountId: true })
+  .partial()
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    "At least one field must be provided for update"
+  )
+  .refine(
+    (data) => {
+      // Validate conditionsJson if provided
+      if (data.conditionsJson) {
+        try {
+          const conditions = JSON.parse(data.conditionsJson);
+          return conditions.logic && Array.isArray(conditions.rules);
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    },
+    "Invalid conditions JSON format"
+  );
+
+export const updateVipContactSchema = createInsertSchema(vipContacts)
+  .omit({ id: true, createdAt: true, updatedAt: true, userId: true })
+  .partial()
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    "At least one field must be provided for update"
+  )
+  .refine(
+    (data) => {
+      // Validate email format if provided
+      if (data.email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(data.email);
+      }
+      return true;
+    },
+    "Invalid email format"
+  )
+  .refine(
+    (data) => {
+      // Validate priority range if provided
+      if (data.priority !== undefined) {
+        return data.priority >= 0 && data.priority <= 3;
+      }
+      return true;
+    },
+    "Priority must be between 0 and 3"
+  );
+
+export const updateUserPrefsSchema = createInsertSchema(userPrefs)
+  .omit({ id: true, createdAt: true, updatedAt: true, userId: true })
+  .partial()
+  .refine(
+    (data) => Object.keys(data).length > 0,
+    "At least one field must be provided for update"
+  );
+
+// Rule reordering validation schema
+export const reorderRulesSchema = z.object({
+  ruleUpdates: z.array(
+    z.object({
+      id: z.string().min(1, "Rule ID is required"),
+      executionOrder: z.number().int().min(0, "Execution order must be non-negative")
+    })
+  ).min(1, "At least one rule update is required")
+});
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -145,12 +278,18 @@ export type MailMessage = typeof mailIndex.$inferSelect;
 export type InsertMailMessage = z.infer<typeof insertMailIndexSchema>;
 export type PriorityRule = typeof priorityRules.$inferSelect;
 export type InsertPriorityRule = z.infer<typeof insertPriorityRuleSchema>;
+export type UpdatePriorityRule = z.infer<typeof updatePriorityRuleSchema>;
 export type VipContact = typeof vipContacts.$inferSelect;
 export type InsertVipContact = z.infer<typeof insertVipContactSchema>;
+export type UpdateVipContact = z.infer<typeof updateVipContactSchema>;
 export type UserPrefs = typeof userPrefs.$inferSelect;
 export type InsertUserPrefs = z.infer<typeof insertUserPrefsSchema>;
+export type UpdateUserPrefs = z.infer<typeof updateUserPrefsSchema>;
 export type AccountFolder = typeof accountFolders.$inferSelect;
 export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
+export type PriorityAnalytics = typeof priorityAnalytics.$inferSelect;
+export type InsertPriorityAnalytics = z.infer<typeof insertPriorityAnalyticsSchema>;
+export type ReorderRules = z.infer<typeof reorderRulesSchema>;
 
 // Enhanced validation schemas for account settings
 
