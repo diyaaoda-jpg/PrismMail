@@ -732,21 +732,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               </Button>
             )}
             
+            {/* NOTIFICATION TEST BUTTON - Click to test if notifications work */}
             <Button
-              variant="outline"
+              variant="destructive"
               size="sm"
               onClick={() => {
-                console.log('DEBUG: Test button clicked');
+                console.log('DEBUG: Test button clicked - should see big red notification');
                 toast({
-                  title: "🧪 Manual Test",
-                  description: "This notification was triggered by clicking the test button.",
-                  duration: 6000,
+                  title: "🚨 BIG TEST NOTIFICATION",
+                  description: "If you see this, notifications work! This is from the red Test button.",
+                  duration: 10000,
                 });
               }}
               data-testid="button-test-notification"
               className="hover-elevate active-elevate-2"
             >
-              Test
+              📧 Test
             </Button>
             
             <ThemeMenu variant="dropdown" />
