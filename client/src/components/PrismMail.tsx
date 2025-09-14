@@ -144,31 +144,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   // WebSocket connection for real-time email updates
   const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
   
-  // Debug WebSocket state
-  console.log('DEBUG: Component render - wsConnected:', wsConnected, 'wsMessage:', wsMessage);
-
-  // Test toast notification immediately
-  useEffect(() => {
-    console.log('DEBUG: Test toast effect running');
-    toast({
-      title: "🧪 Immediate Test",
-      description: "If you see this, the toast system works!",
-      duration: 8000,
-    });
-  }, []);
-
-  // ANOTHER test with timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      console.log('DEBUG: Timer toast firing');
-      toast({
-        title: "⏰ Timer Test",
-        description: "This is the timer test notification",
-        duration: 8000,
-      });
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
 
   // Auto-select account on load with IMAP preference
   useEffect(() => {
@@ -269,30 +244,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   // Listen for WebSocket messages and refresh emails automatically
   useEffect(() => {
-    console.log('DEBUG: WebSocket message effect triggered:', wsMessage);
-    
     if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
-      console.log('🔔 Real-time email update received:', wsMessage.type, wsMessage.data);
-      
       // Show a prominent notification to user with real-time indicator
       const messageData = wsMessage.data || {};
       const accountName = messageData.accountName || 'your email account';
       const folder = messageData.folder || 'Inbox';
       
-      console.log('DEBUG: About to show toast notification for:', wsMessage.type);
-      
       if (wsMessage.type === 'emailReceived') {
-        console.log('DEBUG: Showing emailReceived toast');
         toast({
-          title: "📧 New Email Received (Real-time)",
-          description: `Email arrived in ${accountName} - ${folder}. Updated automatically via WebSocket.`,
+          title: "📧 New Email Received",
+          description: `Email arrived in ${accountName} - ${folder}. Updated automatically.`,
           duration: 5000,
         });
       } else if (wsMessage.type === 'emailSynced') {
-        console.log('DEBUG: Showing emailSynced toast');
         toast({
-          title: "🔄 Email Sync Complete (Real-time)",
-          description: `${accountName} - ${folder} synchronized. Updated automatically via WebSocket.`,
+          title: "🔄 Email Sync Complete",
+          description: `${accountName} - ${folder} synchronized successfully.`,
           duration: 4000,
         });
       }
@@ -731,24 +698,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 <span className="sr-only">Sync emails</span>
               </Button>
             )}
-            
-            {/* NOTIFICATION TEST BUTTON - Click to test if notifications work */}
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                console.log('DEBUG: Test button clicked - should see big red notification');
-                toast({
-                  title: "🚨 BIG TEST NOTIFICATION",
-                  description: "If you see this, notifications work! This is from the red Test button.",
-                  duration: 10000,
-                });
-              }}
-              data-testid="button-test-notification"
-              className="hover-elevate active-elevate-2"
-            >
-              📧 Test
-            </Button>
             
             <ThemeMenu variant="dropdown" />
             
