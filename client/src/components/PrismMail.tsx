@@ -159,38 +159,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [accounts, selectedAccount]);
 
-  // Listen for WebSocket messages and refresh emails automatically
-  useEffect(() => {
-    if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
-      console.log('🔔 Real-time email update received:', wsMessage.type, wsMessage.data);
-      
-      // Show a prominent notification to user with real-time indicator
-      const messageData = wsMessage.data || {};
-      const accountName = messageData.accountName || 'your email account';
-      const folder = messageData.folder || 'Inbox';
-      
-      if (wsMessage.type === 'emailReceived') {
-        toast({
-          title: "📧 New Email Received (Real-time)",
-          description: `Email arrived in ${accountName} - ${folder}. Updated automatically via WebSocket.`,
-          duration: 5000,
-        });
-      } else if (wsMessage.type === 'emailSynced') {
-        toast({
-          title: "🔄 Email Sync Complete (Real-time)",
-          description: `${accountName} - ${folder} synchronized. Updated automatically via WebSocket.`,
-          duration: 4000,
-        });
-      }
-      
-      // Automatically refresh the email list
-      refetchEmails();
-      
-      // Also invalidate the unified counts to update badges
-      queryClient.invalidateQueries({ queryKey: ['/api/mail/unified-counts'] });
-    }
-  }, [wsMessage, refetchEmails, toast]);
-
   // Get the selected account or fall back to first active account - with array safety
   const primaryAccount = accounts.length > 0 ? (
     accounts.find(account => account.id === selectedAccount) ||
@@ -272,6 +240,38 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       });
     }
   });
+
+  // Listen for WebSocket messages and refresh emails automatically
+  useEffect(() => {
+    if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
+      console.log('🔔 Real-time email update received:', wsMessage.type, wsMessage.data);
+      
+      // Show a prominent notification to user with real-time indicator
+      const messageData = wsMessage.data || {};
+      const accountName = messageData.accountName || 'your email account';
+      const folder = messageData.folder || 'Inbox';
+      
+      if (wsMessage.type === 'emailReceived') {
+        toast({
+          title: "📧 New Email Received (Real-time)",
+          description: `Email arrived in ${accountName} - ${folder}. Updated automatically via WebSocket.`,
+          duration: 5000,
+        });
+      } else if (wsMessage.type === 'emailSynced') {
+        toast({
+          title: "🔄 Email Sync Complete (Real-time)",
+          description: `${accountName} - ${folder} synchronized. Updated automatically via WebSocket.`,
+          duration: 4000,
+        });
+      }
+      
+      // Automatically refresh the email list
+      refetchEmails();
+      
+      // Also invalidate the unified counts to update badges
+      queryClient.invalidateQueries({ queryKey: ['/api/mail/unified-counts'] });
+    }
+  }, [wsMessage, refetchEmails, toast]);
 
   // Auto-sync when a new account becomes active (only once when account changes)
   useEffect(() => {
