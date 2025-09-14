@@ -1184,11 +1184,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Unified message aggregation endpoint for All Accounts view
-  app.get('/api/mail/unified', isAuthenticated, async (req: any, res) => {
+  app.get('/api/mail/unified/:folder?', isAuthenticated, async (req: any, res) => {
     const requestId = `unified-mail-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
-      const { folder = 'INBOX', limit = 50, offset = 0 } = req.query;
+      const { limit = 50, offset = 0 } = req.query;
+      const folder = req.params.folder || 'INBOX';
       
       console.log(`[${requestId}] Fetching unified messages for user ${userId}, folder: ${folder}`);
       
@@ -1205,7 +1206,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch messages from all accounts in parallel
       const messagePromises = accounts.map(async (account) => {
         try {
+          console.log(`[${requestId}] Fetching messages for account ${account.id} (${account.name}), folder: ${folder}`);
           const messages = await storage.getMailMessages(account.id, folder, Number(limit), Number(offset));
+          console.log(`[${requestId}] Found ${messages.length} messages for account ${account.id}`);
           
           // Add account info to each message for frontend display
           return messages.map(msg => ({
