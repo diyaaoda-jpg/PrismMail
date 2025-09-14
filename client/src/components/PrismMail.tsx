@@ -163,7 +163,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   ) : undefined;
 
   // Fetch emails - use unified API for "All Accounts" or specific account API for individual accounts
-  const { data: emails = [], isLoading: emailsLoading, refetch: refetchEmails } = useQuery<EmailMessage[]>({
+  const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
     queryKey: selectedAccount === '' 
       ? ['/api/mail/unified', selectedFolder]
       : ['/api/mail', primaryAccount?.id, selectedFolder],
@@ -184,6 +184,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     enabled: selectedAccount === '',
     staleTime: 1000 * 60 * 2, // 2 minutes
   });
+
+  // Extract emails array from API response (handles {success: true, data: [...]} format)
+  const emails: EmailMessage[] = emailResponse?.success ? emailResponse.data : [];
 
   // Auto-sync emails when account becomes available
   const syncMutation = useMutation({
