@@ -212,6 +212,47 @@ function validateAccountData(data: any): { isValid: boolean; errors: string[] } 
   };
 }
 
+// Separate validation function for connection testing (doesn't require account name)
+function validateConnectionData(data: any): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  
+  if (!data.protocol || !['IMAP', 'EWS'].includes(data.protocol)) {
+    errors.push('Protocol must be either IMAP or EWS');
+  }
+  
+  if (!data.host?.trim()) {
+    errors.push('Mail server host is required');
+  }
+  
+  if (!data.username?.trim()) {
+    errors.push('Username is required');
+  }
+  
+  if (!data.password?.trim()) {
+    errors.push('Password is required');
+  }
+  
+  // Protocol-specific validation
+  if (data.protocol === 'IMAP') {
+    if (data.enableCustomSmtp && (!data.smtpHost?.trim() || !data.smtpPort?.trim())) {
+      errors.push('SMTP host and port are required when custom SMTP is enabled');
+    }
+  }
+  
+  if (data.protocol === 'EWS') {
+    // Basic URL validation for EWS
+    const hostUrl = data.host.trim();
+    if (!hostUrl.includes('.') && !hostUrl.startsWith('http')) {
+      errors.push('EWS server should be a domain name (e.g., mail.company.com) or full URL');
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
@@ -276,12 +317,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         enableCustomSmtp, smtpHost, smtpPort, smtpSecure, smtpUsername, smtpPassword
       } = req.body;
 
-      // Enhanced validation with detailed error messages
-      const validation = validateAccountData({ protocol, host, username, password, enableCustomSmtp, smtpHost, smtpPort });
+      // Enhanced validation with detailed error messages (for connection testing)
+      const validation = validateConnectionData({ protocol, host, username, password, enableCustomSmtp, smtpHost, smtpPort });
       if (!validation.isValid) {
         throw new ApiError(
           ErrorCodes.VALIDATION_ERROR,
-          'Invalid account configuration',
+          'Invalid connection configuration',
           400,
           validation.errors.join('; '),
           undefined,
