@@ -996,7 +996,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
         
-        messages = await storage.getMailMessages(accountId as string, folder as string, limitNum, offsetNum);
+        // Map common folder names to protocol-specific names
+        let mappedFolder = folder as string;
+        if (account.protocol === 'EWS') {
+          const ewsFolderMap: Record<string, string> = {
+            'sent': 'SentItems',
+            'drafts': 'Drafts', 
+            'deleted': 'DeletedItems',
+            'trash': 'DeletedItems',
+            'spam': 'JunkEmail',
+            'junk': 'JunkEmail',
+            'archive': 'Archive'
+          };
+          mappedFolder = ewsFolderMap[folder.toLowerCase()] || folder as string;
+        } else if (account.protocol === 'IMAP') {
+          const imapFolderMap: Record<string, string> = {
+            'sent': 'Sent',
+            'drafts': 'Drafts',
+            'deleted': 'Trash', 
+            'trash': 'Trash',
+            'spam': 'Spam',
+            'junk': 'Spam'
+          };
+          mappedFolder = imapFolderMap[folder.toLowerCase()] || folder as string;
+        }
+        
+        messages = await storage.getMailMessages(accountId as string, mappedFolder, limitNum, offsetNum);
       } else {
         // Legacy: get all messages for user across accounts (fallback for unified view)
         messages = await storage.getMailMessages(userId, folder as string, limitNum, offsetNum);
