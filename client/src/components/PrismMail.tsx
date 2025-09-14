@@ -173,8 +173,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
         return fetch(`${endpoint}/${folder}`).then(res => res.json());
       } else {
         // For individual account view, pass the accountId parameter
-        const accountId = primaryAccount?.id;
+        const accountId = selectedAccount;
         const url = `${endpoint}?folder=${folder}&accountId=${accountId}`;
+        console.log(`API Debug - Fetching emails: ${url}`);
         return fetch(url).then(res => res.json());
       }
     },
