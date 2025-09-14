@@ -371,17 +371,100 @@ export class ArchitectureIntegration {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
     
-    // Handle uncaught exceptions gracefully
+    // Handle uncaught exceptions with intelligent error classification
     process.on('uncaughtException', (error) => {
-      logger.error('Uncaught exception, shutting down...', { error });
+      const errorMessage = error.message || '';
+      const errorCode = (error as any).code || '';
+      const errorStack = error.stack || '';
+      
+      // Classify network/connectivity errors as non-fatal (operational errors)
+      const isNetworkError = 
+        errorCode === 'ECONNREFUSED' ||
+        errorCode === 'ETIMEDOUT' ||
+        errorCode === 'ENOTFOUND' ||
+        errorCode === 'ECONNRESET' ||
+        errorCode === 'EHOSTUNREACH' ||
+        errorMessage.includes('ECONNREFUSED') ||
+        errorMessage.includes('ETIMEDOUT') ||
+        errorMessage.includes('Connection timeout') ||
+        errorMessage.includes('connect timeout') ||
+        errorStack.includes('ImapFlow') ||
+        errorStack.includes('WebSocket');
+      
+      if (isNetworkError) {
+        logger.warn('Network/connectivity error occurred (non-fatal)', { 
+          error,
+          errorCode,
+          message: errorMessage,
+          severity: 'operational'
+        });
+        console.warn(`Non-fatal network error: ${errorMessage} (code: ${errorCode})`);
+        console.warn('Application continues running - this is an operational error, not a fatal system error');
+        return; // Don't shutdown for network errors
+      }
+      
+      // Check for other operational errors that shouldn't crash the app
+      const isOperationalError = 
+        errorMessage.includes('Invalid email format') ||
+        errorMessage.includes('Authentication failed') ||
+        errorMessage.includes('Folder not found') ||
+        errorMessage.includes('Message not found') ||
+        errorStack.includes('ValidationError') ||
+        errorStack.includes('AuthenticationError');
+      
+      if (isOperationalError) {
+        logger.warn('Operational error occurred (non-fatal)', { 
+          error,
+          message: errorMessage,
+          severity: 'operational'
+        });
+        console.warn(`Non-fatal operational error: ${errorMessage}`);
+        return; // Don't shutdown for operational errors
+      }
+      
+      // Only shutdown for truly fatal system errors
+      logger.error('Fatal system error, shutting down...', { 
+        error,
+        errorCode,
+        message: errorMessage,
+        severity: 'fatal'
+      });
+      console.error(`Fatal error detected: ${errorMessage} (code: ${errorCode})`);
       gracefulShutdown('UNCAUGHT_EXCEPTION');
     });
     
     process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled rejection, shutting down...', { 
-        reason: reason instanceof Error ? reason.message : String(reason),
-        promise: String(promise)
+      const reasonStr = reason instanceof Error ? reason.message : String(reason);
+      const errorCode = reason instanceof Error ? (reason as any).code : '';
+      
+      // Classify network/connectivity rejections as non-fatal
+      const isNetworkRejection = 
+        errorCode === 'ECONNREFUSED' ||
+        errorCode === 'ETIMEDOUT' ||
+        errorCode === 'ENOTFOUND' ||
+        reasonStr.includes('ECONNREFUSED') ||
+        reasonStr.includes('ETIMEDOUT') ||
+        reasonStr.includes('Connection timeout') ||
+        reasonStr.includes('connect timeout');
+      
+      if (isNetworkRejection) {
+        logger.warn('Network promise rejection (non-fatal)', { 
+          reason: reasonStr,
+          errorCode,
+          promise: String(promise),
+          severity: 'operational'
+        });
+        console.warn(`Non-fatal network rejection: ${reasonStr} (code: ${errorCode})`);
+        return; // Don't shutdown for network rejections
+      }
+      
+      // Only shutdown for truly fatal promise rejections
+      logger.error('Fatal unhandled rejection, shutting down...', { 
+        reason: reasonStr,
+        promise: String(promise),
+        severity: 'fatal'
       });
+      console.error(`Fatal rejection detected: ${reasonStr}`);
       gracefulShutdown('UNHANDLED_REJECTION');
     });
   }

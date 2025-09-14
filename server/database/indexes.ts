@@ -31,6 +31,58 @@ export async function createPriorityEngineIndexes(): Promise<IndexCreationResult
       `,
       description: 'Primary index for account-based queries with date and priority sorting'
     },
+    
+    // CRITICAL SECURITY INDEXES for drafts (multi-tenant isolation)
+    {
+      name: 'idx_drafts_user_updated',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_drafts_user_updated
+        ON mail_drafts (user_id, updated_at DESC)
+      `,
+      description: 'Critical index for draft operations with user isolation and sorting'
+    },
+    {
+      name: 'idx_drafts_user_account_updated',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_drafts_user_account_updated
+        ON mail_drafts (user_id, account_id, updated_at DESC)
+      `,
+      description: 'Index for account-scoped draft queries with user isolation'
+    },
+    {
+      name: 'idx_drafts_user_id_security',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_drafts_user_id_security
+        ON mail_drafts (id, user_id)
+      `,
+      description: 'Security index for fast userId validation in draft operations'
+    },
+    
+    // CRITICAL INDEXES for sent emails
+    {
+      name: 'idx_sent_user_created',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sent_user_created
+        ON mail_sent (user_id, created_at DESC)
+      `,
+      description: 'Primary index for sent email retrieval with user isolation'
+    },
+    {
+      name: 'idx_sent_user_account_date',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sent_user_account_date
+        ON mail_sent (user_id, account_id, sent_at DESC)
+      `,
+      description: 'Index for account-scoped sent email queries with user isolation'
+    },
+    {
+      name: 'idx_sent_status_retry',
+      query: `
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sent_status_retry
+        ON mail_sent (status, retry_count, scheduled_at)
+      `,
+      description: 'Index for background job processing of failed/scheduled emails'
+    },
     {
       name: 'idx_mail_account_folder_priority',
       query: `

@@ -7,6 +7,8 @@ import {
   vipContacts,
   userPrefs,
   priorityAnalytics,
+  mailDrafts,
+  mailSent,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -23,6 +25,10 @@ import {
   type InsertUserPrefs,
   type PriorityAnalytics,
   type InsertPriorityAnalytics,
+  type MailDraft,
+  type InsertMailDraft,
+  type MailSent,
+  type InsertMailSent,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
@@ -110,6 +116,19 @@ export interface IStorage {
   upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
   deleteAccountFolder(id: string): Promise<void>;
   updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void>;
+  // Draft operations for email composition
+  getUserDrafts(userId: string, accountId?: string, limit?: number, offset?: number): Promise<MailDraft[]>;
+  getDraftById(id: string, userId: string): Promise<MailDraft | undefined>;
+  createDraft(draft: InsertMailDraft): Promise<MailDraft>;
+  updateDraft(id: string, updates: Partial<MailDraft>, userId: string): Promise<MailDraft | undefined>;
+  deleteDraft(id: string, userId: string): Promise<boolean>;
+  autoSaveDraft(userId: string, accountId: string, draftData: Partial<InsertMailDraft>): Promise<MailDraft>;
+  // Sent email tracking
+  getSentEmails(userId: string, accountId?: string, limit?: number, offset?: number): Promise<MailSent[]>;
+  createSentEmail(sentEmail: InsertMailSent): Promise<MailSent>;
+  updateSentEmailStatus(id: string, status: string, deliveryError?: string): Promise<MailSent | undefined>;
+  // Contact suggestions for autocomplete
+  getContactSuggestions(userId: string, query: string, limit?: number): Promise<Array<{email: string, name?: string, source: string}>>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -940,6 +959,220 @@ export class DatabaseStorage implements IStorage {
       .where(eq(accountConnections.id, accountId));
     
     return account?.userId || null;
+  }
+
+  // Draft operations for email composition
+  async getUserDrafts(userId: string, accountId?: string, limit: number = 50, offset: number = 0): Promise<MailDraft[]> {
+    let query = db.select().from(mailDrafts)
+      .where(eq(mailDrafts.userId, userId))
+      .orderBy(sql`${mailDrafts.lastEditedAt} DESC`)
+      .limit(limit)
+      .offset(offset);
+
+    if (accountId) {
+      query = query.where(and(
+        eq(mailDrafts.userId, userId),
+        eq(mailDrafts.accountId, accountId)
+      ));
+    }
+
+    return await query;
+  }
+
+  async getDraftById(id: string, userId: string): Promise<MailDraft | undefined> {
+    const [draft] = await db.select().from(mailDrafts)
+      .where(and(
+        eq(mailDrafts.id, id),
+        eq(mailDrafts.userId, userId)
+      ));
+    return draft;
+  }
+
+  async createDraft(draft: InsertMailDraft): Promise<MailDraft> {
+    const [newDraft] = await db.insert(mailDrafts)
+      .values({
+        ...draft,
+        lastEditedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .returning();
+    return newDraft;
+  }
+
+  async updateDraft(id: string, updates: Partial<MailDraft>, userId: string): Promise<MailDraft | undefined> {
+    const [updatedDraft] = await db.update(mailDrafts)
+      .set({
+        ...updates,
+        lastEditedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(and(
+        eq(mailDrafts.id, id),
+        eq(mailDrafts.userId, userId)
+      ))
+      .returning();
+    return updatedDraft;
+  }
+
+  async deleteDraft(id: string, userId: string): Promise<boolean> {
+    const result = await db.delete(mailDrafts)
+      .where(and(
+        eq(mailDrafts.id, id),
+        eq(mailDrafts.userId, userId)
+      ));
+    return (result.rowCount || 0) > 0;
+  }
+
+  async autoSaveDraft(userId: string, accountId: string, draftData: Partial<InsertMailDraft>): Promise<MailDraft> {
+    // Check if there's an existing auto-saved draft for this user/account
+    const [existingDraft] = await db.select().from(mailDrafts)
+      .where(and(
+        eq(mailDrafts.userId, userId),
+        eq(mailDrafts.accountId, accountId),
+        eq(mailDrafts.isAutoSaved, true),
+        eq(mailDrafts.compositionMode, draftData.compositionMode || "new"),
+        draftData.replyToMessageId ? eq(mailDrafts.replyToMessageId, draftData.replyToMessageId) : sql`${mailDrafts.replyToMessageId} IS NULL`
+      ))
+      .orderBy(sql`${mailDrafts.lastEditedAt} DESC`)
+      .limit(1);
+
+    if (existingDraft) {
+      // Update existing auto-saved draft
+      return await this.updateDraft(existingDraft.id, {
+        ...draftData,
+        isAutoSaved: true
+      }, userId) as MailDraft;
+    } else {
+      // Create new auto-saved draft
+      return await this.createDraft({
+        userId,
+        accountId,
+        ...draftData,
+        isAutoSaved: true
+      } as InsertMailDraft);
+    }
+  }
+
+  // Sent email tracking
+  async getSentEmails(userId: string, accountId?: string, limit: number = 50, offset: number = 0): Promise<MailSent[]> {
+    let query = db.select().from(mailSent)
+      .where(eq(mailSent.userId, userId))
+      .orderBy(sql`${mailSent.sentAt} DESC`)
+      .limit(limit)
+      .offset(offset);
+
+    if (accountId) {
+      query = query.where(and(
+        eq(mailSent.userId, userId),
+        eq(mailSent.accountId, accountId)
+      ));
+    }
+
+    return await query;
+  }
+
+  async createSentEmail(sentEmail: InsertMailSent): Promise<MailSent> {
+    const [newSentEmail] = await db.insert(mailSent)
+      .values({
+        ...sentEmail,
+        sentAt: new Date(),
+        updatedAt: new Date()
+      })
+      .returning();
+    return newSentEmail;
+  }
+
+  async updateSentEmailStatus(id: string, status: string, deliveryError?: string): Promise<MailSent | undefined> {
+    const updates: Partial<MailSent> = {
+      deliveryStatus: status as any,
+      updatedAt: new Date()
+    };
+
+    if (deliveryError) {
+      updates.deliveryError = deliveryError;
+    }
+
+    if (status === 'delivered') {
+      updates.deliveredAt = new Date();
+    }
+
+    const [updatedSentEmail] = await db.update(mailSent)
+      .set(updates)
+      .where(eq(mailSent.id, id))
+      .returning();
+    return updatedSentEmail;
+  }
+
+  // Contact suggestions for autocomplete
+  async getContactSuggestions(userId: string, query: string, limit: number = 10): Promise<Array<{email: string, name?: string, source: string}>> {
+    const suggestions: Array<{email: string, name?: string, source: string}> = [];
+    
+    // Get suggestions from VIP contacts
+    const vipSuggestions = await db.select({
+      email: vipContacts.email,
+      name: vipContacts.name
+    }).from(vipContacts)
+      .where(and(
+        eq(vipContacts.userId, userId),
+        eq(vipContacts.isActive, true),
+        sql`(${vipContacts.email} ILIKE ${`%${query}%`} OR ${vipContacts.name} ILIKE ${`%${query}%`})`
+      ))
+      .limit(Math.min(limit, 5));
+
+    suggestions.push(...vipSuggestions.map(contact => ({
+      email: contact.email,
+      name: contact.name || undefined,
+      source: 'vip'
+    })));
+
+    // Get suggestions from recent email senders (from mailIndex)
+    if (suggestions.length < limit) {
+      const remainingLimit = limit - suggestions.length;
+      const userAccountIds = await db.select({ id: accountConnections.id })
+        .from(accountConnections)
+        .where(eq(accountConnections.userId, userId));
+
+      if (userAccountIds.length > 0) {
+        const accountIds = userAccountIds.map(acc => acc.id);
+        
+        const recentSenders = await db.selectDistinct({
+          from: mailIndex.from
+        }).from(mailIndex)
+          .where(and(
+            sql`${mailIndex.accountId} = ANY(${accountIds})`,
+            sql`${mailIndex.from} ILIKE ${`%${query}%`}`,
+            sql`${mailIndex.from} IS NOT NULL AND ${mailIndex.from} != ''`
+          ))
+          .orderBy(sql`MAX(${mailIndex.date}) DESC`)
+          .groupBy(mailIndex.from)
+          .limit(remainingLimit);
+
+        const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+        
+        recentSenders.forEach(sender => {
+          if (sender.from) {
+            const emailMatch = sender.from.match(emailRegex);
+            if (emailMatch) {
+              const email = emailMatch[1];
+              // Extract name if format is "Name <email@domain.com>"
+              const nameMatch = sender.from.match(/^(.+?)\s*<[^>]+>$/);
+              const name = nameMatch ? nameMatch[1].replace(/"/g, '').trim() : undefined;
+              
+              // Don't add if already in suggestions
+              if (!suggestions.some(s => s.email === email)) {
+                suggestions.push({
+                  email,
+                  name,
+                  source: 'recent'
+                });
+              }
+            }
+          }
+        });
+      }
+    }
+
+    return suggestions.slice(0, limit);
   }
 }
 

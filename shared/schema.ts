@@ -187,15 +187,190 @@ export const accountFolders = pgTable("account_folders", {
   unique("unique_folder_per_account").on(table.accountId, table.folderId),
 ]);
 
-// Insert and select schemas
-export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertMailIndexSchema = createInsertSchema(mailIndex).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertPriorityRuleSchema = createInsertSchema(priorityRules).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertPriorityAnalyticsSchema = createInsertSchema(priorityAnalytics).omit({ id: true, createdAt: true });
+// Email drafts table for composition feature
+export const mailDrafts = pgTable("mail_drafts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
+  subject: text("subject").default(""),
+  bodyText: text("body_text").default(""), // Plain text version
+  bodyHtml: text("body_html").default(""), // Rich HTML version
+  toRecipients: text("to_recipients").default(""), // JSON array of email addresses
+  ccRecipients: text("cc_recipients").default(""), // JSON array of email addresses
+  bccRecipients: text("bcc_recipients").default(""), // JSON array of email addresses
+  priority: integer("priority").default(0), // 0-3 priority level
+  attachments: jsonb("attachments"), // JSON array of attachment metadata
+  replyToMessageId: varchar("reply_to_message_id"), // Reference to original message if reply/forward
+  compositionMode: varchar("composition_mode", {
+    enum: ["new", "reply", "reply_all", "forward"]
+  }).default("new"),
+  isAutoSaved: boolean("is_auto_saved").default(false), // True if auto-saved vs manually saved
+  lastEditedAt: timestamp("last_edited_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Index for efficient retrieval by user and account
+  index("idx_drafts_user_account").on(table.userId, table.accountId),
+  index("idx_drafts_last_edited").on(table.lastEditedAt),
+]);
+
+// Sent emails tracking table for composition feature
+export const mailSent = pgTable("mail_sent", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
+  draftId: varchar("draft_id").references(() => mailDrafts.id), // Reference to original draft
+  messageId: varchar("message_id"), // SMTP/EWS message ID from server
+  subject: text("subject").notNull(),
+  bodyText: text("body_text"), // Plain text version sent
+  bodyHtml: text("body_html"), // Rich HTML version sent
+  toRecipients: text("to_recipients").notNull(), // JSON array of email addresses
+  ccRecipients: text("cc_recipients").default(""), // JSON array of email addresses
+  bccRecipients: text("bcc_recipients").default(""), // JSON array of email addresses
+  priority: integer("priority").default(0), // 0-3 priority level
+  attachments: jsonb("attachments"), // JSON array of attachment metadata
+  deliveryStatus: varchar("delivery_status", {
+    enum: ["pending", "sent", "delivered", "failed", "bounced"]
+  }).default("pending"),
+  deliveryError: text("delivery_error"), // Error message if delivery failed
+  replyToMessageId: varchar("reply_to_message_id"), // Reference to original message if reply/forward
+  compositionMode: varchar("composition_mode", {
+    enum: ["new", "reply", "reply_all", "forward"]
+  }).default("new"),
+  sentAt: timestamp("sent_at").defaultNow(),
+  deliveredAt: timestamp("delivered_at"), // When delivery was confirmed
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Index for efficient retrieval by user and delivery status
+  index("idx_sent_user_status").on(table.userId, table.deliveryStatus),
+  index("idx_sent_account").on(table.accountId, table.sentAt),
+  index("idx_sent_message_id").on(table.messageId),
+]);
+
+// Enhanced insert schemas with strict validation and field length limits
+export const insertUserSchema = createInsertSchema(users)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    email: z.string().email("Invalid email format").max(255, "Email must be 255 characters or less"),
+    firstName: z.string().min(1, "First name is required").max(100, "First name must be 100 characters or less").optional(),
+    lastName: z.string().min(1, "Last name is required").max(100, "Last name must be 100 characters or less").optional(),
+    profileImageUrl: z.string().url("Invalid URL format").max(500, "URL must be 500 characters or less").optional()
+  });
+
+export const insertAccountConnectionSchema = createInsertSchema(accountConnections)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    name: z.string().min(1, "Account name is required").max(100, "Account name must be 100 characters or less"),
+    settingsJson: z.string().min(1, "Settings are required").max(10000, "Settings too large")
+  });
+
+export const insertMailIndexSchema = createInsertSchema(mailIndex)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    messageId: z.string().min(1, "Message ID is required").max(255, "Message ID too long"),
+    subject: z.string().max(1000, "Subject must be 1000 characters or less").optional(),
+    from: z.string().max(500, "From field too long").optional(),
+    to: z.string().max(2000, "To field too long").optional(),
+    priority: z.number().int().min(0).max(3, "Priority must be between 0 and 3"),
+    autoPriority: z.number().int().min(0).max(3, "Auto priority must be between 0 and 3"),
+    priorityScore: z.number().int().min(0).max(100, "Priority score must be between 0 and 100"),
+    folder: z.string().min(1, "Folder is required").max(255, "Folder name too long")
+  });
+
+export const insertPriorityRuleSchema = createInsertSchema(priorityRules)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    name: z.string().min(1, "Rule name is required").max(100, "Rule name must be 100 characters or less"),
+    description: z.string().max(500, "Description must be 500 characters or less").optional(),
+    conditionsJson: z.string().min(1, "Conditions are required").max(5000, "Conditions too complex"),
+    priority: z.number().int().min(0).max(3, "Priority must be between 0 and 3"),
+    executionOrder: z.number().int().min(0).max(1000, "Execution order out of range")
+  });
+
+export const insertVipContactSchema = createInsertSchema(vipContacts)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    email: z.string().email("Invalid email format").max(255, "Email must be 255 characters or less"),
+    name: z.string().max(100, "Name must be 100 characters or less").optional(),
+    organization: z.string().max(100, "Organization must be 100 characters or less").optional(),
+    title: z.string().max(100, "Title must be 100 characters or less").optional(),
+    priority: z.number().int().min(1).max(3, "Priority must be between 1 and 3"),
+    notes: z.string().max(1000, "Notes must be 1000 characters or less").optional()
+  });
+
+export const insertUserPrefsSchema = createInsertSchema(userPrefs)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    signatureHtml: z.string().max(5000, "Signature must be 5000 characters or less").optional(),
+    backgroundImageUrl: z.string().url("Invalid URL format").max(500, "URL must be 500 characters or less").optional()
+  });
+
+export const insertAccountFolderSchema = createInsertSchema(accountFolders)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    folderId: z.string().min(1, "Folder ID is required").max(255, "Folder ID too long"),
+    displayName: z.string().min(1, "Display name is required").max(255, "Display name too long"),
+    unreadCount: z.number().int().min(0, "Unread count must be non-negative"),
+    totalCount: z.number().int().min(0, "Total count must be non-negative")
+  });
+
+export const insertPriorityAnalyticsSchema = createInsertSchema(priorityAnalytics)
+  .omit({ id: true, createdAt: true })
+  .extend({
+    metricType: z.string().min(1, "Metric type is required").max(100, "Metric type too long"),
+    metricValue: z.number().min(0, "Metric value must be non-negative")
+  });
+
+// ENHANCED DRAFT SCHEMA with comprehensive validation
+export const insertMailDraftSchema = createInsertSchema(mailDrafts)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    subject: z.string().max(500, "Subject must be 500 characters or less"),
+    bodyText: z.string().max(100000, "Email body too large (max 100KB)"),
+    bodyHtml: z.string().max(200000, "HTML body too large (max 200KB)"),
+    toRecipients: z.string().max(2000, "Too many recipients").refine(
+      (val) => {
+        if (!val) return true;
+        try {
+          const emails = JSON.parse(val);
+          return Array.isArray(emails) && emails.every(email => 
+            typeof email === 'string' && z.string().email().safeParse(email).success
+          ) && emails.length <= 50;
+        } catch { return false; }
+      },
+      "Invalid recipient format or too many recipients (max 50)"
+    ),
+    ccRecipients: z.string().max(2000, "Too many CC recipients").optional(),
+    bccRecipients: z.string().max(2000, "Too many BCC recipients").optional(),
+    priority: z.number().int().min(0).max(3, "Priority must be between 0 and 3"),
+    replyToMessageId: z.string().max(255, "Reply message ID too long").optional()
+  });
+
+// ENHANCED SENT EMAIL SCHEMA with comprehensive validation  
+export const insertMailSentSchema = createInsertSchema(mailSent)
+  .omit({ id: true, createdAt: true, updatedAt: true })
+  .extend({
+    subject: z.string().min(1, "Subject is required").max(500, "Subject must be 500 characters or less"),
+    bodyText: z.string().max(100000, "Email body too large (max 100KB)").optional(),
+    bodyHtml: z.string().max(200000, "HTML body too large (max 200KB)").optional(),
+    toRecipients: z.string().min(1, "Recipients are required").max(2000, "Too many recipients").refine(
+      (val) => {
+        try {
+          const emails = JSON.parse(val);
+          return Array.isArray(emails) && emails.length > 0 && emails.every(email => 
+            typeof email === 'string' && z.string().email().safeParse(email).success
+          ) && emails.length <= 50;
+        } catch { return false; }
+      },
+      "Invalid recipient format or too many recipients (max 50)"
+    ),
+    ccRecipients: z.string().max(2000, "Too many CC recipients").optional(),
+    bccRecipients: z.string().max(2000, "Too many BCC recipients").optional(),
+    priority: z.number().int().min(0).max(3, "Priority must be between 0 and 3"),
+    deliveryError: z.string().max(1000, "Delivery error message too long").optional(),
+    replyToMessageId: z.string().max(255, "Reply message ID too long").optional()
+  });
 
 // Update schemas for PUT operations (partial updates allowed)
 export const updatePriorityRuleSchema = createInsertSchema(priorityRules)
@@ -483,6 +658,12 @@ export type ValidatedImapSettings = z.infer<typeof imapSettingsSchema>;
 export type ValidatedEwsSettings = z.infer<typeof ewsSettingsSchema>;
 export type ValidatedAccountSettings = z.infer<typeof accountSettingsSchema>;
 export type ValidatedAccountConnection = z.infer<typeof enhancedAccountConnectionSchema>;
+
+// Type definitions for new tables
+export type MailDraft = typeof mailDrafts.$inferSelect;
+export type InsertMailDraft = z.infer<typeof insertMailDraftSchema>;
+export type MailSent = typeof mailSent.$inferSelect;
+export type InsertMailSent = z.infer<typeof insertMailSentSchema>;
 
 // Email composition schemas and types
 export const sendEmailRequestSchema = z.object({

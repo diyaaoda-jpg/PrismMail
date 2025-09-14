@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { X, Send, Paperclip, Bold, Italic, Underline } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { X, Send, Paperclip, Bold, Italic, Underline, Save, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { SendEmailRequest, SendEmailResponse } from "@shared/schema";
+import type { SendEmailRequest, SendEmailResponse, MailDraft, InsertMailDraft } from "@shared/schema";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 
@@ -23,24 +24,128 @@ interface ComposeDialogProps {
   isOpen: boolean;
   onClose: () => void;
   accountId?: string; // Account ID for sending emails
+  draftId?: string; // Load existing draft
   replyTo?: {
     to: string;
     cc?: string;
     bcc?: string;
     subject: string;
     body?: string;
+    messageId?: string; // For reply/forward context
   };
+  mode?: 'new' | 'reply' | 'forward' | 'reply_all'; // Composition mode
 }
 
-export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDialogProps) {
+export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo, mode = 'new' }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout>();
+  const [currentDraftId, setCurrentDraftId] = useState<string | undefined>(draftId);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [contactSuggestions, setContactSuggestions] = useState<Array<{email: string, name?: string, source: string}>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeField, setActiveField] = useState<'to' | 'cc' | 'bcc' | null>(null);
+  
   const [formData, setFormData] = useState({
     to: replyTo?.to || "",
     cc: replyTo?.cc || "",
     bcc: replyTo?.bcc || "",
     subject: replyTo?.subject || "",
-    body: replyTo?.body || ""
+    body: replyTo?.body || "",
+    priority: 2, // Default priority
+    compositionMode: mode
+  });
+
+  // Load existing draft query
+  const { data: loadedDraft } = useQuery({
+    queryKey: ['/api/drafts', currentDraftId],
+    queryFn: async (): Promise<MailDraft> => {
+      const response = await apiRequest('GET', `/api/drafts/${currentDraftId}`);
+      if (!response.ok) throw new Error('Failed to load draft');
+      const result = await response.json();
+      return result.data;
+    },
+    enabled: !!currentDraftId && isOpen
+  });
+
+  // Contact suggestions query
+  const getContactSuggestions = useCallback(async (query: string, field: 'to' | 'cc' | 'bcc') => {
+    if (query.length < 2) {
+      setContactSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    
+    try {
+      const response = await apiRequest('GET', `/api/contacts/suggestions?query=${encodeURIComponent(query)}&limit=5`);
+      if (response.ok) {
+        const result = await response.json();
+        setContactSuggestions(result.data || []);
+        setActiveField(field);
+        setShowSuggestions(true);
+      }
+    } catch (error) {
+      console.error('Failed to get contact suggestions:', error);
+    }
+  }, []);
+
+  // Auto-save draft mutation
+  const autoSaveMutation = useMutation({
+    mutationFn: async (draftData: Partial<InsertMailDraft>) => {
+      if (!accountId) return null;
+      
+      const response = await apiRequest('POST', '/api/drafts/auto-save', { accountId, ...draftData });
+      
+      if (!response.ok) throw new Error('Failed to auto-save draft');
+      const result = await response.json();
+      return result.data;
+    },
+    onSuccess: (savedDraft) => {
+      if (savedDraft) {
+        setCurrentDraftId(savedDraft.id);
+        setLastSavedAt(new Date());
+        queryClient.invalidateQueries({ queryKey: ['/api/drafts'] });
+      }
+    },
+    onError: (error) => {
+      console.error('Auto-save failed:', error);
+    }
+  });
+
+  // Manual save draft mutation
+  const saveDraftMutation = useMutation({
+    mutationFn: async (draftData: Partial<InsertMailDraft>) => {
+      if (!accountId) throw new Error('No account selected');
+      
+      const method = currentDraftId ? 'PUT' : 'POST';
+      const url = currentDraftId ? `/api/drafts/${currentDraftId}` : '/api/drafts';
+      
+      const response = await apiRequest(method, url, {
+        accountId, 
+        ...draftData,
+        isAutoSaved: false 
+      });
+      
+      if (!response.ok) throw new Error('Failed to save draft');
+      const result = await response.json();
+      return result.data;
+    },
+    onSuccess: (savedDraft) => {
+      setCurrentDraftId(savedDraft.id);
+      setLastSavedAt(new Date());
+      queryClient.invalidateQueries({ queryKey: ['/api/drafts'] });
+      toast({
+        title: "Draft Saved",
+        description: "Your email draft has been saved successfully."
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Save Failed",
+        description: "Failed to save draft. Please try again.",
+        variant: "destructive"
+      });
+    }
   });
 
   // Initialize TipTap editor
@@ -49,34 +154,81 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     content: formData.body,
     editorProps: {
       attributes: {
-        class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none min-h-[300px] p-4',
+        class: 'prose-email',
       },
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
       setFormData(prev => ({ ...prev, body: html }));
+      // Schedule auto-save
+      scheduleAutoSave();
     },
   });
 
+  // Auto-save functionality
+  const scheduleAutoSave = useCallback(() => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      if (accountId && (formData.to || formData.subject || formData.body)) {
+        const draftData = {
+          toRecipients: formData.to,
+          ccRecipients: formData.cc || null,
+          bccRecipients: formData.bcc || null,
+          subject: formData.subject,
+          bodyHtml: formData.body,
+          priority: formData.priority,
+          compositionMode: formData.compositionMode,
+          replyToMessageId: replyTo?.messageId || null
+        };
+        autoSaveMutation.mutate(draftData);
+      }
+    }, 30000); // Auto-save every 30 seconds
+  }, [accountId, formData, autoSaveMutation, replyTo?.messageId]);
+
+  // Load draft data when component opens or draft changes
+  useEffect(() => {
+    if (loadedDraft) {
+      const draftFormData = {
+        to: loadedDraft.toRecipients || "",
+        cc: loadedDraft.ccRecipients || "",
+        bcc: loadedDraft.bccRecipients || "",
+        subject: loadedDraft.subject || "",
+        body: loadedDraft.bodyHtml || "",
+        priority: loadedDraft.priority || 2,
+        compositionMode: loadedDraft.compositionMode || 'new'
+      };
+      setFormData(draftFormData);
+      
+      if (editor && loadedDraft.bodyHtml) {
+        editor.commands.setContent(loadedDraft.bodyHtml);
+      }
+    }
+  }, [loadedDraft, editor]);
+
   // Update editor content when replyTo changes
   useEffect(() => {
-    if (editor && replyTo?.body) {
+    if (editor && replyTo?.body && !loadedDraft) {
       editor.commands.setContent(replyTo.body);
     }
-  }, [editor, replyTo]);
+  }, [editor, replyTo, loadedDraft]);
 
   // Update form data when replyTo changes
   useEffect(() => {
-    if (replyTo) {
-      setFormData({
+    if (replyTo && !loadedDraft) {
+      setFormData(prev => ({
+        ...prev,
         to: replyTo.to || "",
         cc: replyTo.cc || "",
         bcc: replyTo.bcc || "",
         subject: replyTo.subject || "",
-        body: replyTo.body || ""
-      });
+        body: replyTo.body || "",
+        compositionMode: mode
+      }));
     }
-  }, [replyTo]);
+  }, [replyTo, mode, loadedDraft]);
 
   // TanStack Query mutation for sending emails
   const sendEmailMutation = useMutation({
@@ -85,13 +237,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest(`/api/accounts/${accountId}/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(emailData),
-      });
+      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -114,7 +260,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       
       onClose();
       // Reset form
-      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
+      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "", priority: 2, compositionMode: 'new' });
     },
     onError: (error: Error) => {
       console.error('Email sending failed:', error);
@@ -167,6 +313,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
 
     // Prepare email data for API
     const emailData: SendEmailRequest = {
+      accountId: accountId!,
       to: formData.to,
       cc: formData.cc || undefined,
       bcc: formData.bcc || undefined,
@@ -184,7 +331,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     onClose();
     // Reset form after close
     setTimeout(() => {
-      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
+      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "", priority: 2, compositionMode: 'new' });
     }, 300);
   };
 

@@ -34,7 +34,7 @@ export interface ImapFolderManager {
 export interface ImapNotificationEvent {
   accountId: string;
   folder: string;
-  eventType: 'EXISTS' | 'EXPUNGE' | 'FETCH';
+  eventType: 'EXISTS' | 'EXPUNGE' | 'FLAGS';
   details?: any;
   timestamp: Date;
 }
@@ -124,10 +124,13 @@ class ImapIdleService {
 
       this.connections.set(accountId, manager);
 
-      // Set up event handlers
+      // Set up event handlers BEFORE connecting
       this.setupIdleEventHandlers(client, accountId);
+      
+      // Add comprehensive socket-level error handling to prevent uncaught exceptions
+      this.setupSocketErrorHandlers(client, accountId);
 
-      // Connect and start IDLE
+      // Connect and start IDLE with proper error handling
       await this.connectAndStartIdle(manager);
 
       console.log(`IMAP IDLE connection started successfully for account ${accountId}`);
@@ -253,10 +256,13 @@ class ImapIdleService {
         manager.selectedFolder = folder;
       }
 
-      // Set up event handlers
+      // Set up event handlers BEFORE connecting
       this.setupIdleEventHandlers(client, accountId);
+      
+      // Add comprehensive socket-level error handling to prevent uncaught exceptions
+      this.setupSocketErrorHandlers(client, accountId);
 
-      // Connect and start IDLE
+      // Connect and start IDLE with proper error handling
       await this.connectAndStartIdle(manager);
 
       console.log(`IMAP IDLE connection started successfully for account ${accountId}`);
@@ -523,8 +529,8 @@ class ImapIdleService {
   private setupFolderIdleEventHandlers(client: ImapFlow, accountId: string, folder: string): void {
     const connectionKey = `${accountId}:${folder}`;
     
-    client.on('exists', async (data) => {
-      console.log(`📧 New message in ${folder} for account ${accountId}: UID ${data.uid}`);
+    client.on('exists', async (data: any) => {
+      console.log(`📧 New message in ${folder} for account ${accountId}: Count ${data.count || 'unknown'}`);
       
       // Trigger incremental sync for this folder
       try {
@@ -547,8 +553,8 @@ class ImapIdleService {
       console.log(`📨 IMAP notification: ${JSON.stringify(event)}`);
     });
 
-    client.on('expunge', (data) => {
-      console.log(`🗑️ Message deleted in ${folder} for account ${accountId}: UID ${data.uid}`);
+    client.on('expunge', (data: any) => {
+      console.log(`🗑️ Message deleted in ${folder} for account ${accountId}: Seq ${data.seq || 'unknown'}`);
       
       const event: ImapNotificationEvent = {
         accountId,
@@ -561,13 +567,14 @@ class ImapIdleService {
       console.log(`🗂️ IMAP notification: ${JSON.stringify(event)}`);
     });
 
-    client.on('fetch', (data) => {
-      console.log(`📨 Message updated in ${folder} for account ${accountId}: UID ${data.uid}`);
+    // Note: ImapFlow supports 'flags' event instead of 'fetch'
+    client.on('flags', (data: any) => {
+      console.log(`🏷️ Message flags updated in ${folder} for account ${accountId}: UID ${data.uid || 'unknown'}`);
       
       const event: ImapNotificationEvent = {
         accountId,
         folder,
-        eventType: 'FETCH',
+        eventType: 'FLAGS',
         details: data,
         timestamp: new Date()
       };
@@ -596,6 +603,11 @@ class ImapIdleService {
         manager.lastError = error.message;
         manager.isActive = false;
         manager.isIdle = false;
+        
+        // Schedule reconnection with error context
+        if (!this.isShuttingDown && manager.reconnectAttempts < manager.maxReconnectAttempts) {
+          this.scheduleReconnectionFolder(manager, `connection error: ${error.message}`);
+        }
       }
     });
   }
@@ -623,7 +635,6 @@ class ImapIdleService {
       
       // Set state BEFORE starting IDLE
       manager.isActive = true;
-      manager.selectedFolder = manager.folder;
       
       console.log(`Starting IDLE mode for account ${manager.accountId}, folder ${manager.folder}`);
       
@@ -793,6 +804,26 @@ class ImapIdleService {
   }
 
   /**
+   * Setup comprehensive error handling to prevent uncaught exceptions
+   */
+  private setupSocketErrorHandlers(client: ImapFlow, identifier: string): void {
+    // Handle connection-level errors that might not be caught elsewhere
+    client.on('error', (error: any) => {
+      console.error(`Connection error for ${identifier}:`, error);
+      // This ensures ALL connection errors are logged and contained
+    });
+    
+    // Handle unexpected disconnections
+    client.on('close', () => {
+      console.log(`Connection closed unexpectedly for ${identifier}`);
+    });
+    
+    // Note: ImapFlow doesn't expose the underlying socket directly
+    // Socket-level errors are handled internally by the library
+    console.log(`Error handlers setup for ${identifier}`);
+  }
+
+  /**
    * Setup event handlers for IMAP IDLE connections
    */
   private setupIdleEventHandlers(client: ImapFlow, accountId: string): void {
@@ -832,7 +863,12 @@ class ImapIdleService {
 
     client.on('error', async (error) => {
       console.error(`IMAP connection error for account ${accountId}:`, error);
-      await this.handleConnectionError(accountId, error);
+      try {
+        await this.handleConnectionError(accountId, error);
+      } catch (handlerError) {
+        console.error(`Error in connection error handler for account ${accountId}:`, handlerError);
+        // Prevent handler errors from becoming uncaught exceptions
+      }
     });
   }
 
@@ -1028,6 +1064,63 @@ class ImapIdleService {
     if (!this.isShuttingDown && !manager.reconnectScheduled) {
       this.scheduleReconnection(manager, `connection error: ${error.message}`);
     }
+  }
+
+  /**
+   * Schedule reconnection for folder-specific connections
+   */
+  private scheduleReconnectionFolder(manager: ImapFolderManager, reason: string): void {
+    const connectionKey = `${manager.accountId}:${manager.folder}`;
+    
+    if (manager.reconnectScheduled) {
+      console.log(`Reconnection already scheduled for ${connectionKey}`);
+      return;
+    }
+
+    // Check for cooldown period
+    if (manager.cooldownUntil && manager.cooldownUntil > new Date()) {
+      const remaining = Math.round((manager.cooldownUntil.getTime() - Date.now()) / 1000);
+      console.log(`${connectionKey} in cooldown for ${remaining} more seconds - skipping reconnection`);
+      return;
+    }
+
+    // Detect ECONNREFUSED errors and apply immediate cooldown
+    if ((typeof reason === 'string' && reason.includes('ECONNREFUSED')) || 
+        (typeof manager.lastError === 'string' && manager.lastError.includes('ECONNREFUSED'))) {
+      console.warn(`${connectionKey} has unreachable host (ECONNREFUSED) - applying immediate 15-minute cooldown`);
+      manager.cooldownUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+      manager.reconnectAttempts = manager.maxReconnectAttempts; // Prevent further attempts
+      console.log(`${connectionKey} will not retry for 15 minutes due to unreachable host`);
+      return;
+    }
+
+    // Check if max attempts reached
+    if (manager.reconnectAttempts >= manager.maxReconnectAttempts) {
+      console.warn(`Max reconnection attempts (${manager.maxReconnectAttempts}) reached for ${connectionKey} - adding 15 minute cooldown`);
+      manager.cooldownUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+      manager.reconnectAttempts = 0; // Reset for next cooldown period
+      console.log(`${connectionKey} will automatically restart after cooldown expires`);
+      return;
+    }
+
+    manager.reconnectScheduled = true;
+    manager.reconnectAttempts++;
+    
+    // Enhanced exponential backoff with jitter
+    const baseDelay = 1000 * Math.pow(2, manager.reconnectAttempts);
+    const jitter = Math.random() * 1000;
+    const delay = Math.min(baseDelay + jitter, 60000); // Cap at 60 seconds
+    
+    console.log(`Scheduling reconnection for ${connectionKey} due to ${reason} (attempt ${manager.reconnectAttempts}/${manager.maxReconnectAttempts}) in ${Math.round(delay)}ms`);
+    
+    setTimeout(async () => {
+      manager.reconnectScheduled = false;
+      try {
+        await this.startFolderIdleConnection(manager.accountId, manager.folder);
+      } catch (retryError) {
+        console.error(`Reconnection attempt failed for ${connectionKey}:`, retryError);
+      }
+    }, delay);
   }
 
   /**

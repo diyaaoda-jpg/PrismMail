@@ -101,6 +101,19 @@ app.use(express.urlencoded({ extended: false }));
   // Set up WebSocket server for real-time notifications with authentication
   const wss = new WebSocketServer({ server, path: '/ws' });
   
+  // Add comprehensive error handling for the WebSocket server itself
+  wss.on('error', (error) => {
+    console.error('WebSocket server error:', error);
+    logger.error('WebSocket server error occurred', { error: error as Error });
+    // Don't crash the application for WebSocket server errors
+  });
+  
+  // Handle WebSocket server issues
+  wss.on('close', () => {
+    console.log('WebSocket server closed');
+    logger.info('WebSocket server closed');
+  });
+  
   wss.on('connection', async (ws, req) => {
     console.log('WebSocket client attempting connection...');
     

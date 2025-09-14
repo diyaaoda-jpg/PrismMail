@@ -2,7 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertPriorityRuleSchema, insertVipContactSchema, insertUserPrefsSchema, updatePriorityRuleSchema, updateVipContactSchema, updateUserPrefsSchema, reorderRulesSchema } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertPriorityRuleSchema, insertVipContactSchema, insertUserPrefsSchema, updatePriorityRuleSchema, updateVipContactSchema, updateUserPrefsSchema, reorderRulesSchema, insertMailDraftSchema, insertMailSentSchema } from "@shared/schema";
+import { apiRateLimiter, strictRateLimiter, composeRateLimiter } from "./middleware/security";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
 import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
@@ -80,6 +81,7 @@ const ErrorCodes = {
   // Resource errors
   RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
   ACCOUNT_NOT_FOUND: 'ACCOUNT_NOT_FOUND',
+  FORBIDDEN_ERROR: 'FORBIDDEN_ERROR',
   
   // Server errors
   INTERNAL_SERVER_ERROR: 'INTERNAL_SERVER_ERROR',
@@ -2092,7 +2094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         autoPriority: priorityData.autoPriority,
         priorityScore: priorityData.priorityScore,
         priorityFactors: priorityData.priorityFactors,
-        prioritySource: priorityData.prioritySource,
+        prioritySource: priorityData.prioritySource as "manual" | "rule" | "vip" | "thread" | "auto",
         ruleId: priorityData.ruleId,
         isVip: priorityData.isVip
       });
@@ -2275,6 +2277,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ));
     } catch (error) {
       handleApiError(error, res, 'POST /api/priority/rescore-all', requestId);
+    }
+  });
+
+  // Draft Management Endpoints for Email Composition
+  app.get('/api/drafts', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-drafts-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, limit = 50, offset = 0 } = req.query;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      const drafts = await storage.getUserDrafts(userId, accountId, parseInt(limit), parseInt(offset));
+      res.json(createSuccessResponse(drafts, 'Drafts retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/drafts', requestId);
+    }
+  });
+
+  app.get('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      const draft = await storage.getDraftById(id, userId);
+      if (!draft) {
+        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
+      }
+
+      res.json(createSuccessResponse(draft, 'Draft retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, `GET /api/drafts/${req.params.id}`, requestId);
+    }
+  });
+
+  app.post('/api/drafts', isAuthenticated, async (req: any, res) => {
+    const requestId = `create-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      // Validate request body
+      const validatedData = insertMailDraftSchema.parse({ ...req.body, userId });
+      
+      const draft = await storage.createDraft(validatedData);
+      res.json(createSuccessResponse(draft, 'Draft created successfully'));
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const fieldErrors = error.errors.map(e => ({
+          field: e.path.join('.'),
+          message: e.message
+        }));
+        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Validation failed', 400, JSON.stringify(fieldErrors));
+      }
+      handleApiError(error, res, 'POST /api/drafts', requestId);
+    }
+  });
+
+  app.put('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      // Don't include id and userId in updates
+      const { id: _, userId: __, ...updateData } = req.body;
+      
+      const draft = await storage.updateDraft(id, updateData, userId);
+      if (!draft) {
+        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
+      }
+
+      res.json(createSuccessResponse(draft, 'Draft updated successfully'));
+    } catch (error) {
+      handleApiError(error, res, `PUT /api/drafts/${req.params.id}`, requestId);
+    }
+  });
+
+  app.delete('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `delete-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { id } = req.params;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      const deleted = await storage.deleteDraft(id, userId);
+      if (!deleted) {
+        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
+      }
+
+      res.json(createSuccessResponse({ deleted: true }, 'Draft deleted successfully'));
+    } catch (error) {
+      handleApiError(error, res, `DELETE /api/drafts/${req.params.id}`, requestId);
+    }
+  });
+
+  app.post('/api/drafts/auto-save', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
+    const requestId = `auto-save-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, ...draftData } = req.body;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      if (!accountId) {
+        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Account ID is required', 400);
+      }
+
+      const draft = await storage.autoSaveDraft(userId, accountId, draftData);
+      res.json(createSuccessResponse(draft, 'Draft auto-saved successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/drafts/auto-save', requestId);
+    }
+  });
+
+  // Contact Suggestions for Autocomplete (with rate limiting for security)
+  app.get('/api/contacts/suggestions', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
+    const requestId = `get-contact-suggestions-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { query, limit = 10 } = req.query;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      if (!query || typeof query !== 'string' || query.trim().length < 2) {
+        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Query must be at least 2 characters', 400);
+      }
+
+      const suggestions = await storage.getContactSuggestions(userId, query.trim(), parseInt(limit));
+      res.json(createSuccessResponse(suggestions, 'Contact suggestions retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/contacts/suggestions', requestId);
+    }
+  });
+
+  // Sent Emails Tracking
+  app.get('/api/sent-emails', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
+    const requestId = `get-sent-emails-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, limit = 50, offset = 0 } = req.query;
+
+      if (!userId) {
+        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
+      }
+
+      const sentEmails = await storage.getSentEmails(userId, accountId, parseInt(limit), parseInt(offset));
+      res.json(createSuccessResponse(sentEmails, 'Sent emails retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/sent-emails', requestId);
     }
   });
 
