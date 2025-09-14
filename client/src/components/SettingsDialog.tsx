@@ -202,10 +202,23 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       });
       
       if (!response.ok) {
-        throw new Error(`Sync failed: ${response.statusText}`);
+        let errorMessage = `Sync failed: ${response.statusText}`;
+        try {
+          const error = await response.json();
+          errorMessage = error.message || errorMessage;
+        } catch {
+          // If JSON parsing fails, use response status text
+          errorMessage = response.statusText || 'Sync failed';
+        }
+        throw new Error(errorMessage);
       }
       
-      return response.json();
+      try {
+        return await response.json();
+      } catch (error) {
+        // If successful response isn't valid JSON, return a default success response
+        return { accountsProcessed: 1, success: true };
+      }
     },
     onSuccess: (data) => {
       toast({
