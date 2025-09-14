@@ -303,19 +303,38 @@ export async function testEwsConnection(settingsJson: string): Promise<Connectio
   };
   
   try {
-    // Parse settings
+    // Parse settings - handle both encrypted and plain JSON
     let settings: any;
     try {
-      settings = JSON.parse(settingsJson);
-    } catch {
+      // First try parsing as plain JSON
+      const parsed = JSON.parse(settingsJson);
+      
+      // Check if it's encrypted format (has encrypted, iv, tag fields)
+      if (parsed.encrypted && parsed.iv && parsed.tag) {
+        console.log('Decrypting EWS account settings...');
+        settings = decryptAccountSettingsWithPassword(settingsJson);
+      } else {
+        // It's plain JSON settings
+        settings = parsed;
+      }
+    } catch (parseError) {
+      // If JSON parsing fails, try direct decryption
       try {
+        console.log('Attempting direct decryption of EWS settings...');
         settings = decryptAccountSettingsWithPassword(settingsJson);
       } catch (decryptError) {
-        throw new Error('Failed to parse account settings - invalid format');
+        console.error('Failed to parse/decrypt EWS settings:', parseError, decryptError);
+        throw new Error(`Failed to parse EWS account settings: ${(parseError as Error).message}`);
       }
     }
     
     // Validate required settings
+    console.log('Validating EWS settings:', { 
+      hasHost: !!settings.host, 
+      hasUsername: !!settings.username, 
+      hasPassword: !!settings.password 
+    });
+    
     if (!settings.host || !settings.username || !settings.password) {
       throw new Error('Missing required settings: host, username, or password');
     }
