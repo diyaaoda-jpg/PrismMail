@@ -90,7 +90,7 @@ export const vipContacts = pgTable("vip_contacts", {
 // User preferences
 export const userPrefs = pgTable("user_prefs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
   theme: varchar("theme").default("light"), // light, dark
   colorTheme: varchar("color_theme").default("default"), // default, sunrise, neon, deepspace
   backgroundImageUrl: varchar("background_image_url"),
