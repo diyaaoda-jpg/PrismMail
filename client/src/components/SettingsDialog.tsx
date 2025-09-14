@@ -29,8 +29,9 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { X, Save, Mail, User, Shield, Palette, CheckCircle, Loader2, HelpCircle } from "lucide-react";
+import { X, Save, Mail, User, Shield, Palette, CheckCircle, Loader2, HelpCircle, Layout, Columns3, Monitor, Smartphone, Tablet } from "lucide-react";
 import { ThemeMenu } from "./ThemeMenu";
+import { useLayoutPreferences, type LayoutMode } from "./ResizablePanelLayout";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -179,6 +180,9 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("account");
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Layout preferences
+  const { preferences: layoutPrefs, updatePreferences: updateLayoutPrefs, resetToDefaults } = useLayoutPreferences();
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editAccountId, setEditAccountId] = useState<string | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
@@ -784,7 +788,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="account" data-testid="tab-account">
                 <User className="w-4 h-4 mr-2" />
                 Account
@@ -792,6 +796,10 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
               <TabsTrigger value="mail" data-testid="tab-mail">
                 <Mail className="w-4 h-4 mr-2" />
                 Email
+              </TabsTrigger>
+              <TabsTrigger value="layout" data-testid="tab-layout">
+                <Layout className="w-4 h-4 mr-2" />
+                Layout
               </TabsTrigger>
               <TabsTrigger value="theme" data-testid="tab-theme">
                 <Palette className="w-4 h-4 mr-2" />
@@ -1436,6 +1444,185 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                       )}
                       Save Email Preferences
                     </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Layout Tab */}
+            <TabsContent value="layout" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Panel Layout</CardTitle>
+                  <CardDescription>Customize the resizable panel layout and responsive behavior</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Layout Mode Selection */}
+                  <div className="space-y-3">
+                    <Label className="text-base font-medium">Layout Mode</Label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <Button
+                        variant={layoutPrefs.mode === 'classic' ? 'default' : 'outline'}
+                        onClick={() => updateLayoutPrefs({ mode: 'classic' })}
+                        className="flex flex-col items-center gap-2 h-auto py-4 hover-elevate active-elevate-2"
+                        data-testid="layout-mode-classic"
+                      >
+                        <Columns3 className="h-5 w-5" />
+                        <div className="text-center">
+                          <div className="font-medium">Classic</div>
+                          <div className="text-xs text-muted-foreground">Side-by-side panels</div>
+                        </div>
+                      </Button>
+                      <Button
+                        variant={layoutPrefs.mode === 'wide' ? 'default' : 'outline'}
+                        onClick={() => updateLayoutPrefs({ mode: 'wide' })}
+                        className="flex flex-col items-center gap-2 h-auto py-4 hover-elevate active-elevate-2"
+                        data-testid="layout-mode-wide"
+                      >
+                        <Monitor className="h-5 w-5" />
+                        <div className="text-center">
+                          <div className="font-medium">Wide</div>
+                          <div className="text-xs text-muted-foreground">Reading pane below</div>
+                        </div>
+                      </Button>
+                      <Button
+                        variant={layoutPrefs.mode === 'compact' ? 'default' : 'outline'}
+                        onClick={() => updateLayoutPrefs({ mode: 'compact' })}
+                        className="flex flex-col items-center gap-2 h-auto py-4 hover-elevate active-elevate-2"
+                        data-testid="layout-mode-compact"
+                      >
+                        <Smartphone className="h-5 w-5" />
+                        <div className="text-center">
+                          <div className="font-medium">Compact</div>
+                          <div className="text-xs text-muted-foreground">Minimal panels</div>
+                        </div>
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Choose how you want the panels arranged. Changes apply immediately and are saved automatically.
+                    </p>
+                  </div>
+
+                  <Separator />
+
+                  {/* Panel Size Information */}
+                  <div className="space-y-3">
+                    <Label className="text-base font-medium">Current Panel Sizes</Label>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Sidebar</Label>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-primary transition-all duration-300" 
+                              style={{ width: `${layoutPrefs.sizes.sidebar}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-mono min-w-[3rem]">{Math.round(layoutPrefs.sizes.sidebar)}%</span>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Message List</Label>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-accent transition-all duration-300" 
+                              style={{ width: `${layoutPrefs.sizes.messageList}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-mono min-w-[3rem]">{Math.round(layoutPrefs.sizes.messageList)}%</span>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Reading Pane</Label>
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-secondary transition-all duration-300" 
+                              style={{ width: `${layoutPrefs.sizes.readingPane}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-mono min-w-[3rem]">{Math.round(layoutPrefs.sizes.readingPane)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Drag the panel borders in the main interface to resize. Changes are saved automatically.
+                    </p>
+                  </div>
+
+                  <Separator />
+
+                  {/* Responsive Behavior */}
+                  <div className="space-y-3">
+                    <Label className="text-base font-medium">Responsive Behavior</Label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Tablet className="h-4 w-4 text-muted-foreground" />
+                          <Label className="text-sm font-medium">Tablet (768px - 1024px)</Label>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Collapsible sidebar with toggle button. Two-panel content area remains resizable.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="h-4 w-4 text-muted-foreground" />
+                          <Label className="text-sm font-medium">Mobile (&lt; 768px)</Label>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Single-panel view with navigation between message list and reading modes.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Layout Actions */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-base font-medium">Layout Management</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Reset panels to default sizes or manage layout preferences.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          resetToDefaults();
+                          toast({
+                            title: "Layout Reset",
+                            description: "Panel layout has been reset to default sizes."
+                          });
+                        }}
+                        data-testid="button-reset-layout"
+                        className="hover-elevate active-elevate-2"
+                      >
+                        Reset to Defaults
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Current Layout Status */}
+                  <div className="p-4 bg-muted/50 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <Layout className="h-5 w-5 text-muted-foreground mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Current Layout: {layoutPrefs.mode.charAt(0).toUpperCase() + layoutPrefs.mode.slice(1)}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Sidebar: {layoutPrefs.sidebarCollapsed ? 'Collapsed' : 'Expanded'} • 
+                          Panel ratios: {Math.round(layoutPrefs.sizes.sidebar)}% / {Math.round(layoutPrefs.sizes.messageList)}% / {Math.round(layoutPrefs.sizes.readingPane)}%
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Layout preferences are automatically saved to your browser and restored on reload.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
