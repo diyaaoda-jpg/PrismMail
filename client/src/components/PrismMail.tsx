@@ -197,9 +197,18 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
 
   // Extract emails with tolerant parsing - handle both wrapped {success,data} and raw array formats
+  console.log(`Frontend Debug - selectedAccount: ${selectedAccount}, selectedFolder: ${selectedFolder}, primaryAccount?.id: ${primaryAccount?.id}`);
+  console.log(`Frontend Debug - emailResponse:`, emailResponse);
+  console.log(`Frontend Debug - emailsLoading: ${emailsLoading}`);
+  
   const emails: EmailMessage[] = Array.isArray(emailResponse) 
     ? emailResponse 
     : (emailResponse?.success && Array.isArray(emailResponse.data) ? emailResponse.data : []);
+  
+  console.log(`Frontend Debug - Final emails array length: ${emails.length}`);
+  if (emails.length > 0) {
+    console.log(`Frontend Debug - First email: ${emails[0].subject}`);
+  }
 
   // Auto-sync emails when account becomes available
   const syncMutation = useMutation({
