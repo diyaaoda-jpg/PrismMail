@@ -127,10 +127,13 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   // Inline compose state for replies
   const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
 
-  // Fetch user's accounts
-  const { data: accounts = [], isLoading: accountsLoading } = useQuery<AccountConnection[]>({
+  // Fetch user's accounts - ensure it's always an array
+  const { data: accountsData, isLoading: accountsLoading } = useQuery<AccountConnection[]>({
     queryKey: ['/api/accounts']
   });
+  
+  // Ensure accounts is always an array to prevent runtime errors
+  const accounts = Array.isArray(accountsData) ? accountsData : [];
 
   // Fetch user preferences for auto-sync settings
   const { data: userPrefs } = useQuery<UserPrefs>({
@@ -139,7 +142,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   // Auto-select account on load with IMAP preference
   useEffect(() => {
-    if (accounts.length > 0 && !selectedAccount) {
+    if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
       // Prefer IMAP accounts over EWS for auto-sync
       const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
                                accounts.find(account => account.isActive) ||
@@ -152,16 +155,34 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [accounts, selectedAccount]);
 
-  // Get the selected account or fall back to first active account
-  const primaryAccount = accounts.find(account => account.id === selectedAccount) ||
-                         accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
-                         accounts.find(account => account.isActive);
+  // Get the selected account or fall back to first active account - with array safety
+  const primaryAccount = accounts.length > 0 ? (
+    accounts.find(account => account.id === selectedAccount) ||
+    accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
+    accounts.find(account => account.isActive)
+  ) : undefined;
 
-  // Fetch emails for the primary account
+  // Fetch emails - use unified API for "All Accounts" or specific account API for individual accounts
   const { data: emails = [], isLoading: emailsLoading, refetch: refetchEmails } = useQuery<EmailMessage[]>({
-    queryKey: ['/api/mail', primaryAccount?.id, selectedFolder],
-    enabled: !!primaryAccount,
+    queryKey: selectedAccount === '' 
+      ? ['/api/mail/unified', selectedFolder]
+      : ['/api/mail', primaryAccount?.id, selectedFolder],
+    enabled: selectedAccount === '' || !!primaryAccount,
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  // Fetch unified folder counts for All Accounts view
+  const { data: unifiedCounts } = useQuery<{
+    unified: Record<string, { unread: number; total: number }>;
+    accounts: Array<{
+      accountId: string;
+      accountName: string;
+      folders: Record<string, { unread: number; total: number }>;
+    }>;
+  }>({
+    queryKey: ['/api/mail/unified-counts'],
+    enabled: selectedAccount === '',
+    staleTime: 1000 * 60 * 2, // 2 minutes
   });
 
   // Auto-sync emails when account becomes available
@@ -213,8 +234,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       return; // No auto-sync if disabled
     }
 
-    // Get all active accounts, prioritizing IMAP
-    const activeAccounts = accounts.filter(account => account.isActive);
+    // Get all active accounts, prioritizing IMAP - with array safety
+    const activeAccounts = accounts.length > 0 ? accounts.filter(account => account.isActive) : [];
     const imapAccounts = activeAccounts.filter(account => account.protocol === 'IMAP');
     const ewsAccounts = activeAccounts.filter(account => account.protocol === 'EWS');
     
@@ -552,14 +573,35 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           setSelectedFolder(folderId);
           if (accountId) {
             setSelectedAccount(accountId);
+          } else {
+            // When selecting unified folder, clear selected account to show all accounts
+            setSelectedAccount('');
           }
         }}
-        onAccountSelect={setSelectedAccount}
+        onAccountSelect={(accountId) => {
+          setSelectedAccount(accountId);
+          // Keep the current folder when switching accounts
+        }}
         onCompose={handleCompose}
         onSearch={handleSearch}
         onSettings={handleSettings}
-        unreadCounts={mockUnreadCounts}
-        accountFolderCounts={{}}
+        unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
+          Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
+            ...acc,
+            [folderType]: counts.unread
+          }), {}) : 
+          mockUnreadCounts
+        }
+        accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
+          unifiedCounts.accounts.reduce((acc, account) => ({
+            ...acc,
+            [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
+              ...folderAcc,
+              [folderType]: counts.unread
+            }), {})
+          }), {}) : 
+          {}
+        }
         accounts={accounts}
       />
 

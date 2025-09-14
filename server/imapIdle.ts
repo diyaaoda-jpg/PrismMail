@@ -17,6 +17,20 @@ export interface ImapIdleManager {
   mailboxLock?: any;
 }
 
+export interface ImapFolderManager {
+  accountId: string;
+  folder: string;
+  connection?: ImapFlow;
+  isActive: boolean;
+  isIdle: boolean;
+  lastError?: string;
+  reconnectAttempts: number;
+  maxReconnectAttempts: number;
+  reconnectScheduled: boolean;
+  cooldownUntil?: Date;
+  mailboxLock?: any;
+}
+
 export interface ImapNotificationEvent {
   accountId: string;
   folder: string;
@@ -27,9 +41,13 @@ export interface ImapNotificationEvent {
 
 class ImapIdleService {
   private connections: Map<string, ImapIdleManager> = new Map();
+  private folderConnections: Map<string, ImapFolderManager> = new Map(); // accountId:folder -> manager
   private storage: IStorage;
   private isShuttingDown: boolean = false;
   private heartbeatInterval?: NodeJS.Timeout;
+  
+  // Important folders to monitor for IMAP accounts
+  private readonly PRIORITY_FOLDERS = ['INBOX', 'Sent', 'Sent Items', 'Drafts', 'Trash', 'Deleted Items'];
 
   constructor(storage: IStorage) {
     this.storage = storage;
@@ -357,7 +375,7 @@ class ImapIdleService {
   }
 
   /**
-   * Start IDLE connections for all active IMAP accounts
+   * Start IDLE connections for all active IMAP accounts - supports multiple folders
    */
   async startAllIdleConnections(): Promise<void> {
     try {
@@ -373,36 +391,311 @@ class ImapIdleService {
       
       console.log(`Found ${imapAccounts.length} active IMAP accounts`);
       
-      // Start IDLE connections for each account in parallel
-      const idlePromises = imapAccounts.map(async (account) => {
-        try {
-          console.log(`Starting IDLE connection for account ${account.id} (${account.name})`);
-          const result = await this.startIdleConnection(account.id, 'INBOX');
-          
-          if (result.success) {
-            console.log(`Successfully started IDLE connection for account ${account.id}`);
-          } else {
-            console.error(`Failed to start IDLE connection for account ${account.id}: ${result.error}`);
-          }
-          
-          return result;
-        } catch (error) {
-          console.error(`Error starting IDLE connection for account ${account.id}:`, error);
-          return { success: false, error: (error as Error).message };
-        }
-      });
+      // Start multi-folder IDLE connections for each account
+      const allConnectionPromises: Promise<{ success: boolean; error?: string; accountId: string; folder: string }>[] = [];
       
-      // Wait for all connections to complete (don't fail if some fail)
-      const results = await Promise.allSettled(idlePromises);
+      for (const account of imapAccounts) {
+        console.log(`Starting multi-folder IDLE connections for account ${account.id} (${account.name})`);
+        
+        // Get account folders from database
+        const accountFolders = await this.storage.getAccountFolders(account.id);
+        const foldersToMonitor = accountFolders
+          .filter(f => f.isActive && this.PRIORITY_FOLDERS.some(pf => 
+            f.displayName.toLowerCase().includes(pf.toLowerCase()) || 
+            f.folderId.toLowerCase().includes(pf.toLowerCase())
+          ))
+          .map(f => f.folderId);
+        
+        // Fallback to INBOX if no folders found
+        if (foldersToMonitor.length === 0) {
+          foldersToMonitor.push('INBOX');
+        }
+        
+        console.log(`Account ${account.id} will monitor folders: ${foldersToMonitor.join(', ')}`);
+        
+        // Start IDLE connection for each priority folder
+        for (const folder of foldersToMonitor) {
+          allConnectionPromises.push(
+            this.startFolderIdleConnection(account.id, folder).then(result => ({
+              ...result,
+              accountId: account.id,
+              folder
+            })).catch(error => ({
+              success: false,
+              error: error.message,
+              accountId: account.id,
+              folder
+            }))
+          );
+        }
+      }
+      
+      // Wait for all folder connections to complete
+      const results = await Promise.allSettled(allConnectionPromises);
       
       const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
       const failed = results.length - successful;
       
       console.log(`IMAP IDLE initialization completed: ${successful} successful, ${failed} failed`);
+      console.log(`Total folder connections started: ${results.length}`);
       
     } catch (error) {
       console.error('Error starting all IMAP IDLE connections:', error);
     }
+  }
+
+  /**
+   * Start IDLE connection for a specific folder (multi-folder support)
+   */
+  async startFolderIdleConnection(accountId: string, folder: string): Promise<{ success: boolean; error?: string }> {
+    const connectionKey = `${accountId}:${folder}`;
+    
+    try {
+      // Check if this specific folder connection already exists
+      const existingManager = this.folderConnections.get(connectionKey);
+      if (existingManager?.isActive) {
+        console.log(`IDLE connection already active for account ${accountId}, folder ${folder}`);
+        return { success: true };
+      }
+      
+      console.log(`Starting IDLE connection for account ${accountId}, folder: ${folder}`);
+      
+      // Get encrypted account settings
+      const accountData = await this.storage.getAccountConnectionEncrypted(accountId);
+      if (!accountData) {
+        throw new Error('Account not found');
+      }
+
+      // Decrypt account settings
+      const settings = decryptAccountSettingsWithPassword(accountData.settingsJson);
+      
+      // Create dedicated IMAP connection for this folder
+      const client = new ImapFlow({
+        host: settings.host,
+        port: settings.port,
+        secure: settings.useSSL,
+        auth: {
+          user: settings.username,
+          pass: settings.password,
+        },
+        socketTimeout: 60000,
+        greetingTimeout: 30000,
+        maxIdleTime: 30 * 60 * 1000, // 30 minutes max IDLE time
+      });
+
+      // Create folder-specific manager
+      const folderManager: ImapFolderManager = {
+        accountId,
+        folder,
+        connection: client,
+        isActive: false,
+        isIdle: false,
+        reconnectAttempts: 0,
+        maxReconnectAttempts: 5,
+        reconnectScheduled: false
+      };
+
+      this.folderConnections.set(connectionKey, folderManager);
+
+      // Set up event handlers for this specific folder connection
+      this.setupFolderIdleEventHandlers(client, accountId, folder);
+
+      // Connect and start IDLE for this folder
+      await this.connectAndStartFolderIdle(folderManager);
+
+      console.log(`IMAP IDLE connection started successfully for account ${accountId}, folder ${folder}`);
+      
+      return { success: true };
+
+    } catch (error: any) {
+      console.error(`Failed to start IMAP IDLE connection for account ${accountId}, folder ${folder}:`, error);
+      
+      return { 
+        success: false, 
+        error: error.message || 'Failed to start folder IDLE connection' 
+      };
+    }
+  }
+
+  /**
+   * Setup IDLE event handlers for folder-specific connection
+   */
+  private setupFolderIdleEventHandlers(client: ImapFlow, accountId: string, folder: string): void {
+    const connectionKey = `${accountId}:${folder}`;
+    
+    client.on('exists', async (data) => {
+      console.log(`📧 New message in ${folder} for account ${accountId}: UID ${data.uid}`);
+      
+      // Trigger incremental sync for this folder
+      try {
+        await syncImapEmails(accountId, folder, this.storage, { limit: 10 });
+        console.log(`✅ Incremental sync completed for ${folder}`);
+      } catch (error) {
+        console.error(`❌ Incremental sync failed for ${folder}:`, error);
+      }
+      
+      // Emit notification event
+      const event: ImapNotificationEvent = {
+        accountId,
+        folder,
+        eventType: 'EXISTS',
+        details: data,
+        timestamp: new Date()
+      };
+      
+      // Could emit events here for real-time UI updates
+      console.log(`📨 IMAP notification: ${JSON.stringify(event)}`);
+    });
+
+    client.on('expunge', (data) => {
+      console.log(`🗑️ Message deleted in ${folder} for account ${accountId}: UID ${data.uid}`);
+      
+      const event: ImapNotificationEvent = {
+        accountId,
+        folder,
+        eventType: 'EXPUNGE',
+        details: data,
+        timestamp: new Date()
+      };
+      
+      console.log(`🗂️ IMAP notification: ${JSON.stringify(event)}`);
+    });
+
+    client.on('fetch', (data) => {
+      console.log(`📨 Message updated in ${folder} for account ${accountId}: UID ${data.uid}`);
+      
+      const event: ImapNotificationEvent = {
+        accountId,
+        folder,
+        eventType: 'FETCH',
+        details: data,
+        timestamp: new Date()
+      };
+      
+      console.log(`📋 IMAP notification: ${JSON.stringify(event)}`);
+    });
+
+    client.on('close', () => {
+      console.log(`IMAP connection closed for account ${accountId}, folder ${folder}`);
+      const manager = this.folderConnections.get(connectionKey);
+      if (manager) {
+        manager.isActive = false;
+        manager.isIdle = false;
+      }
+      
+      // Attempt reconnection if not shutting down
+      if (!this.isShuttingDown && manager && manager.reconnectAttempts < manager.maxReconnectAttempts) {
+        this.scheduleReconnection(connectionKey, 5000); // 5 second delay
+      }
+    });
+
+    client.on('error', (error) => {
+      console.error(`IMAP connection error for account ${accountId}, folder ${folder}:`, error);
+      const manager = this.folderConnections.get(connectionKey);
+      if (manager) {
+        manager.lastError = error.message;
+        manager.isActive = false;
+        manager.isIdle = false;
+      }
+    });
+  }
+
+  /**
+   * Connect and start IDLE for a specific folder
+   */
+  private async connectAndStartFolderIdle(manager: ImapFolderManager): Promise<void> {
+    if (!manager.connection) {
+      throw new Error('No connection available');
+    }
+
+    const client = manager.connection;
+    
+    try {
+      // Connect to IMAP server
+      await client.connect();
+      console.log(`Connected to IMAP server for account ${manager.accountId}, folder ${manager.folder}`);
+      
+      // Select the specific folder
+      const lock = await client.getMailboxLock(manager.folder);
+      
+      // Store the lock for later release
+      manager.mailboxLock = lock;
+      
+      // Set state BEFORE starting IDLE
+      manager.isActive = true;
+      manager.selectedFolder = manager.folder;
+      
+      console.log(`Starting IDLE mode for account ${manager.accountId}, folder ${manager.folder}`);
+      
+      // Start IDLE mode (this will block until IDLE is broken)
+      client.idle().catch(error => {
+        console.error(`IDLE error for account ${manager.accountId}, folder ${manager.folder}:`, error);
+        manager.lastError = error.message;
+        manager.isIdle = false;
+        
+        // Release lock on error
+        if (manager.mailboxLock) {
+          manager.mailboxLock.release();
+          manager.mailboxLock = undefined;
+        }
+      });
+      
+      manager.isIdle = true;
+      console.log(`✅ IDLE mode started successfully for account ${manager.accountId}, folder ${manager.folder}`);
+      
+    } catch (error: any) {
+      console.error(`Failed to start IDLE for account ${manager.accountId}, folder ${manager.folder}:`, error);
+      manager.lastError = error.message;
+      manager.isActive = false;
+      manager.isIdle = false;
+      
+      // Clean up on failure
+      if (manager.mailboxLock) {
+        try {
+          manager.mailboxLock.release();
+        } catch (lockError) {
+          console.log(`Failed to release lock for ${manager.folder}:`, lockError);
+        }
+        manager.mailboxLock = undefined;
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Schedule reconnection for a folder connection
+   */
+  private scheduleReconnection(connectionKey: string, delay: number): void {
+    const manager = this.folderConnections.get(connectionKey);
+    if (!manager || manager.reconnectScheduled || this.isShuttingDown) {
+      return;
+    }
+    
+    manager.reconnectScheduled = true;
+    manager.reconnectAttempts++;
+    
+    console.log(`Scheduling reconnection for ${connectionKey} in ${delay}ms (attempt ${manager.reconnectAttempts}/${manager.maxReconnectAttempts})`);
+    
+    setTimeout(async () => {
+      if (this.isShuttingDown) {
+        return;
+      }
+      
+      manager.reconnectScheduled = false;
+      
+      try {
+        const result = await this.startFolderIdleConnection(manager.accountId, manager.folder);
+        if (result.success) {
+          console.log(`✅ Reconnection successful for ${connectionKey}`);
+          manager.reconnectAttempts = 0; // Reset on success
+        } else {
+          console.error(`❌ Reconnection failed for ${connectionKey}: ${result.error}`);
+        }
+      } catch (error) {
+        console.error(`❌ Reconnection error for ${connectionKey}:`, error);
+      }
+    }, delay);
   }
 
   /**
@@ -412,17 +705,75 @@ class ImapIdleService {
     console.log('Stopping all IMAP IDLE connections...');
     this.isShuttingDown = true;
 
+    // Stop legacy single-folder connections
     const stopPromises = Array.from(this.connections.keys()).map(accountId => 
       this.stopIdleConnection(accountId)
     );
 
-    await Promise.all(stopPromises);
+    // Stop multi-folder connections
+    const stopFolderPromises = Array.from(this.folderConnections.keys()).map(connectionKey => 
+      this.stopFolderIdleConnection(connectionKey)
+    );
+
+    await Promise.all([...stopPromises, ...stopFolderPromises]);
 
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
     }
 
     console.log('All IMAP IDLE connections stopped');
+  }
+
+  /**
+   * Stop a specific folder IDLE connection
+   */
+  async stopFolderIdleConnection(connectionKey: string): Promise<void> {
+    const manager = this.folderConnections.get(connectionKey);
+    if (!manager) {
+      return;
+    }
+
+    console.log(`Stopping IDLE connection for ${connectionKey}`);
+
+    try {
+      if (manager.connection && manager.isActive) {
+        // Stop IDLE mode if active
+        if (manager.isIdle) {
+          try {
+            await manager.connection.noop(); // Send NOOP to break IDLE
+          } catch (idleError) {
+            console.log(`IDLE stop failed for ${connectionKey}`);
+          }
+        }
+        
+        // Release the mailbox lock
+        if (manager.mailboxLock) {
+          try {
+            manager.mailboxLock.release();
+          } catch (lockError) {
+            console.log(`Lock release failed for ${connectionKey}`);
+          }
+        }
+        
+        // Close connection
+        try {
+          await manager.connection.logout();
+        } catch (logoutError) {
+          console.log(`Logout failed for ${connectionKey}`);
+        }
+      }
+    } catch (error) {
+      console.error(`Error stopping IDLE connection for ${connectionKey}:`, error);
+    } finally {
+      // Clean up manager state
+      manager.isActive = false;
+      manager.isIdle = false;
+      manager.connection = undefined;
+      manager.mailboxLock = undefined;
+      
+      // Remove from connections map
+      this.folderConnections.delete(connectionKey);
+    }
   }
 
   /**

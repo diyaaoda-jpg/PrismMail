@@ -1108,7 +1108,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const requestId = `preferences-get-${Date.now()}`;
     try {
       const userId = req.user.claims.sub;
-      const preferences = await storage.getUserPreferences(userId);
+      const preferences = await storage.getUserPrefs(userId);
       res.json(createSuccessResponse(preferences, 'User preferences retrieved'));
     } catch (error) {
       handleApiError(error, res, 'GET /api/preferences', requestId);
@@ -1132,13 +1132,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      const updatedPreferences = await storage.updateUserPreferences(userId, preferences);
+      const updatedPreferences = await storage.upsertUserPrefs({ ...preferences, userId });
       res.json(createSuccessResponse(
         updatedPreferences,
         'User preferences updated successfully'
       ));
     } catch (error) {
       handleApiError(error, res, 'POST /api/preferences', requestId);
+    }
+  });
+
+  // Unified message aggregation endpoint for All Accounts view
+  app.get('/api/mail/unified', isAuthenticated, async (req: any, res) => {
+    const requestId = `unified-mail-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { folder = 'INBOX', limit = 50, offset = 0 } = req.query;
+      
+      console.log(`[${requestId}] Fetching unified messages for user ${userId}, folder: ${folder}`);
+      
+      // Get all user's accounts
+      const accounts = await storage.getUserAccountConnections(userId);
+      
+      if (accounts.length === 0) {
+        res.json(createSuccessResponse([], 'No accounts found'));
+        return;
+      }
+      
+      console.log(`[${requestId}] Found ${accounts.length} accounts for user`);
+      
+      // Fetch messages from all accounts in parallel
+      const messagePromises = accounts.map(async (account) => {
+        try {
+          const messages = await storage.getMailMessages(account.id, folder, Number(limit), Number(offset));
+          
+          // Add account info to each message for frontend display
+          return messages.map(msg => ({
+            ...msg,
+            accountName: account.name,
+            accountProtocol: account.protocol,
+            accountId: account.id
+          }));
+        } catch (error) {
+          console.error(`[${requestId}] Failed to fetch messages for account ${account.id}:`, error);
+          return []; // Return empty array on failure to not break the aggregation
+        }
+      });
+      
+      const accountMessages = await Promise.all(messagePromises);
+      
+      // Flatten and sort all messages by date (newest first)
+      const allMessages = accountMessages
+        .flat()
+        .sort((a, b) => {
+          const dateA = a.date ? new Date(a.date).getTime() : 0;
+          const dateB = b.date ? new Date(b.date).getTime() : 0;
+          return dateB - dateA;
+        })
+        .slice(0, Number(limit)); // Apply limit after sorting
+      
+      console.log(`[${requestId}] Returning ${allMessages.length} unified messages`);
+      
+      res.json(createSuccessResponse(allMessages, `Retrieved ${allMessages.length} unified messages`));
+      
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/mail/unified', requestId);
+    }
+  });
+
+  // Unified message count aggregation for folder badges
+  app.get('/api/mail/unified-counts', isAuthenticated, async (req: any, res) => {
+    const requestId = `unified-counts-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      
+      console.log(`[${requestId}] Fetching unified message counts for user ${userId}`);
+      
+      // Get all user's accounts
+      const accounts = await storage.getUserAccountConnections(userId);
+      
+      if (accounts.length === 0) {
+        res.json(createSuccessResponse({}, 'No accounts found'));
+        return;
+      }
+      
+      // Get folder counts from all accounts
+      const countPromises = accounts.map(async (account) => {
+        try {
+          const folders = await storage.getAccountFolders(account.id);
+          return {
+            accountId: account.id,
+            accountName: account.name,
+            folders: folders.reduce((acc, folder) => {
+              acc[folder.folderType] = {
+                unread: folder.unreadCount || 0,
+                total: folder.totalCount || 0
+              };
+              return acc;
+            }, {} as Record<string, { unread: number; total: number }>)
+          };
+        } catch (error) {
+          console.error(`[${requestId}] Failed to fetch folder counts for account ${account.id}:`, error);
+          return { accountId: account.id, accountName: account.name, folders: {} };
+        }
+      });
+      
+      const accountCounts = await Promise.all(countPromises);
+      
+      // Aggregate counts by folder type across all accounts
+      const unifiedCounts = accountCounts.reduce((acc, account) => {
+        Object.entries(account.folders).forEach(([folderType, counts]) => {
+          if (!acc[folderType]) {
+            acc[folderType] = { unread: 0, total: 0 };
+          }
+          acc[folderType].unread += counts.unread;
+          acc[folderType].total += counts.total;
+        });
+        return acc;
+      }, {} as Record<string, { unread: number; total: number }>);
+      
+      console.log(`[${requestId}] Returning unified counts for ${Object.keys(unifiedCounts).length} folder types`);
+      
+      res.json(createSuccessResponse({
+        unified: unifiedCounts,
+        accounts: accountCounts
+      }, 'Unified message counts retrieved'));
+      
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/mail/unified-counts', requestId);
     }
   });
 

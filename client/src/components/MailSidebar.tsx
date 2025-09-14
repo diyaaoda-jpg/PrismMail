@@ -45,15 +45,10 @@ const unifiedFolders: MailFolder[] = [
 const defaultAccountFolders: MailFolder[] = [
   { id: 'inbox', name: 'Inbox', icon: Inbox },
   { id: 'drafts', name: 'Drafts', icon: FileText },
-  { id: 'archive', name: 'Archive', icon: Archive },
   { id: 'sent', name: 'Sent', icon: Send },
+  { id: 'archive', name: 'Archive', icon: Archive },
   { id: 'deleted', name: 'Deleted Items', icon: Trash },
   { id: 'junk', name: 'Junk Email', icon: ShieldAlert },
-  { id: 'conversation', name: 'Conversation History', icon: Mail },
-  { id: 'rss', name: 'RSS Feeds', icon: Rss },
-  { id: 'scheduled', name: 'Scheduled', icon: Clock },
-  { id: 'sync', name: 'Sync Issues', icon: AlertTriangle },
-  { id: 'public', name: 'Subscribed Public Folders', icon: FolderOpen },
 ];
 
 const smartFolders: MailFolder[] = [
