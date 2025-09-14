@@ -164,12 +164,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
       console.log('🔔 Real-time email update received:', wsMessage.type, wsMessage.data);
       
-      // Show a subtle notification to user
+      // Show a prominent notification to user with real-time indicator
+      const messageData = wsMessage.data || {};
+      const accountName = messageData.accountName || 'your email account';
+      const folder = messageData.folder || 'Inbox';
+      
       if (wsMessage.type === 'emailReceived') {
         toast({
-          title: "New email received",
-          description: "Your inbox has been updated automatically.",
-          duration: 3000,
+          title: "📧 New Email Received (Real-time)",
+          description: `Email arrived in ${accountName} - ${folder}. Updated automatically via WebSocket.`,
+          duration: 5000,
+        });
+      } else if (wsMessage.type === 'emailSynced') {
+        toast({
+          title: "🔄 Email Sync Complete (Real-time)",
+          description: `${accountName} - ${folder} synchronized. Updated automatically via WebSocket.`,
+          duration: 4000,
         });
       }
       
