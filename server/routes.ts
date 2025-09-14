@@ -1628,9 +1628,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
-        result = await syncEwsEmails(storage, accountId, folder, limit);
+        // Sync multiple important folders for EWS
+        const foldersToSync = ['INBOX', 'SentItems', 'Drafts'];
+        let overallSuccess = true;
+        let lastError: string | null = null;
+        let totalMessageCount = 0;
+        
+        for (const folderName of foldersToSync) {
+          try {
+            console.log(`[${requestId}] Syncing EWS folder: ${folderName} for account ${account.name}`);
+            const syncResult = await syncEwsEmails(storage, accountId, folderName, limit);
+            
+            if (syncResult.success) {
+              totalMessageCount += syncResult.messageCount || 0;
+              console.log(`[${requestId}] Successfully synced ${syncResult.messageCount || 0} messages from ${folderName}`);
+            } else {
+              console.log(`[${requestId}] Failed to sync folder ${folderName}: ${syncResult.error}`);
+              if (folderName === 'INBOX') {
+                // INBOX failure is critical
+                overallSuccess = false;
+                lastError = syncResult.error || `Failed to sync ${folderName}`;
+              }
+            }
+          } catch (error) {
+            console.log(`[${requestId}] Error syncing folder ${folderName}: ${(error as Error).message}`);
+            if (folderName === 'INBOX') {
+              overallSuccess = false;
+              lastError = `Failed to sync ${folderName}: ${(error as Error).message}`;
+            }
+          }
+        }
+        
+        result = {
+          success: overallSuccess,
+          messageCount: totalMessageCount,
+          lastSync: new Date(),
+          error: lastError
+        };
       } else if (account.protocol === 'IMAP') {
-        result = await syncImapEmails(accountId, encryptedAccount.settingsJson, storage, { folder, limit });
+        // Sync multiple important folders for IMAP
+        const foldersToSync = ['INBOX', 'Sent', 'Sent Items', 'Drafts'];
+        let overallSuccess = true;
+        let lastError: string | null = null;
+        let totalMessageCount = 0;
+        
+        for (const folderName of foldersToSync) {
+          try {
+            console.log(`[${requestId}] Syncing IMAP folder: ${folderName} for account ${account.name}`);
+            const syncResult = await syncImapEmails(accountId, encryptedAccount.settingsJson, storage, { folder: folderName, limit });
+            
+            if (syncResult.success) {
+              totalMessageCount += syncResult.messageCount || 0;
+              console.log(`[${requestId}] Successfully synced ${syncResult.messageCount || 0} messages from ${folderName}`);
+            } else {
+              console.log(`[${requestId}] Failed to sync folder ${folderName}: ${syncResult.error}`);
+              if (folderName === 'INBOX') {
+                // INBOX failure is critical
+                overallSuccess = false;
+                lastError = syncResult.error || `Failed to sync ${folderName}`;
+              }
+            }
+          } catch (error) {
+            console.log(`[${requestId}] Error syncing folder ${folderName}: ${(error as Error).message}`);
+            if (folderName === 'INBOX') {
+              overallSuccess = false;
+              lastError = `Failed to sync ${folderName}: ${(error as Error).message}`;
+            }
+          }
+        }
+        
+        result = {
+          success: overallSuccess,
+          messageCount: totalMessageCount,
+          lastSync: new Date(),
+          error: lastError
+        };
       } else {
         throw new ApiError(
           ErrorCodes.UNSUPPORTED_PROTOCOL,
