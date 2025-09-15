@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/components/ThemeProvider";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSwipeGestures } from "@/hooks/useSwipeGestures";
+import { triggerHapticFeedback, clamp } from "@/lib/gestureUtils";
 import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
@@ -25,6 +27,11 @@ interface EmailViewerProps {
   onToggleFlagged?: (email: EmailMessage) => void;
   onToggleStar?: (email: EmailMessage) => void;
   onBack?: () => void;
+  onNavigatePrevious?: () => void;
+  onNavigateNext?: () => void;
+  hasNext?: boolean;
+  hasPrevious?: boolean;
+  enableGestures?: boolean;
 }
 
 export function EmailViewer({
@@ -37,6 +44,11 @@ export function EmailViewer({
   onDelete,
   onToggleFlagged,
   onBack,
+  onNavigatePrevious,
+  onNavigateNext,
+  hasNext = false,
+  hasPrevious = false,
+  enableGestures = true,
 }: EmailViewerProps) {
   // All hooks must be declared at the top in consistent order
   const { toast } = useToast();
@@ -49,6 +61,16 @@ export function EmailViewer({
   const [showImages, setShowImages] = useState(false);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [contentLoaded, setContentLoaded] = useState(false);
+  
+  // Zoom and gesture state
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isZooming, setIsZooming] = useState(false);
+  const [lastDoubleTapTime, setLastDoubleTapTime] = useState(0);
+  const [showNavigationHints, setShowNavigationHints] = useState(false);
+  
+  // Gesture refs
+  const viewerRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
 
   // Query hooks
   const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
@@ -182,6 +204,119 @@ export function EmailViewer({
     setFontSize(100);
   }, []);
   
+  // Navigation gesture configuration
+  const navigationGestureConfig = {
+    leftActions: hasPrevious ? [{
+      type: 'previous' as const,
+      icon: 'ChevronLeft',
+      color: 'hsl(var(--primary))',
+      label: 'Previous Email',
+      threshold: 80,
+      callback: () => {
+        onNavigatePrevious?.();
+        if (isMobile) triggerHapticFeedback('light');
+      },
+    }] : [],
+    rightActions: hasNext ? [{
+      type: 'next' as const,
+      icon: 'ChevronRight', 
+      color: 'hsl(var(--primary))',
+      label: 'Next Email',
+      threshold: 80,
+      callback: () => {
+        onNavigateNext?.();
+        if (isMobile) triggerHapticFeedback('light');
+      },
+    }] : [],
+    enableHapticFeedback: isMobile && enableGestures,
+    preventScrolling: false,
+  };
+
+  // Close gesture configuration (swipe down)
+  const closeGestureConfig = {
+    leftActions: [],
+    rightActions: [],
+    enableHapticFeedback: isMobile && enableGestures,
+    preventScrolling: false,
+  };
+
+  const navigationGestures = useSwipeGestures(
+    enableGestures && isMobile ? navigationGestureConfig : { leftActions: [], rightActions: [] }
+  );
+
+  // Zoom functionality
+  const handlePinchZoom = useCallback((scaleFactor: number) => {
+    if (!enableGestures) return;
+    
+    setZoomLevel(prev => {
+      const newZoom = clamp(prev * scaleFactor, 0.5, 3.0);
+      return newZoom;
+    });
+    setIsZooming(true);
+    
+    // Clear zooming state after animation
+    setTimeout(() => setIsZooming(false), 300);
+  }, [enableGestures]);
+
+  // Double tap to zoom
+  const handleDoubleTap = useCallback((event: React.TouchEvent | React.PointerEvent) => {
+    if (!enableGestures || !isMobile) return;
+    
+    const currentTime = Date.now();
+    const timeDiff = currentTime - lastDoubleTapTime;
+    
+    if (timeDiff < 300) { // Double tap detected
+      event.preventDefault();
+      
+      if (zoomLevel > 1) {
+        // Reset zoom
+        setZoomLevel(1);
+        triggerHapticFeedback('light');
+      } else {
+        // Smart zoom to 1.5x
+        setZoomLevel(1.5);
+        triggerHapticFeedback('medium');
+      }
+      
+      setIsZooming(true);
+      setTimeout(() => setIsZooming(false), 300);
+    }
+    
+    setLastDoubleTapTime(currentTime);
+  }, [enableGestures, isMobile, lastDoubleTapTime, zoomLevel]);
+
+  // Handle swipe down to close
+  const handleSwipeDown = useCallback((event: TouchEvent) => {
+    if (!enableGestures || !isMobile || !onBack) return;
+    
+    const touch = event.touches[0];
+    const startY = touch?.clientY || 0;
+    
+    const handleTouchMove = (moveEvent: TouchEvent) => {
+      const currentTouch = moveEvent.touches[0];
+      if (!currentTouch) return;
+      
+      const deltaY = currentTouch.clientY - startY;
+      
+      // If swipe down more than 100px, trigger close
+      if (deltaY > 100) {
+        moveEvent.preventDefault();
+        onBack();
+        triggerHapticFeedback('medium');
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchend', handleTouchEnd);
+      }
+    };
+    
+    const handleTouchEnd = () => {
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+    
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+  }, [enableGestures, isMobile, onBack]);
+
   // Enhanced image loading with lazy loading simulation
   useEffect(() => {
     if (email?.bodyHtml) {
@@ -196,6 +331,15 @@ export function EmailViewer({
       setContentLoaded(true);
     }
   }, [email]);
+
+  // Show navigation hints on mobile
+  useEffect(() => {
+    if (isMobile && enableGestures && (hasNext || hasPrevious)) {
+      setShowNavigationHints(true);
+      const timer = setTimeout(() => setShowNavigationHints(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [email, isMobile, enableGestures, hasNext, hasPrevious]);
   
   // CRITICAL: All useMemo hooks must be called before any early returns to maintain hooks order
   const contextualLabels = useMemo(() => {
@@ -311,7 +455,54 @@ export function EmailViewer({
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-background email-viewer-enhanced">
+    <div 
+      ref={viewerRef}
+      className="relative flex-1 flex flex-col bg-background email-viewer-enhanced"
+      onTouchStart={enableGestures && isMobile ? navigationGestures.handlers.onTouchStart : undefined}
+      onTouchMove={enableGestures && isMobile ? navigationGestures.handlers.onTouchMove : undefined}
+      onTouchEnd={enableGestures && isMobile ? navigationGestures.handlers.onTouchEnd : undefined}
+      onPointerDown={enableGestures && isMobile ? navigationGestures.handlers.onPointerDown : undefined}
+      onPointerMove={enableGestures && isMobile ? navigationGestures.handlers.onPointerMove : undefined}
+      onPointerUp={enableGestures && isMobile ? navigationGestures.handlers.onPointerUp : undefined}
+    >
+      {/* Navigation gesture visual feedback */}
+      {enableGestures && isMobile && navigationGestures.swipeState.isActive && (
+        <div className="absolute inset-0 pointer-events-none z-40">
+          {navigationGestures.swipeState.direction === 'left' && hasPrevious && (
+            <div 
+              className="absolute left-0 top-0 h-full bg-primary/20 transition-all duration-200 flex items-center justify-start"
+              style={{ width: Math.min(navigationGestures.swipeState.distance, 120) }}
+            >
+              <div className="flex items-center justify-center h-full px-6">
+                <ChevronLeft className="h-8 w-8 text-primary" />
+                <span className="ml-2 text-primary font-medium">Previous</span>
+              </div>
+            </div>
+          )}
+          {navigationGestures.swipeState.direction === 'right' && hasNext && (
+            <div 
+              className="absolute right-0 top-0 h-full bg-primary/20 transition-all duration-200 flex items-center justify-end"
+              style={{ width: Math.min(navigationGestures.swipeState.distance, 120) }}
+            >
+              <div className="flex items-center justify-center h-full px-6">
+                <span className="mr-2 text-primary font-medium">Next</span>
+                <ChevronRight className="h-8 w-8 text-primary" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Navigation hints */}
+      {showNavigationHints && enableGestures && isMobile && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 pointer-events-none">
+          <div className="bg-black/70 text-white px-4 py-2 rounded-full text-sm font-medium animate-fade-in-out">
+            Swipe left/right to navigate emails
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col">
       {/* Mobile Header - Only shown on mobile */}
       {isMobile && onBack && (
         <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
@@ -494,11 +685,25 @@ export function EmailViewer({
 
       {/* Content */}
       <div className="flex-1 flex flex-col">
-        <ScrollArea className="flex-1">
+        <ScrollArea 
+          className="flex-1" 
+          ref={contentScrollRef}
+          onTouchStart={enableGestures && isMobile ? handleSwipeDown : undefined}
+        >
           <div 
             ref={contentRef}
-            className="p-6 prose prose-sm max-w-none dark:prose-invert email-content-container"
-            style={{ fontSize: `${fontSize}%` }}
+            className={cn(
+              "p-6 prose prose-sm max-w-none dark:prose-invert email-content-container",
+              "transition-transform duration-300 transform-gpu",
+              isZooming && "transition-transform duration-300"
+            )}
+            style={{ 
+              fontSize: `${fontSize}%`,
+              transform: `scale(${zoomLevel})`,
+              transformOrigin: 'top center'
+            }}
+            onTouchStart={enableGestures && isMobile ? handleDoubleTap : undefined}
+            onPointerDown={enableGestures && isMobile ? handleDoubleTap : undefined}
           >
             {isLoadingContent && email?.bodyHtml ? (
               <div className="flex items-center justify-center py-8" data-testid="email-loading">
@@ -666,5 +871,6 @@ export function EmailViewer({
         </div>
       </div>
     </div>
+  </div>
   );
 }

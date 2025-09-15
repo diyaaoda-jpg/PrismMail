@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit, ChevronDown } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -23,6 +23,9 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useOfflineActions } from "@/hooks/useOfflineActions";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
+import { useSwipeGestures } from "@/hooks/useSwipeGestures";
+import { triggerHapticFeedback } from "@/lib/gestureUtils";
 import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
@@ -170,6 +173,61 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   // WebSocket connection for real-time email updates
   const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
+  
+  // Pull-to-refresh functionality
+  const handleRefresh = useCallback(async () => {
+    console.log('Pull-to-refresh triggered');
+    if (primaryAccount) {
+      // Trigger sync for the current account
+      await syncMutation.mutateAsync(primaryAccount.id);
+    } else {
+      // Refetch emails if no specific account
+      await refetchEmails();
+    }
+  }, [primaryAccount, syncMutation, refetchEmails]);
+
+  const pullToRefresh = usePullToRefresh(handleRefresh, {
+    threshold: 80,
+    maxPullDistance: 120,
+    enableHapticFeedback: isMobile,
+    refreshingText: 'Refreshing emails...',
+    pullText: 'Pull to refresh',
+    readyText: 'Release to refresh',
+    completedText: 'Emails updated',
+  });
+
+  // Edge swipe gestures for navigation
+  const edgeSwipeConfig = {
+    leftActions: [{
+      type: 'menu' as const,
+      icon: 'Menu',
+      color: 'hsl(var(--primary))',
+      label: 'Open Menu',
+      threshold: 60,
+      callback: () => {
+        setIsMobileSidebarOpen(true);
+        if (isMobile) triggerHapticFeedback('light');
+      },
+    }],
+    rightActions: [{
+      type: 'compose' as const,
+      icon: 'Edit',
+      color: 'hsl(var(--chart-2))',
+      label: 'Compose',
+      threshold: 60,
+      callback: () => {
+        setIsComposeOpen(true);
+        if (isMobile) triggerHapticFeedback('light');
+      },
+    }],
+    enableHapticFeedback: isMobile,
+    preventScrolling: false,
+  };
+
+  const edgeSwipes = useSwipeGestures(isMobile ? edgeSwipeConfig : { leftActions: [], rightActions: [] });
+  
+  // Refs for gesture handling
+  const mainContainerRef = useRef<HTMLDivElement>(null);
   
 
   // Auto-select account on load with IMAP preference
@@ -727,7 +785,42 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   };
 
   return (
-    <div className="h-screen bg-background">
+    <div 
+      ref={mainContainerRef}
+      className="h-screen bg-background"
+      onTouchStart={isMobile ? edgeSwipes.handlers.onTouchStart : undefined}
+      onTouchMove={isMobile ? edgeSwipes.handlers.onTouchMove : undefined}
+      onTouchEnd={isMobile ? edgeSwipes.handlers.onTouchEnd : undefined}
+      onPointerDown={isMobile ? edgeSwipes.handlers.onPointerDown : undefined}
+      onPointerMove={isMobile ? edgeSwipes.handlers.onPointerMove : undefined}
+      onPointerUp={isMobile ? edgeSwipes.handlers.onPointerUp : undefined}
+    >
+      {/* Edge swipe visual feedback */}
+      {edgeSwipes.swipeState.isActive && (
+        <div className="fixed inset-0 pointer-events-none z-50">
+          {edgeSwipes.swipeState.direction === 'right' && (
+            <div 
+              className="absolute left-0 top-0 h-full bg-primary/20 transition-all duration-200"
+              style={{ width: Math.min(edgeSwipes.swipeState.distance, 100) }}
+            >
+              <div className="flex items-center justify-center h-full px-4">
+                <Menu className="h-6 w-6 text-primary" />
+              </div>
+            </div>
+          )}
+          {edgeSwipes.swipeState.direction === 'left' && (
+            <div 
+              className="absolute right-0 top-0 h-full bg-chart-2/20 transition-all duration-200"
+              style={{ width: Math.min(edgeSwipes.swipeState.distance, 100) }}
+            >
+              <div className="flex items-center justify-center h-full px-4">
+                <Edit className="h-6 w-6 text-chart-2" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className={cn(
         "flex",
         isMobile ? "h-full flex-col" : "h-full"
@@ -1071,7 +1164,41 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 </div>
               </div>
               
-              <ScrollArea className="flex-1">
+              <ScrollArea 
+                className="flex-1" 
+                data-scroll-container
+                onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
+                onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
+                onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
+                onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
+                onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
+                onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
+                onScroll={pullToRefresh.handlers.onScroll}
+              >
+                {/* Pull-to-refresh indicator */}
+                {pullToRefresh.pullState.isActive && (
+                  <div 
+                    className="flex items-center justify-center py-4 transition-all duration-300"
+                    style={{ 
+                      height: pullToRefresh.pullDistance,
+                      opacity: pullToRefresh.pullProgress,
+                    }}
+                  >
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <RefreshCw 
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-300",
+                          pullToRefresh.isRefreshing && "animate-spin",
+                          pullToRefresh.pullProgress > 0.8 && "rotate-180"
+                        )} 
+                      />
+                      <span className="text-sm font-medium">
+                        {pullToRefresh.getStatusText()}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <div className="divide-y">
                   {filteredEmails.map((email) => (
                     <EmailListItem
@@ -1085,10 +1212,14 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                         }
                         console.log('Selected email:', email.subject);
                       }}
+                      onToggleRead={(emailId) => handleToggleRead(emailId)}
                       onToggleFlagged={(emailId) => handleToggleFlagged(emailId)}
                       onToggleStar={handleStar}
                       onArchive={handleArchive}
                       onDelete={handleDelete}
+                      onFlag={(emailId) => handleToggleFlagged(emailId)}
+                      enableSwipeGestures={isMobile}
+                      showSwipeHints={false}
                     />
                   ))}
                   {emailsLoading && (
@@ -1163,6 +1294,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
             )}
           </div>
         ) : null}
+        </div>
       </div>
 
       {/* Reading Mode Overlay */}
