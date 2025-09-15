@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, memo, useMemo } from "react";
+import * as React from "react";
 import { Star, Paperclip, Circle, Archive, Trash, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,7 +51,7 @@ const priorityColors = {
   3: "bg-destructive/20 border-destructive", // red
 };
 
-export const EmailListItem = memo(function EmailListItem({
+export const EmailListItem = React.memo(function EmailListItem({
   email,
   isSelected = false,
   onClick,
@@ -64,12 +64,12 @@ export const EmailListItem = memo(function EmailListItem({
   enableSwipeGestures = true,
   showSwipeHints = false,
 }: EmailListItemProps) {
-  const [isHovered, setIsHovered] = useState(false);
-  const itemRef = useRef<HTMLDivElement>(null);
+  const [isHovered, setIsHovered] = React.useState(false);
+  const itemRef = React.useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
   // Create swipe configuration for this email - PERFORMANCE FIX: Memoize to prevent recreation
-  const swipeConfig = useMemo(() => {
+  const swipeConfig = React.useMemo(() => {
     if (!enableSwipeGestures || !isMobile) return { leftActions: [], rightActions: [] };
     
     return createEmailSwipeActions(
@@ -92,17 +92,17 @@ export const EmailListItem = memo(function EmailListItem({
   // Initialize swipe gestures - Only when needed
   const { swipeState, handlers, getActionFeedback } = useSwipeGestures(swipeConfig);
 
-  const handleToggleRead = useCallback((e: React.MouseEvent) => {
+  const handleToggleRead = React.useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onToggleRead?.(email.id);
   }, [onToggleRead, email.id]);
 
-  const handleToggleFlagged = useCallback((e: React.MouseEvent) => {
+  const handleToggleFlagged = React.useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onToggleFlagged?.(email.id);
   }, [onToggleFlagged, email.id]);
 
-  const handleClick = useCallback((e: React.MouseEvent) => {
+  const handleClick = React.useCallback((e: React.MouseEvent) => {
     // Don't trigger click if user is swiping
     if (swipeState.isActive) {
       e.preventDefault();
@@ -115,7 +115,7 @@ export const EmailListItem = memo(function EmailListItem({
   const actionFeedback = getActionFeedback();
 
   // Memoize expensive computations for mobile performance
-  const memoizedPriorityStyle = useMemo(() => {
+  const memoizedPriorityStyle = React.useMemo(() => {
     if (email.priority === 0) return {};
     return {
       className: priorityColors[email.priority as keyof typeof priorityColors] || "",
@@ -123,7 +123,7 @@ export const EmailListItem = memo(function EmailListItem({
     };
   }, [email.priority]);
 
-  const memoizedTimeDisplay = useMemo(() => {
+  const memoizedTimeDisplay = React.useMemo(() => {
     // PERFORMANCE FIX: Use more efficient date handling and cache current time
     const emailDate = email.date instanceof Date ? email.date : new Date(email.date);
     const emailTime = emailDate.getTime();

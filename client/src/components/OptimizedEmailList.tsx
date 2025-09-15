@@ -1,4 +1,4 @@
-import { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
+import * as React from 'react';
 import { VirtualScrollList, useVirtualScrollList } from './VirtualScrollList';
 import { EmailListItem, type EmailMessage } from './EmailListItem';
 import { performanceMonitor } from '@/lib/performanceMonitor';
@@ -92,14 +92,14 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
   enableSwipeGestures = true,
   isLoading = false
 }: OptimizedEmailListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [itemHeight] = useState(80); // Fixed height for consistent performance
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [itemHeight] = React.useState(80); // Fixed height for consistent performance
   
   // Use virtual scrolling hook for container size management
   const { containerHeight } = useVirtualScrollList(emails, containerRef, itemHeight);
 
   // Memoized email filtering for performance - CRITICAL FIX: Remove performance monitor to prevent render loop
-  const filteredEmails = useMemo(() => {
+  const filteredEmails = React.useMemo(() => {
     if (!searchQuery) return emails;
     
     const query = searchQuery.toLowerCase();
@@ -111,32 +111,32 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
   }, [emails, searchQuery]);
 
   // Memoized handlers for performance
-  const handleEmailSelect = useCallback((email: EmailMessage) => {
+  const handleEmailSelect = React.useCallback((email: EmailMessage) => {
     onEmailSelect?.(email);
   }, [onEmailSelect]);
 
-  const handleToggleRead = useCallback((id: string) => {
+  const handleToggleRead = React.useCallback((id: string) => {
     onToggleRead?.(id);
   }, [onToggleRead]);
 
-  const handleToggleFlagged = useCallback((id: string) => {
+  const handleToggleFlagged = React.useCallback((id: string) => {
     onToggleFlagged?.(id);
   }, [onToggleFlagged]);
 
-  const handleArchive = useCallback((id: string) => {
+  const handleArchive = React.useCallback((id: string) => {
     onArchive?.(id);
   }, [onArchive]);
 
-  const handleDelete = useCallback((id: string) => {
+  const handleDelete = React.useCallback((id: string) => {
     onDelete?.(id);
   }, [onDelete]);
 
-  const handleToggleStar = useCallback((id: string) => {
+  const handleToggleStar = React.useCallback((id: string) => {
     onToggleStar?.(id);
   }, [onToggleStar]);
 
   // Performance monitoring effect - Stable to prevent excessive re-runs
-  useEffect(() => {
+  React.useEffect(() => {
     let timeoutId: number;
     
     // Use setTimeout to measure after React's reconciliation is complete

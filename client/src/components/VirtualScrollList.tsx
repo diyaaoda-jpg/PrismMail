@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 interface VirtualScrollListProps<T> {
@@ -22,11 +22,11 @@ export function VirtualScrollList<T>({
   onScroll,
   itemKey = (_, index) => index,
 }: VirtualScrollListProps<T>) {
-  const [scrollTop, setScrollTop] = useState(0);
-  const scrollElementRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const scrollElementRef = React.useRef<HTMLDivElement>(null);
 
   // Calculate visible range with overscan for smooth scrolling - Optimized to prevent excessive re-calculations
-  const visibleRange = useMemo(() => {
+  const visibleRange = React.useMemo(() => {
     const start = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
     const visibleCount = Math.ceil(containerHeight / itemHeight);
     const end = Math.min(items.length, start + visibleCount + overscan * 2);
@@ -35,7 +35,7 @@ export function VirtualScrollList<T>({
   }, [Math.floor(scrollTop / itemHeight), containerHeight, items.length, overscan]); // Reduce sensitivity to scrollTop changes
 
   // Get visible items efficiently - Memoize more aggressively to prevent unnecessary re-renders
-  const visibleItems = useMemo(() => {
+  const visibleItems = React.useMemo(() => {
     if (visibleRange.start >= items.length) return [];
     
     const slicedItems = items.slice(visibleRange.start, visibleRange.end);
@@ -50,7 +50,7 @@ export function VirtualScrollList<T>({
   const totalHeight = items.length * itemHeight;
 
   // Handle scroll events with throttling for performance - Add RAF throttling to prevent excessive renders
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+  const handleScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const newScrollTop = e.currentTarget.scrollTop;
     
     // Throttle scroll updates using requestAnimationFrame
@@ -68,7 +68,7 @@ export function VirtualScrollList<T>({
   }, [onScroll]);
 
   // Scroll to specific item (for navigation)
-  const scrollToItem = useCallback((index: number, behavior: ScrollBehavior = 'smooth') => {
+  const scrollToItem = React.useCallback((index: number, behavior: ScrollBehavior = 'smooth') => {
     if (scrollElementRef.current) {
       const targetScrollTop = Math.max(0, index * itemHeight);
       scrollElementRef.current.scrollTo({
@@ -79,7 +79,7 @@ export function VirtualScrollList<T>({
   }, [itemHeight]);
 
   // Expose scroll methods
-  useEffect(() => {
+  React.useEffect(() => {
     if (scrollElementRef.current) {
       (scrollElementRef.current as any).scrollToItem = scrollToItem;
     }
@@ -126,10 +126,10 @@ export function useVirtualScrollList<T>(
   containerRef: React.RefObject<HTMLElement>,
   itemHeight: number = 60
 ) {
-  const [containerHeight, setContainerHeight] = useState(400);
+  const [containerHeight, setContainerHeight] = React.useState(400);
   
   // Observe container size changes for responsive design
-  useEffect(() => {
+  React.useEffect(() => {
     if (!containerRef.current) return;
     
     const resizeObserver = new ResizeObserver(entries => {
