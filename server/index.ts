@@ -1,6 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { WebSocketServer } from "ws";
-import { IncomingMessage } from "http";
+import { IncomingMessage, createServer } from "http";
 import { parse as parseCookie } from "cookie";
 import { parse as parseUrl } from "url";
 import { registerRoutes } from "./routes";
@@ -24,10 +24,21 @@ import { metrics, EmailMetrics } from "./monitoring/metrics.js";
 
 const app = express();
 
-// Initialize production-grade architecture
+// Set trust proxy for external domain access (Replit hosting)
+app.set('trust proxy', 1);
+
+// CRITICAL FIX: Setup Vite FIRST before any security middleware
+// This ensures Vite handles "/" and assets before security intercepts them
+const server = createServer(app);
+if (config.server.nodeEnv === 'development') {
+  await setupVite(app, server);
+  log('🎯 CRITICAL FIX: Vite middleware setup BEFORE security - ensuring browser access works');
+}
+
+// Initialize production-grade architecture AFTER Vite
 const architectureIntegration = new ArchitectureIntegration(app);
 
-// Basic middleware (before architecture integration)
+// Basic middleware (after Vite, before architecture integration)
 app.use(express.json({ limit: config.performance.requestTimeout ? '10mb' : '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -51,22 +62,7 @@ app.use(express.urlencoded({ extended: false }));
   // Setup enhanced attachment routes with comprehensive security
   setupAttachmentRoutes(app);
 
-  // CRITICAL: Add guaranteed health check endpoints before any other middleware
-  app.get('/healthz', (_req: Request, res: Response) => {
-    res.status(200).json({ 
-      status: 'ok', 
-      timestamp: Date.now(),
-      message: 'PrismMail server is running' 
-    });
-  });
-
-  app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json({ 
-      status: 'healthy', 
-      timestamp: Date.now(),
-      service: 'PrismMail'
-    });
-  });
+  // Health check endpoints are already handled in registerRoutes()
 
   // CRITICAL: Enforce platform-assigned PORT environment variable
   const envPort = process.env.PORT;
@@ -392,13 +388,20 @@ app.use(express.urlencoded({ extended: false }));
       process.on('SIGINT', () => gracefulShutdown('SIGINT'));
       process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
       
-      await setupVite(app, server);
+      // Vite already setup earlier in middleware stack - no need to duplicate
+      
       log('Vite development server initialized with permanent exit protection');
       log('Use Ctrl+C (SIGINT) or SIGTERM for graceful shutdown', 'vite-protection');
       
     } catch (error) {
-      console.error('Failed to setup Vite dev server:', error);
+      console.error('CRITICAL: Failed to setup Vite dev server:', error);
       logger.error('Vite setup failed', { error: error as Error });
+      // Log the full error details for debugging
+      console.error('Vite setup error details:', {
+        message: (error as Error).message,
+        stack: (error as Error).stack,
+        name: (error as Error).name
+      });
       // Fallback to basic static serving if Vite fails
       serveBasicStatic(app);
     }
