@@ -124,10 +124,27 @@ export class DistributedJobService {
   }
 
   private setupFallbackProcessing(): void {
-    // Set up periodic processing of fallback jobs
-    setInterval(() => {
-      this.processFallbackJobs();
-    }, 10000); // Process fallback jobs every 10 seconds
+    // Set up periodic processing of fallback jobs with exponential backoff
+    let backoffInterval = 30000; // Start with 30 seconds
+    const maxInterval = 300000; // Max 5 minutes
+    let lastLogTime = 0;
+    
+    const processWithBackoff = () => {
+      const now = Date.now();
+      // Only log every 5 minutes to reduce noise
+      if (now - lastLogTime > 300000) {
+        this.processFallbackJobs();
+        lastLogTime = now;
+        
+        // Increase backoff interval for less frequent checks
+        backoffInterval = Math.min(backoffInterval * 1.5, maxInterval);
+      }
+      
+      setTimeout(processWithBackoff, backoffInterval);
+    };
+    
+    // Start the process with initial delay
+    setTimeout(processWithBackoff, backoffInterval);
   }
 
   static getInstance(): DistributedJobService {

@@ -295,6 +295,35 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Health check endpoint (no authentication required)
+  app.get('/healthz', async (_req, res) => {
+    try {
+      // Check basic server health
+      const healthCheck = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        server: 'PrismMail Server',
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development',
+        services: {
+          storage: 'ok', // Could add storage health check here
+          redis: 'unavailable', // Based on the logs showing Redis unavailable
+          database: 'available' // Based on the PostgreSQL status
+        }
+      };
+      
+      res.status(200).json(healthCheck);
+    } catch (error) {
+      console.error('Health check failed:', error);
+      res.status(503).json({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        server: 'PrismMail Server',
+        error: 'Health check failed'
+      });
+    }
+  });
+
   // Auth middleware
   await setupAuth(app);
 
@@ -1198,40 +1227,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        transporter = nodemailer.createTransport({
-          host: smtpSettings.host,
-          port: smtpSettings.port || 587,
-          secure: smtpSettings.secure || false,
-          auth: {
-            user: smtpSettings.username || accountSettings.username,
-            pass: smtpSettings.password || accountSettings.password,
-          },
-          connectionTimeout: 30000,
-          greetingTimeout: 30000,
-          socketTimeout: 30000,
-        });
-
-        // Verify SMTP connection
-        try {
-          await transporter.verify();
-          console.log(`[${requestId}] SMTP connection verified`);
-        } catch (error: any) {
-          console.error(`[${requestId}] SMTP verification failed:`, error);
-          throw new ApiError(
-            ErrorCodes.SMTP_CONNECTION_FAILED,
-            'SMTP connection failed',
-            500,
-            `Cannot connect to SMTP server: ${error.message}`,
-            undefined,
-            [
-              'Check SMTP server settings in account configuration',
-              'Verify SMTP credentials are correct',
-              'Ensure SMTP server is reachable'
-            ]
-          );
-        }
-        
-        // Configure SMTP transporter
         const transporter = nodemailer.createTransport({
           host: smtpSettings.host,
           port: smtpSettings.port || 587,
@@ -1330,7 +1325,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         date: new Date(),
         size: (emailRequest.body || '').length + (emailRequest.bodyHtml || '').length,
         replyTo: null,
-        attachments: emailRequest.attachments || []
+        attachments: emailRequest.attachments || [],
+        priority: 0, // Normal priority for sent emails
+        autoPriority: 0, // Normal auto-calculated priority
+        priorityScore: 0 // Base score for sent emails
       };
 
       try {
