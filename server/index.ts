@@ -60,8 +60,34 @@ const server = createServer(app);
 
   // ARCHITECT FIX: Setup Vite AFTER routes but BEFORE 404 fallback
   if (config.server.nodeEnv === 'development') {
+    // CRITICAL FIX: Prevent Content-Encoding mismatch causing net::ERR_CONTENT_DECODING_FAILED
+    app.use((req, res, next) => {
+      const originalEnd = res.end.bind(res);
+      const originalSend = res.send.bind(res);
+      
+      res.end = function(chunk?: any, encoding?: any, cb?: any) {
+        const contentType = res.getHeader('Content-Type');
+        if (typeof contentType === 'string' && contentType.includes('text/html')) {
+          res.removeHeader('Content-Encoding');
+          res.setHeader('Cache-Control', 'no-transform');
+        }
+        return originalEnd(chunk, encoding, cb);
+      };
+      
+      res.send = function(body?: any) {
+        const contentType = res.getHeader('Content-Type');
+        if (typeof contentType === 'string' && contentType.includes('text/html')) {
+          res.removeHeader('Content-Encoding');
+          res.setHeader('Cache-Control', 'no-transform');
+        }
+        return originalSend(body);
+      };
+      
+      next();
+    });
+    
     await setupVite(app, server);
-    log('🎯 ARCHITECT FIX: Vite setup in correct position - after routes, before 404');
+    log('🎯 CONTENT-ENCODING FIX: Stripped compression headers to prevent decoding errors');
   }
 
   // Health check endpoints are already handled in registerRoutes()
