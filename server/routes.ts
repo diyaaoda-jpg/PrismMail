@@ -2,12 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, type SearchEmailsParams } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertAttachmentSchema, saveDraftRequestSchema, type SaveDraftRequest, type SaveDraftResponse, type LoadDraftResponse, type ListDraftsResponse, type DeleteDraftResponse, createSignatureRequestSchema, updateSignatureRequestSchema, type CreateSignatureRequest, type UpdateSignatureRequest, type SignatureResponse, type ListSignaturesResponse, type DeleteSignatureResponse } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertAttachmentSchema, saveDraftRequestSchema, type SaveDraftRequest, type SaveDraftResponse, type LoadDraftResponse, type ListDraftsResponse, type DeleteDraftResponse, createSignatureRequestSchema, updateSignatureRequestSchema, type CreateSignatureRequest, type UpdateSignatureRequest, type SignatureResponse, type ListSignaturesResponse, type DeleteSignatureResponse, pushSubscriptionRequestSchema, updateNotificationPreferencesRequestSchema, updateAccountNotificationPreferencesRequestSchema, type PushSubscriptionRequest, type PushSubscriptionResponse, type UpdateNotificationPreferencesRequest, type UpdateAccountNotificationPreferencesRequest, type NotificationPreferencesResponse } from "@shared/schema";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
 import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
 import { getImapIdleService } from "./imapIdle";
+import { pushNotificationManager } from "./push/pushNotifications";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
@@ -107,7 +108,16 @@ const ErrorCodes = {
   DRAFT_NOT_FOUND: 'DRAFT_NOT_FOUND',
   DRAFT_SAVE_FAILED: 'DRAFT_SAVE_FAILED',
   DRAFT_DELETE_FAILED: 'DRAFT_DELETE_FAILED',
-  INVALID_DRAFT_DATA: 'INVALID_DRAFT_DATA'
+  INVALID_DRAFT_DATA: 'INVALID_DRAFT_DATA',
+  
+  // Push notification errors
+  PUSH_SUBSCRIPTION_FAILED: 'PUSH_SUBSCRIPTION_FAILED',
+  PUSH_UNSUBSCRIBE_FAILED: 'PUSH_UNSUBSCRIBE_FAILED',
+  PUSH_NOTIFICATION_SEND_FAILED: 'PUSH_NOTIFICATION_SEND_FAILED',
+  NOTIFICATION_PREFERENCES_UPDATE_FAILED: 'NOTIFICATION_PREFERENCES_UPDATE_FAILED',
+  VAPID_NOT_CONFIGURED: 'VAPID_NOT_CONFIGURED',
+  INVALID_PUSH_SUBSCRIPTION: 'INVALID_PUSH_SUBSCRIPTION',
+  PUSH_NOT_SUPPORTED: 'PUSH_NOT_SUPPORTED'
 } as const;
 
 /**
@@ -3462,6 +3472,386 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(createSuccessResponse(response, signature ? 'Default signature retrieved' : 'No default signature set'));
     } catch (error) {
       handleApiError(error, res, 'GET /api/signatures/default', requestId);
+    }
+  });
+
+  // PUSH NOTIFICATION ROUTES
+
+  // Get VAPID public key for client subscription
+  app.get('/api/push/public-key', async (req: any, res) => {
+    const requestId = `get-vapid-key-${Date.now()}`;
+    try {
+      const publicKey = pushNotificationManager.getPublicKey();
+      
+      if (!publicKey) {
+        throw new ApiError(
+          ErrorCodes.VAPID_NOT_CONFIGURED,
+          'Push notifications not available',
+          503,
+          'VAPID keys are not configured on the server',
+          undefined,
+          ['Contact system administrator to configure push notifications']
+        );
+      }
+
+      const response: PushSubscriptionResponse = {
+        success: true,
+        publicKey,
+      };
+
+      res.json(createSuccessResponse(response, 'VAPID public key retrieved'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/push/public-key', requestId);
+    }
+  });
+
+  // Subscribe to push notifications
+  app.post('/api/push/subscribe', isAuthenticated, async (req: any, res) => {
+    const requestId = `push-subscribe-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Validate subscription data
+      const subscriptionData = pushSubscriptionRequestSchema.parse(req.body);
+
+      // Check if this subscription already exists
+      const existingSubscriptions = await storage.getUserPushSubscriptions(userId);
+      const existingSubscription = existingSubscriptions.find(
+        sub => sub.endpoint === subscriptionData.endpoint
+      );
+
+      if (existingSubscription) {
+        // Update existing subscription
+        const updated = await storage.updatePushSubscription(existingSubscription.id, {
+          p256dhKey: subscriptionData.keys.p256dh,
+          authKey: subscriptionData.keys.auth,
+          userAgent: subscriptionData.userAgent,
+          deviceType: subscriptionData.deviceType,
+          isActive: true,
+          lastUsed: new Date(),
+        });
+
+        if (!updated) {
+          throw new ApiError(
+            ErrorCodes.PUSH_SUBSCRIPTION_FAILED,
+            'Failed to update push subscription',
+            500
+          );
+        }
+
+        const response: PushSubscriptionResponse = {
+          success: true,
+          subscriptionId: updated.id,
+          publicKey: pushNotificationManager.getPublicKey(),
+        };
+
+        res.json(createSuccessResponse(response, 'Push subscription updated'));
+      } else {
+        // Create new subscription
+        const subscription = await storage.createPushSubscription({
+          userId,
+          endpoint: subscriptionData.endpoint,
+          p256dhKey: subscriptionData.keys.p256dh,
+          authKey: subscriptionData.keys.auth,
+          userAgent: subscriptionData.userAgent,
+          deviceType: subscriptionData.deviceType || 'desktop',
+          isActive: true,
+          lastUsed: new Date(),
+        });
+
+        const response: PushSubscriptionResponse = {
+          success: true,
+          subscriptionId: subscription.id,
+          publicKey: pushNotificationManager.getPublicKey(),
+        };
+
+        res.json(createSuccessResponse(response, 'Push subscription created'));
+      }
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/push/subscribe', requestId);
+    }
+  });
+
+  // Unsubscribe from push notifications
+  app.delete('/api/push/unsubscribe', isAuthenticated, async (req: any, res) => {
+    const requestId = `push-unsubscribe-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const { endpoint } = req.body;
+      
+      if (!endpoint) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Endpoint is required',
+          400,
+          'Push subscription endpoint must be provided'
+        );
+      }
+
+      await storage.deletePushSubscriptionByEndpoint(userId, endpoint);
+
+      res.json(createSuccessResponse({}, 'Push subscription removed'));
+    } catch (error) {
+      handleApiError(error, res, 'DELETE /api/push/unsubscribe', requestId);
+    }
+  });
+
+  // Get notification preferences
+  app.get('/api/push/preferences', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-push-preferences-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const globalPrefs = await storage.getNotificationPreferences(userId);
+      const accountPrefs = await storage.getAccountNotificationPreferences(userId);
+
+      // Get user's account connections for account names
+      const accounts = await storage.getUserAccountConnections(userId);
+
+      const response: NotificationPreferencesResponse = {
+        success: true,
+        preferences: {
+          global: globalPrefs ? {
+            enableNotifications: globalPrefs.enableNotifications,
+            enableNewEmailNotifications: globalPrefs.enableNewEmailNotifications,
+            enableVipNotifications: globalPrefs.enableVipNotifications,
+            enableSystemNotifications: globalPrefs.enableSystemNotifications,
+            enableQuietHours: globalPrefs.enableQuietHours,
+            quietStartHour: globalPrefs.quietStartHour,
+            quietEndHour: globalPrefs.quietEndHour,
+            quietTimezone: globalPrefs.quietTimezone,
+            enableGrouping: globalPrefs.enableGrouping,
+            enableSound: globalPrefs.enableSound,
+            enableVibration: globalPrefs.enableVibration,
+            priorityFilter: globalPrefs.priorityFilter,
+            batchDelaySeconds: globalPrefs.batchDelaySeconds,
+            maxNotificationsPerHour: globalPrefs.maxNotificationsPerHour,
+          } : {
+            enableNotifications: true,
+            enableNewEmailNotifications: true,
+            enableVipNotifications: true,
+            enableSystemNotifications: true,
+            enableQuietHours: false,
+            quietStartHour: 22,
+            quietEndHour: 8,
+            quietTimezone: 'America/New_York',
+            enableGrouping: true,
+            enableSound: true,
+            enableVibration: true,
+            priorityFilter: 'all',
+            batchDelaySeconds: 30,
+            maxNotificationsPerHour: 20,
+          },
+          accounts: accountPrefs.map(pref => {
+            const account = accounts.find(acc => acc.id === pref.accountId);
+            return {
+              accountId: pref.accountId,
+              accountName: account?.name || 'Unknown Account',
+              enableNotifications: pref.enableNotifications,
+              notifyForFolders: pref.notifyForFolders,
+              enableVipFiltering: pref.enableVipFiltering,
+              enablePriorityFiltering: pref.enablePriorityFiltering,
+              minimumPriority: pref.minimumPriority,
+            };
+          }),
+        },
+      };
+
+      res.json(createSuccessResponse(response, 'Notification preferences retrieved'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/push/preferences', requestId);
+    }
+  });
+
+  // Update global notification preferences
+  app.put('/api/push/preferences', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-push-preferences-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const prefsData = updateNotificationPreferencesRequestSchema.parse(req.body);
+
+      // Get existing preferences or create defaults
+      const existingPrefs = await storage.getNotificationPreferences(userId);
+      
+      const updatedPrefs = await storage.upsertNotificationPreferences({
+        userId,
+        enableNotifications: prefsData.enableNotifications ?? existingPrefs?.enableNotifications ?? true,
+        enableNewEmailNotifications: prefsData.enableNewEmailNotifications ?? existingPrefs?.enableNewEmailNotifications ?? true,
+        enableVipNotifications: prefsData.enableVipNotifications ?? existingPrefs?.enableVipNotifications ?? true,
+        enableSystemNotifications: prefsData.enableSystemNotifications ?? existingPrefs?.enableSystemNotifications ?? true,
+        enableQuietHours: prefsData.enableQuietHours ?? existingPrefs?.enableQuietHours ?? false,
+        quietStartHour: prefsData.quietStartHour ?? existingPrefs?.quietStartHour ?? 22,
+        quietEndHour: prefsData.quietEndHour ?? existingPrefs?.quietEndHour ?? 8,
+        quietTimezone: prefsData.quietTimezone ?? existingPrefs?.quietTimezone ?? 'America/New_York',
+        enableGrouping: prefsData.enableGrouping ?? existingPrefs?.enableGrouping ?? true,
+        enableSound: prefsData.enableSound ?? existingPrefs?.enableSound ?? true,
+        enableVibration: prefsData.enableVibration ?? existingPrefs?.enableVibration ?? true,
+        priorityFilter: prefsData.priorityFilter ?? existingPrefs?.priorityFilter ?? 'all',
+        batchDelaySeconds: prefsData.batchDelaySeconds ?? existingPrefs?.batchDelaySeconds ?? 30,
+        maxNotificationsPerHour: prefsData.maxNotificationsPerHour ?? existingPrefs?.maxNotificationsPerHour ?? 20,
+      });
+
+      res.json(createSuccessResponse(updatedPrefs, 'Notification preferences updated'));
+    } catch (error) {
+      handleApiError(error, res, 'PUT /api/push/preferences', requestId);
+    }
+  });
+
+  // Update account-specific notification preferences
+  app.put('/api/push/account-preferences', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-account-push-preferences-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const prefsData = updateAccountNotificationPreferencesRequestSchema.parse(req.body);
+
+      // Verify user owns this account
+      const accounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = accounts.some(acc => acc.id === prefsData.accountId);
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Invalid account ID',
+          403,
+          'You do not have permission to modify preferences for this account'
+        );
+      }
+
+      // Get existing account preferences or create defaults
+      const existingAccountPrefs = await storage.getAccountNotificationPreferences(userId, prefsData.accountId);
+      const existing = existingAccountPrefs[0];
+
+      const updatedPrefs = await storage.upsertAccountNotificationPreferences({
+        userId,
+        accountId: prefsData.accountId,
+        enableNotifications: prefsData.enableNotifications ?? existing?.enableNotifications ?? true,
+        notifyForFolders: prefsData.notifyForFolders ?? existing?.notifyForFolders ?? 'inbox,sent',
+        enableVipFiltering: prefsData.enableVipFiltering ?? existing?.enableVipFiltering ?? true,
+        enablePriorityFiltering: prefsData.enablePriorityFiltering ?? existing?.enablePriorityFiltering ?? false,
+        minimumPriority: prefsData.minimumPriority ?? existing?.minimumPriority ?? 0,
+      });
+
+      res.json(createSuccessResponse(updatedPrefs, 'Account notification preferences updated'));
+    } catch (error) {
+      handleApiError(error, res, 'PUT /api/push/account-preferences', requestId);
+    }
+  });
+
+  // Send test notification
+  app.post('/api/push/test', isAuthenticated, async (req: any, res) => {
+    const requestId = `test-push-notification-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const success = await pushNotificationManager.testNotification(userId);
+      
+      if (!success) {
+        throw new ApiError(
+          ErrorCodes.PUSH_NOTIFICATION_SEND_FAILED,
+          'Failed to send test notification',
+          500,
+          'No active push subscriptions found or notification delivery failed',
+          undefined,
+          ['Make sure push notifications are enabled', 'Try subscribing again']
+        );
+      }
+
+      res.json(createSuccessResponse({ delivered: success }, 'Test notification sent'));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/push/test', requestId);
+    }
+  });
+
+  // Get push notification statistics
+  app.get('/api/push/stats', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-push-stats-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const { days = '7' } = req.query;
+      const daysNum = parseInt(days as string, 10) || 7;
+
+      const stats = await pushNotificationManager.getNotificationStats(userId, daysNum);
+
+      res.json(createSuccessResponse(stats, `Notification statistics for last ${daysNum} days`));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/push/stats', requestId);
+    }
+  });
+
+  // Get notification history
+  app.get('/api/push/history', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-push-history-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const { limit = '50', offset = '0' } = req.query;
+      const limitNum = Math.min(parseInt(limit as string, 10) || 50, 100);
+      const offsetNum = Math.max(parseInt(offset as string, 10) || 0, 0);
+
+      const history = await storage.getUserNotificationHistory(userId, limitNum, offsetNum);
+
+      res.json(createSuccessResponse(history, 'Notification history retrieved'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/push/history', requestId);
     }
   });
 

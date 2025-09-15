@@ -9,8 +9,9 @@ import { initializeEwsPushNotifications } from "./ewsPushNotifications";
 import { initializeEwsStreamingService } from "./ewsStreaming";
 import { initializeImapIdleService } from "./imapIdle";
 import { storage } from "./storage";
-import { emailEventEmitter, EMAIL_EVENTS } from "./events";
+import { emailEventEmitter, EMAIL_EVENTS, type EmailReceivedEvent } from "./events";
 import { getSession } from "./replitAuth";
+import { pushNotificationManager, EmailNotificationHelper } from "./push/pushNotifications";
 
 const app = express();
 app.use(express.json());
@@ -171,19 +172,84 @@ app.use((req, res, next) => {
   });
   
   // Set up authenticated email event listeners with user filtering
-  emailEventEmitter.on(EMAIL_EVENTS.EMAIL_RECEIVED, (data) => {
+  emailEventEmitter.on(EMAIL_EVENTS.EMAIL_RECEIVED, async (data: EmailReceivedEvent) => {
     const message = JSON.stringify({
       type: EMAIL_EVENTS.EMAIL_RECEIVED,
       data: data
     });
     
-    // Broadcast only to authenticated clients who own the account
+    // Broadcast WebSocket notifications to authenticated clients who own the account
     authenticatedConnections.forEach((connInfo, ws) => {
       if (ws.readyState === ws.OPEN && connInfo.userAccounts?.has(data.accountId)) {
         ws.send(message);
         console.log(`Sent emailReceived event to ${connInfo.userEmail} for account ${data.accountId}`);
       }
     });
+
+    // Send push notifications for new emails
+    try {
+      // Get account owner's user ID from the account
+      const account = await storage.getAccountConnection(data.accountId);
+      if (!account) {
+        console.warn(`Account ${data.accountId} not found for push notification`);
+        return;
+      }
+
+      // Get user's notification preferences
+      const userPrefs = await storage.getUserNotificationPreferences(account.userId);
+      const accountPrefs = await storage.getAccountNotificationPreferences(account.userId, data.accountId);
+      
+      // Check if push notifications are enabled for this user and account
+      if (!userPrefs?.enableNotifications || !userPrefs?.enableNewEmailNotifications) {
+        console.log(`Push notifications disabled for user ${account.userId}`);
+        return;
+      }
+
+      if (accountPrefs && !accountPrefs.enableNotifications) {
+        console.log(`Push notifications disabled for account ${data.accountId}`);
+        return;
+      }
+
+      // Check if this folder should trigger notifications
+      if (accountPrefs?.notifyForFolders) {
+        const allowedFolders = accountPrefs.notifyForFolders.split(',');
+        if (!allowedFolders.includes(data.folder.toLowerCase())) {
+          console.log(`Folder ${data.folder} not in notification list for account ${data.accountId}`);
+          return;
+        }
+      }
+
+      // Create privacy-aware notification payload
+      const notificationPayload = EmailNotificationHelper.createNewEmailNotification(
+        {
+          id: data.messageId,
+          accountId: data.accountId,
+          from: data.sender,
+          subject: data.subject,
+          isVip: false // TODO: Add VIP detection logic
+        },
+        {
+          showSender: userPrefs?.showSenderInNotifications ?? true,
+          showSubject: userPrefs?.showSubjectInNotifications ?? true,
+          showPreview: false // Never show email body preview for privacy
+        }
+      );
+
+      // Send push notification
+      const result = await pushNotificationManager.sendNotificationToUser(
+        account.userId,
+        notificationPayload,
+        {
+          urgency: 'normal',
+          TTL: 24 * 60 * 60 // 24 hours
+        }
+      );
+
+      console.log(`Push notification sent for email ${data.messageId}: ${result.success} success, ${result.failed} failed`);
+      
+    } catch (error) {
+      console.error('Failed to send push notification for email:', error);
+    }
   });
   
   emailEventEmitter.on(EMAIL_EVENTS.EMAIL_SYNCED, (data) => {

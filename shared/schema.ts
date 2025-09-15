@@ -161,6 +161,99 @@ export const signatures = pgTable("signatures", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Push notification subscriptions
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  endpoint: text("endpoint").notNull(), // Push service endpoint URL
+  p256dhKey: text("p256dh_key").notNull(), // Client public key for encryption
+  authKey: text("auth_key").notNull(), // Client authentication secret
+  userAgent: text("user_agent"), // Browser/device info for debugging
+  deviceType: varchar("device_type", { enum: ["desktop", "mobile", "tablet"] }),
+  isActive: boolean("is_active").default(true),
+  lastUsed: timestamp("last_used").defaultNow(),
+  expirationTime: timestamp("expiration_time"), // Push subscription expiry
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Ensure each endpoint is unique per user (allow multiple devices per user)
+  unique("unique_endpoint_per_user").on(table.userId, table.endpoint),
+  // Performance indexes for cleanup and filtering operations
+  index("idx_push_subscriptions_active").on(table.isActive),
+  index("idx_push_subscriptions_last_used").on(table.lastUsed),
+  index("idx_push_subscriptions_user_active").on(table.userId, table.isActive),
+]);
+
+// Notification preferences per user
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  // Global notification settings
+  enableNotifications: boolean("enable_notifications").default(true),
+  enableNewEmailNotifications: boolean("enable_new_email_notifications").default(true),
+  enableVipNotifications: boolean("enable_vip_notifications").default(true),
+  enableSystemNotifications: boolean("enable_system_notifications").default(true),
+  // Quiet hours
+  enableQuietHours: boolean("enable_quiet_hours").default(false),
+  quietStartHour: integer("quiet_start_hour").default(22), // 10 PM
+  quietEndHour: integer("quiet_end_hour").default(7), // 7 AM
+  quietTimezone: varchar("quiet_timezone").default("UTC"),
+  // Notification behavior
+  enableGrouping: boolean("enable_grouping").default(true),
+  enableSound: boolean("enable_sound").default(true),
+  enableVibration: boolean("enable_vibration").default(true),
+  priorityFilter: varchar("priority_filter", { enum: ["all", "vip_only", "high_priority", "none"] }).default("all"),
+  // Notification timing
+  batchDelaySeconds: integer("batch_delay_seconds").default(5), // Wait time for batching notifications
+  maxNotificationsPerHour: integer("max_notifications_per_hour").default(20),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Account-specific notification preferences
+export const accountNotificationPreferences = pgTable("account_notification_preferences", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").notNull().references(() => accountConnections.id, { onDelete: "cascade" }),
+  enableNotifications: boolean("enable_notifications").default(true),
+  notifyForFolders: text("notify_for_folders").default("inbox"), // Comma-separated folder types
+  enableVipFiltering: boolean("enable_vip_filtering").default(true),
+  enablePriorityFiltering: boolean("enable_priority_filtering").default(true),
+  minimumPriority: integer("minimum_priority").default(1), // Only notify for priority >= this value
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Unique constraint per user-account pair
+  unique("unique_notification_per_user_account").on(table.userId, table.accountId),
+]);
+
+// Notification delivery log for debugging and analytics
+export const notificationLog = pgTable("notification_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  subscriptionId: varchar("subscription_id").notNull().references(() => pushSubscriptions.id, { onDelete: "cascade" }),
+  emailId: varchar("email_id").references(() => mailIndex.id, { onDelete: "set null" }),
+  notificationType: varchar("notification_type", { enum: ["new_email", "vip_email", "system", "account_sync"] }).notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  iconUrl: text("icon_url"),
+  tag: varchar("tag"), // For notification grouping
+  deliveryStatus: varchar("delivery_status", { enum: ["pending", "sent", "failed", "clicked", "dismissed"] }).default("pending"),
+  errorMessage: text("error_message"),
+  sentAt: timestamp("sent_at"),
+  clickedAt: timestamp("clicked_at"),
+  dismissedAt: timestamp("dismissed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [
+  // Index for performance on user queries
+  index("idx_notification_log_user_created").on(table.userId, table.createdAt),
+  // Performance indexes for monitoring and analytics
+  index("idx_notification_log_status").on(table.deliveryStatus),
+  index("idx_notification_log_type").on(table.notificationType),
+  index("idx_notification_log_user_status").on(table.userId, table.deliveryStatus),
+  index("idx_notification_log_sent_at").on(table.sentAt),
+]);
+
 // Insert and select schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
@@ -171,6 +264,10 @@ export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: tr
 export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAttachmentSchema = createInsertSchema(attachments).omit({ id: true, createdAt: true });
 export const insertSignatureSchema = createInsertSchema(signatures).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPushSubscriptionSchema = createInsertSchema(pushSubscriptions).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertNotificationPreferencesSchema = createInsertSchema(notificationPreferences).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAccountNotificationPreferencesSchema = createInsertSchema(accountNotificationPreferences).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertNotificationLogSchema = createInsertSchema(notificationLog).omit({ id: true, createdAt: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -192,6 +289,14 @@ export type Attachment = typeof attachments.$inferSelect;
 export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
 export type Signature = typeof signatures.$inferSelect;
 export type InsertSignature = z.infer<typeof insertSignatureSchema>;
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema>;
+export type NotificationPreferences = typeof notificationPreferences.$inferSelect;
+export type InsertNotificationPreferences = z.infer<typeof insertNotificationPreferencesSchema>;
+export type AccountNotificationPreferences = typeof accountNotificationPreferences.$inferSelect;
+export type InsertAccountNotificationPreferences = z.infer<typeof insertAccountNotificationPreferencesSchema>;
+export type NotificationLog = typeof notificationLog.$inferSelect;
+export type InsertNotificationLog = z.infer<typeof insertNotificationLogSchema>;
 
 // Enhanced validation schemas for account settings
 
@@ -607,3 +712,111 @@ export type UpdateSignatureRequest = z.infer<typeof updateSignatureRequestSchema
 export type SignatureResponse = z.infer<typeof signatureResponseSchema>;
 export type ListSignaturesResponse = z.infer<typeof listSignaturesResponseSchema>;
 export type DeleteSignatureResponse = z.infer<typeof deleteSignatureResponseSchema>;
+
+// Push notification schemas and types
+export const pushSubscriptionRequestSchema = z.object({
+  endpoint: z.string().url("Valid push endpoint URL required"),
+  keys: z.object({
+    p256dh: z.string().min(1, "p256dh key is required"),
+    auth: z.string().min(1, "Auth key is required")
+  }),
+  userAgent: z.string().optional(),
+  deviceType: z.enum(["desktop", "mobile", "tablet"]).optional()
+});
+
+export const pushSubscriptionResponseSchema = z.object({
+  success: z.boolean(),
+  subscriptionId: z.string().optional(),
+  publicKey: z.string().optional(), // Server's VAPID public key
+  error: z.string().optional()
+});
+
+export const updateNotificationPreferencesRequestSchema = z.object({
+  enableNotifications: z.boolean().optional(),
+  enableNewEmailNotifications: z.boolean().optional(),
+  enableVipNotifications: z.boolean().optional(),
+  enableSystemNotifications: z.boolean().optional(),
+  enableQuietHours: z.boolean().optional(),
+  quietStartHour: z.number().int().min(0).max(23).optional(),
+  quietEndHour: z.number().int().min(0).max(23).optional(),
+  quietTimezone: z.string().optional(),
+  enableGrouping: z.boolean().optional(),
+  enableSound: z.boolean().optional(),
+  enableVibration: z.boolean().optional(),
+  priorityFilter: z.enum(["all", "vip_only", "high_priority", "none"]).optional(),
+  batchDelaySeconds: z.number().int().min(1).max(300).optional(), // 1-300 seconds
+  maxNotificationsPerHour: z.number().int().min(1).max(100).optional()
+});
+
+export const updateAccountNotificationPreferencesRequestSchema = z.object({
+  accountId: z.string().min(1, "Account ID is required"),
+  enableNotifications: z.boolean().optional(),
+  notifyForFolders: z.string().optional(), // Comma-separated folder types
+  enableVipFiltering: z.boolean().optional(),
+  enablePriorityFiltering: z.boolean().optional(),
+  minimumPriority: z.number().int().min(0).max(3).optional()
+});
+
+export const notificationPreferencesResponseSchema = z.object({
+  success: z.boolean(),
+  preferences: z.object({
+    global: z.object({
+      enableNotifications: z.boolean(),
+      enableNewEmailNotifications: z.boolean(),
+      enableVipNotifications: z.boolean(),
+      enableSystemNotifications: z.boolean(),
+      enableQuietHours: z.boolean(),
+      quietStartHour: z.number(),
+      quietEndHour: z.number(),
+      quietTimezone: z.string(),
+      enableGrouping: z.boolean(),
+      enableSound: z.boolean(),
+      enableVibration: z.boolean(),
+      priorityFilter: z.string(),
+      batchDelaySeconds: z.number(),
+      maxNotificationsPerHour: z.number()
+    }),
+    accounts: z.array(z.object({
+      accountId: z.string(),
+      accountName: z.string(),
+      enableNotifications: z.boolean(),
+      notifyForFolders: z.string(),
+      enableVipFiltering: z.boolean(),
+      enablePriorityFiltering: z.boolean(),
+      minimumPriority: z.number()
+    }))
+  }).optional(),
+  error: z.string().optional()
+});
+
+export const pushNotificationPayloadSchema = z.object({
+  title: z.string().min(1, "Notification title is required"),
+  body: z.string().min(1, "Notification body is required"),
+  icon: z.string().url().optional(),
+  badge: z.string().url().optional(),
+  image: z.string().url().optional(),
+  tag: z.string().optional(),
+  data: z.object({
+    emailId: z.string().optional(),
+    accountId: z.string().optional(),
+    url: z.string().optional(),
+    timestamp: z.number().optional(),
+    notificationType: z.enum(["new_email", "vip_email", "system", "account_sync"])
+  }).optional(),
+  actions: z.array(z.object({
+    action: z.string(),
+    title: z.string(),
+    icon: z.string().optional()
+  })).optional(),
+  requireInteraction: z.boolean().optional(),
+  silent: z.boolean().optional(),
+  vibrate: z.array(z.number()).optional()
+});
+
+// Push notification API types
+export type PushSubscriptionRequest = z.infer<typeof pushSubscriptionRequestSchema>;
+export type PushSubscriptionResponse = z.infer<typeof pushSubscriptionResponseSchema>;
+export type UpdateNotificationPreferencesRequest = z.infer<typeof updateNotificationPreferencesRequestSchema>;
+export type UpdateAccountNotificationPreferencesRequest = z.infer<typeof updateAccountNotificationPreferencesRequestSchema>;
+export type NotificationPreferencesResponse = z.infer<typeof notificationPreferencesResponseSchema>;
+export type PushNotificationPayload = z.infer<typeof pushNotificationPayloadSchema>;

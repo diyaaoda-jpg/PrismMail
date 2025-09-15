@@ -340,7 +340,7 @@ async function handleGetCacheStatus(event) {
   }
 }
 
-// Push notification handler with validation
+// Enhanced push notification handler with comprehensive features
 self.addEventListener('push', event => {
   if (!event.data) {
     console.warn('[SW] Push notification received without data');
@@ -355,40 +355,277 @@ self.addEventListener('push', event => {
     return;
   }
   
+  // PRIVACY: Never log notification content - only log event occurrence
+  console.log('[SW] Push notification received:', { type: 'notification_received' });
+  
   // Validate notification data
   if (!validateNotificationData(data)) {
     console.warn('[SW] Invalid notification data received:', data);
     return;
   }
   
-  const options = {
-    body: sanitizeText(data.body || 'New email received'),
-    icon: '/icons/icon-192.svg',
-    badge: '/icons/icon-192.svg',
-    tag: 'email-notification',
-    requireInteraction: false,
+  // Handle different notification types
+  event.waitUntil(handlePushNotification(data));
+});
+
+// Handle different types of push notifications
+async function handlePushNotification(data) {
+  try {
+    const notificationType = data.data?.notificationType || 'new_email';
+    
+    // Check for existing notification to group or replace
+    const existingNotifications = await self.registration.getNotifications({
+      tag: data.tag || getNotificationTag(notificationType, data)
+    });
+    
+    // Handle notification grouping for similar notifications
+    if (existingNotifications.length > 0 && shouldGroupNotifications(notificationType)) {
+      await handleNotificationGrouping(existingNotifications, data);
+      return;
+    }
+    
+    // Create notification options based on type
+    const options = createNotificationOptions(data, notificationType);
+    
+    // Show the notification
+    await self.registration.showNotification(
+      sanitizeText(data.title || 'PrismMail'),
+      options
+    );
+    
+    // Track notification for analytics
+    await trackNotificationEvent('displayed', data);
+    
+  } catch (error) {
+    console.error('[SW] Failed to handle push notification:', error);
+    
+    // Fallback to basic notification
+    await self.registration.showNotification('PrismMail', {
+      body: 'You have new messages',
+      icon: '/icons/icon-192.svg',
+      badge: '/icons/badge-icon.svg',
+      data: { fallback: true }
+    });
+  }
+}
+
+// Create notification options based on type and data
+function createNotificationOptions(data, notificationType) {
+  const baseOptions = {
+    body: sanitizeText(data.body || 'New message received'),
+    icon: data.icon || '/icons/icon-192.svg',
+    badge: data.badge || '/icons/badge-icon.svg',
+    tag: data.tag || getNotificationTag(notificationType, data),
     data: {
-      emailId: data.emailId,
-      accountId: data.accountId
+      emailId: data.data?.emailId,
+      accountId: data.data?.accountId,
+      url: data.data?.url || '/',
+      timestamp: data.data?.timestamp || Date.now(),
+      notificationType,
+      originalData: data.data
+    },
+    timestamp: data.data?.timestamp || Date.now(),
+    renotify: false,
+    silent: data.silent || false
+  };
+
+  // Add type-specific options
+  switch (notificationType) {
+    case 'new_email':
+      return {
+        ...baseOptions,
+        requireInteraction: false,
+        vibrate: data.vibrate || [200, 100, 200],
+        actions: [
+          {
+            action: 'view',
+            title: 'View Email',
+            icon: '/icons/view-icon.svg'
+          },
+          {
+            action: 'mark-read',
+            title: 'Mark as Read',
+            icon: '/icons/check-icon.svg'
+          },
+          {
+            action: 'archive',
+            title: 'Archive',
+            icon: '/icons/archive-icon.svg'
+          }
+        ]
+      };
+      
+    case 'vip_email':
+      return {
+        ...baseOptions,
+        requireInteraction: true,
+        vibrate: data.vibrate || [300, 200, 300, 200, 300],
+        actions: [
+          {
+            action: 'view',
+            title: 'View VIP Email',
+            icon: '/icons/vip-icon.svg'
+          },
+          {
+            action: 'reply',
+            title: 'Quick Reply',
+            icon: '/icons/reply-icon.svg'
+          },
+          {
+            action: 'mark-read',
+            title: 'Mark as Read',
+            icon: '/icons/check-icon.svg'
+          }
+        ]
+      };
+      
+    case 'system':
+      return {
+        ...baseOptions,
+        requireInteraction: true,
+        vibrate: [500],
+        actions: [
+          {
+            action: 'view',
+            title: 'View Details',
+            icon: '/icons/info-icon.svg'
+          },
+          {
+            action: 'dismiss',
+            title: 'Dismiss',
+            icon: '/icons/dismiss-icon.svg'
+          }
+        ]
+      };
+      
+    case 'account_sync':
+      return {
+        ...baseOptions,
+        requireInteraction: true,
+        vibrate: [200, 100, 200, 100, 200],
+        actions: [
+          {
+            action: 'check-account',
+            title: 'Check Account',
+            icon: '/icons/settings-icon.svg'
+          },
+          {
+            action: 'dismiss',
+            title: 'Dismiss',
+            icon: '/icons/dismiss-icon.svg'
+          }
+        ]
+      };
+      
+    default:
+      return {
+        ...baseOptions,
+        requireInteraction: false,
+        actions: [
+          {
+            action: 'view',
+            title: 'View',
+            icon: '/icons/view-icon.svg'
+          },
+          {
+            action: 'dismiss',
+            title: 'Dismiss',
+            icon: '/icons/dismiss-icon.svg'
+          }
+        ]
+      };
+  }
+}
+
+// Generate notification tag for grouping
+function getNotificationTag(notificationType, data) {
+  switch (notificationType) {
+    case 'new_email':
+    case 'vip_email':
+      return `email-${data.data?.accountId || 'default'}`;
+    case 'system':
+      return 'system-notification';
+    case 'account_sync':
+      return `sync-${data.data?.accountId || 'default'}`;
+    default:
+      return 'prismmail-notification';
+  }
+}
+
+// Determine if notifications should be grouped
+function shouldGroupNotifications(notificationType) {
+  return ['new_email', 'vip_email'].includes(notificationType);
+}
+
+// Handle notification grouping
+async function handleNotificationGrouping(existingNotifications, newData) {
+  const existingNotification = existingNotifications[0];
+  const existingData = existingNotification.data || {};
+  
+  // Close existing notification
+  existingNotification.close();
+  
+  // Create grouped notification
+  const groupedOptions = {
+    body: `You have ${existingNotifications.length + 1} new emails`,
+    icon: '/icons/icon-192.svg',
+    badge: '/icons/badge-icon.svg',
+    tag: newData.tag || getNotificationTag(newData.data?.notificationType, newData),
+    data: {
+      ...existingData,
+      grouped: true,
+      count: existingNotifications.length + 1,
+      latest: newData.data
     },
     actions: [
       {
-        action: 'view',
-        title: 'View Email'
+        action: 'view-inbox',
+        title: 'View Inbox',
+        icon: '/icons/inbox-icon.svg'
       },
       {
-        action: 'dismiss',
-        title: 'Dismiss'
+        action: 'mark-all-read',
+        title: 'Mark All Read',
+        icon: '/icons/check-all-icon.svg'
       }
     ]
   };
   
-  event.waitUntil(
-    self.registration.showNotification(sanitizeText(data.title || 'PrismMail'), options)
+  await self.registration.showNotification(
+    `${existingNotifications.length + 1} New Emails`,
+    groupedOptions
   );
-});
+}
 
-// Validate notification data
+// Track notification events for analytics
+async function trackNotificationEvent(eventType, data) {
+  try {
+    // Store notification event in IndexedDB for analytics
+    if (!db) {
+      await initDB();
+    }
+    
+    const transaction = db.transaction([METADATA_STORE], 'readwrite');
+    const store = transaction.objectStore(METADATA_STORE);
+    
+    const eventData = {
+      key: `notification_${eventType}_${Date.now()}`,
+      value: {
+        eventType,
+        notificationType: data.data?.notificationType,
+        timestamp: Date.now(),
+        title: data.title,
+        url: data.data?.url
+      }
+    };
+    
+    store.put(eventData);
+  } catch (error) {
+    console.warn('[SW] Failed to track notification event:', error);
+  }
+}
+
+// Enhanced notification data validation
 function validateNotificationData(data) {
   if (!data || typeof data !== 'object') {
     return false;
@@ -397,12 +634,36 @@ function validateNotificationData(data) {
   // Basic validation - ensure required fields are present and safe
   if (data.title && typeof data.title !== 'string') return false;
   if (data.body && typeof data.body !== 'string') return false;
-  if (data.emailId && typeof data.emailId !== 'string') return false;
-  if (data.accountId && typeof data.accountId !== 'string') return false;
+  if (data.icon && typeof data.icon !== 'string') return false;
+  if (data.badge && typeof data.badge !== 'string') return false;
+  if (data.tag && typeof data.tag !== 'string') return false;
   
   // Length limits for security
-  if (data.title && data.title.length > 100) return false;
-  if (data.body && data.body.length > 500) return false;
+  if (data.title && data.title.length > 200) return false;
+  if (data.body && data.body.length > 1000) return false;
+  if (data.tag && data.tag.length > 50) return false;
+  
+  // Validate data object
+  if (data.data && typeof data.data !== 'object') return false;
+  if (data.data?.emailId && typeof data.data.emailId !== 'string') return false;
+  if (data.data?.accountId && typeof data.data.accountId !== 'string') return false;
+  if (data.data?.url && typeof data.data.url !== 'string') return false;
+  if (data.data?.notificationType && !['new_email', 'vip_email', 'system', 'account_sync'].includes(data.data.notificationType)) return false;
+  
+  // Validate actions array
+  if (data.actions && !Array.isArray(data.actions)) return false;
+  if (data.actions && data.actions.length > 3) return false; // Max 3 actions per notification
+  
+  // Validate individual actions
+  if (data.actions) {
+    for (const action of data.actions) {
+      if (!action || typeof action !== 'object') return false;
+      if (!action.action || typeof action.action !== 'string') return false;
+      if (!action.title || typeof action.title !== 'string') return false;
+      if (action.icon && typeof action.icon !== 'string') return false;
+      if (action.action.length > 30 || action.title.length > 30) return false;
+    }
+  }
   
   return true;
 }
@@ -419,16 +680,267 @@ function sanitizeText(text) {
     .substring(0, 200); // Limit length
 }
 
-// Notification click handler
+// Enhanced notification click handler with comprehensive actions
 self.addEventListener('notificationclick', event => {
+  // PRIVACY: Never log notification data - only log interaction type
+  console.log('[SW] Notification interaction:', { action: event.action || 'click' });
+  
+  const data = event.notification.data || {};
+  const action = event.action;
+  
+  // Close the notification
   event.notification.close();
   
-  if (event.action === 'view') {
-    event.waitUntil(
-      clients.openWindow('/')
-    );
-  }
+  // Track notification interaction
+  trackNotificationEvent('clicked', { data, action }).catch(error => {
+    console.warn('[SW] Failed to track notification click:', error);
+  });
+  
+  // Handle different notification actions
+  event.waitUntil(handleNotificationAction(action, data));
 });
+
+// Handle notification action based on type
+async function handleNotificationAction(action, data) {
+  try {
+    switch (action) {
+      case 'view':
+      case 'view-vip':
+        await openEmailView(data);
+        break;
+        
+      case 'view-inbox':
+        await openAppPage('/inbox');
+        break;
+        
+      case 'mark-read':
+        await performEmailAction('mark-read', data);
+        break;
+        
+      case 'mark-all-read':
+        await performEmailAction('mark-all-read', data);
+        break;
+        
+      case 'archive':
+        await performEmailAction('archive', data);
+        break;
+        
+      case 'reply':
+        await openReplyComposer(data);
+        break;
+        
+      case 'check-account':
+        await openAccountSettings(data);
+        break;
+        
+      case 'dismiss':
+        // Just close notification - no additional action needed
+        console.log('[SW] Notification dismissed');
+        break;
+        
+      default:
+        // Default action - open the app
+        await openEmailView(data);
+        break;
+    }
+  } catch (error) {
+    console.error('[SW] Failed to handle notification action:', error);
+    // Fallback to opening the app
+    await openAppPage('/');
+  }
+}
+
+// Open specific email view
+async function openEmailView(data) {
+  let url = '/';
+  
+  if (data.url) {
+    url = data.url;
+  } else if (data.emailId) {
+    url = `/email/${data.emailId}`;
+  } else if (data.accountId) {
+    url = `/account/${data.accountId}/inbox`;
+  }
+  
+  await openAppPage(url);
+}
+
+// Open reply composer for an email
+async function openReplyComposer(data) {
+  let url = '/compose';
+  
+  if (data.emailId) {
+    url = `/compose?reply=${data.emailId}`;
+  }
+  
+  await openAppPage(url);
+}
+
+// Open account settings
+async function openAccountSettings(data) {
+  let url = '/settings/accounts';
+  
+  if (data.accountId) {
+    url = `/settings/accounts/${data.accountId}`;
+  }
+  
+  await openAppPage(url);
+}
+
+// Open app page with focus management
+async function openAppPage(url) {
+  try {
+    // Try to focus existing tab first
+    const clients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true
+    });
+    
+    // Look for existing app window
+    for (const client of clients) {
+      const clientUrl = new URL(client.url);
+      const targetUrl = new URL(url, self.location.origin);
+      
+      // If same origin, focus and navigate
+      if (clientUrl.origin === targetUrl.origin) {
+        await client.focus();
+        
+        // Navigate to specific page if different
+        if (clientUrl.pathname !== targetUrl.pathname || clientUrl.search !== targetUrl.search) {
+          await client.postMessage({
+            type: 'NAVIGATE',
+            url: url
+          });
+        }
+        
+        return;
+      }
+    }
+    
+    // No existing window found, open new one
+    const fullUrl = new URL(url, self.location.origin).toString();
+    await self.clients.openWindow(fullUrl);
+    
+  } catch (error) {
+    console.error('[SW] Failed to open app page:', error);
+    // Final fallback
+    await self.clients.openWindow('/');
+  }
+}
+
+// Perform email actions (mark as read, archive, etc.)
+async function performEmailAction(action, data) {
+  try {
+    let endpoint = '';
+    let method = 'PUT';
+    let body = null;
+    
+    switch (action) {
+      case 'mark-read':
+        if (!data.emailId) throw new Error('Email ID required for mark-read action');
+        endpoint = `/api/emails/${data.emailId}/read`;
+        method = 'PUT';
+        break;
+        
+      case 'mark-all-read':
+        if (!data.accountId) throw new Error('Account ID required for mark-all-read action');
+        endpoint = `/api/accounts/${data.accountId}/mark-all-read`;
+        method = 'PUT';
+        break;
+        
+      case 'archive':
+        if (!data.emailId) throw new Error('Email ID required for archive action');
+        endpoint = `/api/emails/${data.emailId}/archive`;
+        method = 'PUT';
+        break;
+        
+      default:
+        throw new Error(`Unsupported email action: ${action}`);
+    }
+    
+    // Perform the action via API call
+    const response = await fetch(endpoint, {
+      method,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: body ? JSON.stringify(body) : null
+    });
+    
+    if (response.ok) {
+      console.log(`[SW] Successfully performed ${action} action`);
+      
+      // Show success feedback via toast notification if possible
+      await self.registration.showNotification('Action Completed', {
+        body: getActionCompletedMessage(action),
+        icon: '/icons/icon-192.svg',
+        badge: '/icons/badge-icon.svg',
+        tag: 'action-completed',
+        silent: true,
+        requireInteraction: false,
+        data: { type: 'action-result', action, success: true }
+      });
+      
+      // Notify active clients about the action
+      await broadcastToClients({
+        type: 'EMAIL_ACTION_COMPLETED',
+        action,
+        data: data
+      });
+      
+    } else {
+      throw new Error(`API call failed with status ${response.status}`);
+    }
+    
+  } catch (error) {
+    console.error(`[SW] Failed to perform ${action} action:`, error);
+    
+    // Show error feedback
+    await self.registration.showNotification('Action Failed', {
+      body: `Failed to ${action.replace('-', ' ')}. Please try again in the app.`,
+      icon: '/icons/icon-192.svg',
+      badge: '/icons/badge-icon.svg',
+      tag: 'action-failed',
+      requireInteraction: false,
+      data: { type: 'action-result', action, success: false }
+    });
+    
+    // Queue the action for retry when back online
+    await queueOfflineAction({
+      type: 'EMAIL_ACTION',
+      action,
+      data,
+      timestamp: Date.now()
+    });
+  }
+}
+
+// Get user-friendly message for completed actions
+function getActionCompletedMessage(action) {
+  switch (action) {
+    case 'mark-read':
+      return 'Email marked as read';
+    case 'mark-all-read':
+      return 'All emails marked as read';
+    case 'archive':
+      return 'Email archived';
+    default:
+      return 'Action completed';
+  }
+}
+
+// Broadcast message to all active clients
+async function broadcastToClients(message) {
+  try {
+    const clients = await self.clients.matchAll();
+    
+    for (const client of clients) {
+      client.postMessage(message);
+    }
+  } catch (error) {
+    console.warn('[SW] Failed to broadcast to clients:', error);
+  }
+}
 
 // Caching strategy implementations
 

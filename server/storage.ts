@@ -8,6 +8,10 @@ import {
   userPrefs,
   attachments,
   signatures,
+  pushSubscriptions,
+  notificationPreferences,
+  accountNotificationPreferences,
+  notificationLog,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -26,6 +30,14 @@ import {
   type InsertAttachment,
   type Signature,
   type InsertSignature,
+  type PushSubscription,
+  type InsertPushSubscription,
+  type NotificationPreferences,
+  type InsertNotificationPreferences,
+  type AccountNotificationPreferences,
+  type InsertAccountNotificationPreferences,
+  type NotificationLog,
+  type InsertNotificationLog,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, like, ilike, gte, lte, desc, asc, sql } from "drizzle-orm";
@@ -104,6 +116,24 @@ export interface IStorage {
   deleteSignature(id: string): Promise<void>;
   setDefaultSignature(userId: string, signatureId: string, accountId?: string): Promise<void>;
   getDefaultSignature(userId: string, accountId?: string): Promise<Signature | undefined>;
+  // Push notification operations
+  getUserPushSubscriptions(userId: string): Promise<PushSubscription[]>;
+  createPushSubscription(subscription: InsertPushSubscription): Promise<PushSubscription>;
+  updatePushSubscription(id: string, updates: Partial<PushSubscription>): Promise<PushSubscription | undefined>;
+  deletePushSubscription(id: string): Promise<void>;
+  deletePushSubscriptionByEndpoint(userId: string, endpoint: string): Promise<void>;
+  getActivePushSubscriptions(userId: string): Promise<PushSubscription[]>;
+  // Notification preferences operations
+  getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined>;
+  upsertNotificationPreferences(prefs: InsertNotificationPreferences): Promise<NotificationPreferences>;
+  getAccountNotificationPreferences(userId: string, accountId?: string): Promise<AccountNotificationPreferences[]>;
+  upsertAccountNotificationPreferences(prefs: InsertAccountNotificationPreferences): Promise<AccountNotificationPreferences>;
+  deleteAccountNotificationPreferences(userId: string, accountId: string): Promise<void>;
+  // Notification log operations
+  createNotificationLogEntry(entry: InsertNotificationLog): Promise<NotificationLog>;
+  updateNotificationLogEntry(id: string, updates: Partial<NotificationLog>): Promise<NotificationLog | undefined>;
+  getUserNotificationHistory(userId: string, limit?: number, offset?: number): Promise<NotificationLog[]>;
+  deleteOldNotificationLogs(olderThanDays: number): Promise<void>;
 }
 
 export interface SearchEmailsParams {
@@ -1061,6 +1091,141 @@ export class DatabaseStorage implements IStorage {
       .limit(1);
 
     return result;
+  }
+
+  // Push notification operations
+  async getUserPushSubscriptions(userId: string): Promise<PushSubscription[]> {
+    return await db.select().from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, userId))
+      .orderBy(desc(pushSubscriptions.lastUsed));
+  }
+
+  async createPushSubscription(subscription: InsertPushSubscription): Promise<PushSubscription> {
+    const [result] = await db.insert(pushSubscriptions).values(subscription).returning();
+    return result;
+  }
+
+  async updatePushSubscription(id: string, updates: Partial<PushSubscription>): Promise<PushSubscription | undefined> {
+    const [result] = await db
+      .update(pushSubscriptions)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(pushSubscriptions.id, id))
+      .returning();
+    return result;
+  }
+
+  async deletePushSubscription(id: string): Promise<void> {
+    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, id));
+  }
+
+  async deletePushSubscriptionByEndpoint(userId: string, endpoint: string): Promise<void> {
+    await db.delete(pushSubscriptions).where(
+      and(
+        eq(pushSubscriptions.userId, userId),
+        eq(pushSubscriptions.endpoint, endpoint)
+      )
+    );
+  }
+
+  async getActivePushSubscriptions(userId: string): Promise<PushSubscription[]> {
+    return await db.select().from(pushSubscriptions)
+      .where(and(
+        eq(pushSubscriptions.userId, userId),
+        eq(pushSubscriptions.isActive, true),
+        or(
+          sql`${pushSubscriptions.expirationTime} IS NULL`,
+          gte(pushSubscriptions.expirationTime, new Date())
+        )
+      ))
+      .orderBy(desc(pushSubscriptions.lastUsed));
+  }
+
+  // Notification preferences operations
+  async getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined> {
+    const [prefs] = await db.select().from(notificationPreferences)
+      .where(eq(notificationPreferences.userId, userId));
+    return prefs;
+  }
+
+  async upsertNotificationPreferences(prefs: InsertNotificationPreferences): Promise<NotificationPreferences> {
+    const [result] = await db
+      .insert(notificationPreferences)
+      .values(prefs)
+      .onConflictDoUpdate({
+        target: [notificationPreferences.userId],
+        set: {
+          ...prefs,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async getAccountNotificationPreferences(userId: string, accountId?: string): Promise<AccountNotificationPreferences[]> {
+    let whereCondition = eq(accountNotificationPreferences.userId, userId);
+    
+    if (accountId) {
+      whereCondition = and(whereCondition, eq(accountNotificationPreferences.accountId, accountId));
+    }
+    
+    return await db.select().from(accountNotificationPreferences)
+      .where(whereCondition)
+      .orderBy(accountNotificationPreferences.createdAt);
+  }
+
+  async upsertAccountNotificationPreferences(prefs: InsertAccountNotificationPreferences): Promise<AccountNotificationPreferences> {
+    const [result] = await db
+      .insert(accountNotificationPreferences)
+      .values(prefs)
+      .onConflictDoUpdate({
+        target: [accountNotificationPreferences.userId, accountNotificationPreferences.accountId],
+        set: {
+          ...prefs,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteAccountNotificationPreferences(userId: string, accountId: string): Promise<void> {
+    await db.delete(accountNotificationPreferences)
+      .where(and(
+        eq(accountNotificationPreferences.userId, userId),
+        eq(accountNotificationPreferences.accountId, accountId)
+      ));
+  }
+
+  // Notification log operations
+  async createNotificationLogEntry(entry: InsertNotificationLog): Promise<NotificationLog> {
+    const [result] = await db.insert(notificationLog).values(entry).returning();
+    return result;
+  }
+
+  async updateNotificationLogEntry(id: string, updates: Partial<NotificationLog>): Promise<NotificationLog | undefined> {
+    const [result] = await db
+      .update(notificationLog)
+      .set(updates)
+      .where(eq(notificationLog.id, id))
+      .returning();
+    return result;
+  }
+
+  async getUserNotificationHistory(userId: string, limit = 50, offset = 0): Promise<NotificationLog[]> {
+    return await db.select().from(notificationLog)
+      .where(eq(notificationLog.userId, userId))
+      .orderBy(desc(notificationLog.createdAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async deleteOldNotificationLogs(olderThanDays: number): Promise<void> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    
+    await db.delete(notificationLog)
+      .where(lte(notificationLog.createdAt, cutoffDate));
   }
 }
 
