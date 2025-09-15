@@ -1,0 +1,82 @@
+{
+  "name": "PrismMail - Priority Web Mail",
+  "short_name": "PrismMail",
+  "description": "A sophisticated dual-pane web mail client with IMAP/EWS connectivity, priority management, and immersive Reading Mode",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1a1a23",
+  "background_color": "#f5f5f7",
+  "categories": ["productivity", "communication", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512.svg", 
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Compose Email",
+      "short_name": "Compose",
+      "description": "Compose a new email",
+      "url": "/?action=compose",
+      "icons": [
+        {
+          "src": "/icons/icon-192.svg",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Search Emails",
+      "short_name": "Search", 
+      "description": "Search through your emails",
+      "url": "/?action=search",
+      "icons": [
+        {
+          "src": "/icons/icon-192.svg",
+          "sizes": "96x96",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false,
+  "protocol_handlers": [
+    {
+      "protocol": "mailto",
+      "url": "/?action=compose&to=%s"
+    }
+  ],
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "preferred",
+  "capture_links": "new-client"
+}

@@ -2873,7 +2873,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cc: draft.cc || undefined,
           subject: draft.subject || undefined,
           snippet: draft.snippet || undefined,
-          hasAttachments: draft.hasAttachments,
+          hasAttachments: draft.hasAttachments ?? false,
           createdAt: draft.createdAt!,
           updatedAt: draft.updatedAt!
         }))
@@ -3045,7 +3045,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           cc: draft.cc || undefined,
           subject: draft.subject || undefined,
           snippet: draft.snippet || undefined,
-          hasAttachments: draft.hasAttachments,
+          hasAttachments: draft.hasAttachments ?? false,
           createdAt: draft.createdAt!,
           updatedAt: draft.updatedAt!
         }))
@@ -3085,9 +3085,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: sig.name,
           contentHtml: sig.contentHtml || undefined,
           contentText: sig.contentText || undefined,
-          isDefault: sig.isDefault,
-          isActive: sig.isActive,
-          sortOrder: sig.sortOrder,
+          isDefault: sig.isDefault ?? false,
+          isActive: sig.isActive ?? false,
+          sortOrder: sig.sortOrder ?? 0,
           templateType: sig.templateType || undefined,
           createdAt: sig.createdAt!,
           updatedAt: sig.updatedAt!
@@ -3144,9 +3144,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: signature.name,
           contentHtml: signature.contentHtml || undefined,
           contentText: signature.contentText || undefined,
-          isDefault: signature.isDefault,
-          isActive: signature.isActive,
-          sortOrder: signature.sortOrder,
+          isDefault: signature.isDefault ?? false,
+          isActive: signature.isActive ?? false,
+          sortOrder: signature.sortOrder ?? 0,
           templateType: signature.templateType || undefined,
           createdAt: signature.createdAt!,
           updatedAt: signature.updatedAt!
@@ -3204,9 +3204,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: signature.name,
           contentHtml: signature.contentHtml || undefined,
           contentText: signature.contentText || undefined,
-          isDefault: signature.isDefault,
-          isActive: signature.isActive,
-          sortOrder: signature.sortOrder,
+          isDefault: signature.isDefault ?? false,
+          isActive: signature.isActive ?? false,
+          sortOrder: signature.sortOrder ?? 0,
           templateType: signature.templateType || undefined,
           createdAt: signature.createdAt!,
           updatedAt: signature.updatedAt!
@@ -3290,9 +3290,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: signature.name,
           contentHtml: signature.contentHtml || undefined,
           contentText: signature.contentText || undefined,
-          isDefault: signature.isDefault,
-          isActive: signature.isActive,
-          sortOrder: signature.sortOrder,
+          isDefault: signature.isDefault ?? false,
+          isActive: signature.isActive ?? false,
+          sortOrder: signature.sortOrder ?? 0,
           templateType: signature.templateType || undefined,
           createdAt: signature.createdAt!,
           updatedAt: signature.updatedAt!
@@ -3450,9 +3450,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: signature.name,
           contentHtml: signature.contentHtml || undefined,
           contentText: signature.contentText || undefined,
-          isDefault: signature.isDefault,
-          isActive: signature.isActive,
-          sortOrder: signature.sortOrder,
+          isDefault: signature.isDefault ?? false,
+          isActive: signature.isActive ?? false,
+          sortOrder: signature.sortOrder ?? 0,
           templateType: signature.templateType || undefined,
           createdAt: signature.createdAt!,
           updatedAt: signature.updatedAt!

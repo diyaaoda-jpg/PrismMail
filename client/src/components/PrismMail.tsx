@@ -14,11 +14,13 @@ import { ReadingMode } from "./ReadingMode";
 import { ComposeDialog } from "./ComposeDialog";
 import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { OfflineIndicator } from "./OfflineIndicator";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useOfflineActions } from "@/hooks/useOfflineActions";
 import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
@@ -766,6 +768,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 <span className="sr-only">Sync emails</span>
               </Button>
             )}
+            
+            <OfflineIndicator variant="badge" />
             
             <ThemeMenu variant="dropdown" />
             

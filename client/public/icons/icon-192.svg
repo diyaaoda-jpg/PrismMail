@@ -1,0 +1,16 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="96" cy="96" r="96" fill="#1a1a23"/>
+  
+  <!-- Mail envelope -->
+  <rect x="48" y="72" width="96" height="72" rx="8" fill="#a8d8ff" stroke="#f5f5f7" stroke-width="2"/>
+  
+  <!-- Envelope flap -->
+  <path d="M48 72 L96 108 L144 72" stroke="#1a1a23" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Priority indicator - small diamond -->
+  <rect x="124" y="52" width="16" height="16" rx="2" fill="#a8d8ff" transform="rotate(45 132 60)"/>
+  
+  <!-- Text "P" for PrismMail -->
+  <text x="96" y="40" font-family="Arial, sans-serif" font-size="20" font-weight="bold" text-anchor="middle" fill="#f5f5f7">P</text>
+</svg>
