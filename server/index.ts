@@ -12,6 +12,9 @@ import { initializeImapIdleService } from "./imapIdle";
 import { storage } from "./storage";
 import { emailEventEmitter, EMAIL_EVENTS } from "./events";
 import { getSession } from "./replitAuth";
+import { db } from "./db";
+import { sessions } from "@shared/schema";
+import { sql } from "drizzle-orm";
 
 // Production-grade architecture imports
 import { ArchitectureIntegration, BackwardCompatibility } from "./integration/index.js";
@@ -106,28 +109,63 @@ app.use(express.urlencoded({ extended: false }));
   // Store authenticated WebSocket connections
   const authenticatedConnections = new Map<any, AuthenticatedWebSocket>();
 
-  // Helper function to authenticate WebSocket connection using query parameter
-  // For simplicity, we'll require the client to pass userId as a query parameter
-  // In a production system, you'd want more robust session validation
+  // SECURITY FIX: Authenticate WebSocket connection using session validation
+  // Replaced spoofable userId query parameter with secure session-based authentication
   async function authenticateWebSocket(req: IncomingMessage): Promise<{ userId: string; userEmail?: string } | null> {
     try {
-      // Parse URL and get query parameters  
-      const url = parseUrl(req.url || '', true);
-      const userId = url.query.userId as string;
-      
-      if (!userId) {
-        console.log('WebSocket authentication failed: No userId provided');
+      // Extract and validate session from cookies
+      const cookieHeader = req.headers.cookie;
+      if (!cookieHeader) {
+        console.log('WebSocket authentication failed: No session cookie');
         return null;
       }
 
-      // Validate that the user exists in our system
+      // Parse cookies properly using imported cookie parser
+      const cookies = parseCookie(cookieHeader);
+      const connectSidCookie = cookies['connect.sid'];
+      
+      if (!connectSidCookie) {
+        console.log('WebSocket authentication failed: No valid session cookie');
+        return null;
+      }
+
+      // Handle signed cookies (format: s:<sid>.<signature>)
+      let sessionId = connectSidCookie;
+      if (connectSidCookie.startsWith('s:')) {
+        // Extract the raw session ID from signed cookie (before first dot)
+        const signedPart = connectSidCookie.slice(2); // Remove 's:' prefix
+        sessionId = signedPart.split('.')[0]; // Get sid before signature
+      }
+      
+      // Query sessions table directly to validate session
+      const [sessionRecord] = await db.select()
+        .from(sessions)
+        .where(sql`sid = ${sessionId} AND expire > NOW()`);
+      
+      if (!sessionRecord || !sessionRecord.sess) {
+        console.log('WebSocket authentication failed: Invalid or expired session');
+        return null;
+      }
+
+      // Parse session data to extract user information (handle multiple auth formats)
+      const sessionData = sessionRecord.sess as any;
+      const userId = sessionData.passport?.user?.id || 
+                     sessionData.user?.id || 
+                     sessionData.userId;
+      
+      if (!userId) {
+        console.log('WebSocket authentication failed: No authenticated user in session');
+        return null;
+      }
+
+      // Get user details from validated session
       const user = await storage.getUser(userId);
       if (!user) {
         console.log(`WebSocket authentication failed: User ${userId} not found`);
         return null;
       }
 
-      console.log(`WebSocket authentication success: ${user.email} (${userId})`);
+      console.log(`WebSocket authentication success: ${user.email} (${user.id})`);
       return {
         userId: user.id,
         userEmail: user.email ?? undefined

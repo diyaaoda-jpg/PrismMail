@@ -1,4 +1,4 @@
-import { redis } from '../config/redis';
+// Redis dependency removed for clean installation
 
 /**
  * Performance guards and rate limiting for scalable production deployment
@@ -18,37 +18,40 @@ export interface CircuitBreakerOptions {
 }
 
 /**
- * Rate limiter using Redis for distributed rate limiting
+ * Simple in-memory rate limiter for clean installation
  */
 export class DistributedRateLimiter {
   private options: RateLimitOptions;
+  private requests = new Map<string, { count: number; resetTime: number }>();
   
   constructor(options: RateLimitOptions) {
     this.options = options;
   }
   
   async checkLimit(key: string): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
-    const windowStart = Math.floor(Date.now() / this.options.windowMs) * this.options.windowMs;
-    const redisKey = `ratelimit:${key}:${windowStart}`;
+    const now = Date.now();
+    const windowStart = Math.floor(now / this.options.windowMs) * this.options.windowMs;
+    const resetTime = windowStart + this.options.windowMs;
+    const rateLimitKey = `${key}:${windowStart}`;
     
-    try {
-      const current = await redis.incr(redisKey);
-      
-      // Set expiration on first increment
-      if (current === 1) {
-        await redis.expire(redisKey, Math.ceil(this.options.windowMs / 1000));
+    // Clean up old entries
+    this.cleanup(now);
+    
+    const record = this.requests.get(rateLimitKey) || { count: 0, resetTime };
+    record.count++;
+    this.requests.set(rateLimitKey, record);
+    
+    const allowed = record.count <= this.options.maxRequests;
+    const remaining = Math.max(0, this.options.maxRequests - record.count);
+    
+    return { allowed, remaining, resetTime };
+  }
+  
+  private cleanup(now: number): void {
+    for (const [key, record] of this.requests.entries()) {
+      if (record.resetTime < now) {
+        this.requests.delete(key);
       }
-      
-      const allowed = current <= this.options.maxRequests;
-      const remaining = Math.max(0, this.options.maxRequests - current);
-      const resetTime = windowStart + this.options.windowMs;
-      
-      return { allowed, remaining, resetTime };
-      
-    } catch (error) {
-      console.error('Rate limiter error:', error);
-      // Fail open - allow request if Redis is down
-      return { allowed: true, remaining: this.options.maxRequests, resetTime: Date.now() + this.options.windowMs };
     }
   }
 }

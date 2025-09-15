@@ -17,109 +17,42 @@ interface RateLimitStore {
 }
 
 /**
- * Redis-compatible rate limit store for distributed deployments
+ * Simple memory-only rate limit store for clean PrismMail installation
  */
 class RedisRateLimitStore implements RateLimitStore {
-  private client: any;
-  private connected: boolean = false;
   private fallbackStore: MemoryRateLimitStore;
 
   constructor() {
     this.fallbackStore = new MemoryRateLimitStore();
-    this.initializeRedis();
-  }
-
-  private async initializeRedis(): Promise<void> {
-    if (!config.security.enableDistributedRateLimit || !config.security.redisUrl) {
-      logger.info('Redis rate limiting disabled, using memory store');
-      return;
-    }
-
-    try {
-      // Note: In a real implementation, you'd use ioredis or node-redis
-      // For now, we'll simulate Redis behavior and use memory store as fallback
-      logger.info('Redis rate limiting enabled but using memory store fallback for now');
-      this.connected = false;
-    } catch (error) {
-      logger.error('Failed to connect to Redis for rate limiting', { error: error as Error });
-      this.connected = false;
-    }
+    logger.info('Using memory-only rate limiting for clean installation');
   }
 
   async get(key: string): Promise<number | null> {
-    if (!this.connected) {
-      return this.fallbackStore.get(key);
-    }
-
-    try {
-      // Redis implementation would go here
-      const value = await this.client.get(key);
-      return value ? parseInt(value, 10) : null;
-    } catch (error) {
-      logger.error('Redis rate limit get error, falling back to memory', { error: error as Error, key });
-      return this.fallbackStore.get(key);
-    }
+    return this.fallbackStore.get(key);
   }
 
   async set(key: string, value: number, ttl: number): Promise<void> {
-    if (!this.connected) {
-      return this.fallbackStore.set(key, value, ttl);
-    }
-
-    try {
-      // Redis implementation would go here
-      await this.client.setex(key, Math.ceil(ttl / 1000), value.toString());
-    } catch (error) {
-      logger.error('Redis rate limit set error, falling back to memory', { error: error as Error, key });
-      return this.fallbackStore.set(key, value, ttl);
-    }
+    return this.fallbackStore.set(key, value, ttl);
   }
 
   async increment(key: string, ttl: number): Promise<number> {
-    if (!this.connected) {
-      return this.fallbackStore.increment(key, ttl);
-    }
-
-    try {
-      // Redis atomic increment with TTL
-      const result = await this.client.multi()
-        .incr(key)
-        .expire(key, Math.ceil(ttl / 1000))
-        .exec();
-      return result[0][1];
-    } catch (error) {
-      logger.error('Redis rate limit increment error, falling back to memory', { error: error as Error, key });
-      return this.fallbackStore.increment(key, ttl);
-    }
+    return this.fallbackStore.increment(key, ttl);
   }
 
   async reset(key: string): Promise<void> {
-    if (!this.connected) {
-      return this.fallbackStore.reset(key);
-    }
-
-    try {
-      await this.client.del(key);
-    } catch (error) {
-      logger.error('Redis rate limit reset error, falling back to memory', { error: error as Error, key });
-      return this.fallbackStore.reset(key);
-    }
+    return this.fallbackStore.reset(key);
   }
 
   startCleanup(): void {
-    // Redis handles expiration automatically, but start cleanup for fallback
     this.fallbackStore.startCleanup();
   }
 
   stopCleanup(): void {
     this.fallbackStore.stopCleanup();
-    if (this.client) {
-      this.client.disconnect?.();
-    }
   }
 
   getConnectionStatus(): boolean {
-    return this.connected;
+    return false; // Always return false for memory-only mode
   }
 }
 
