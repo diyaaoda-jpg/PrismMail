@@ -96,7 +96,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     isOpen, // Pass isOpen to fix body scroll lock
     onSend: () => handleSend(),
     onClose: () => handleClose(), // This is safe - handleClose will handle confirmation
-    onSaveDraft: () => saveDraftManually(),
+    onSaveDraft: () => saveDraftManually(formData),
     enableSwipeGestures: true,
     enableHapticFeedback: true,
     keyboardAdjustment: true,
@@ -285,7 +285,13 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         const currentContent = editor.getHTML();
         // Only insert signature if content doesn't already contain one
         if (!currentContent.includes('data-signature-id=')) {
-          insertSignature(defaultSignature, true); // Prevent auto-save during insertion
+          insertSignature({ 
+            ...defaultSignature, 
+            accountId: defaultSignature.accountId || null,
+            contentHtml: defaultSignature.contentHtml || null,
+            contentText: defaultSignature.contentText || null,
+            templateType: defaultSignature.templateType || null
+          }, true); // Prevent auto-save during insertion
         } else {
           setSignatureInserted(true);
         }
@@ -670,7 +676,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     // Check for unsaved changes and show confirmation if needed
     const hasUnsavedContent = formData.to || formData.subject || formData.body || attachments.length > 0;
     
-    if (hasUnsavedContent && draftStatus !== 'saving' && draftStatus !== 'saved') {
+    if (hasUnsavedContent && !draftStatus.isAutoSaving && draftStatus.hasUnsavedChanges) {
       // Set up pending close action for unsaved changes dialog
       setPendingCloseAction(() => () => {
         // Apply haptic feedback on mobile
@@ -738,19 +744,19 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         </h2>
         <div className="flex items-center space-x-2">
           {/* Draft status indicator */}
-          {draftStatus === 'saving' && (
+          {draftStatus.isAutoSaving && (
             <div className="flex items-center space-x-1 text-muted-foreground text-sm">
               <Clock className="h-3 w-3 animate-spin" />
               <span>Saving...</span>
             </div>
           )}
-          {draftStatus === 'saved' && (
+          {!draftStatus.isAutoSaving && !draftStatus.hasUnsavedChanges && !draftStatus.autoSaveError && (
             <div className="flex items-center space-x-1 text-muted-foreground text-sm">
               <CheckCircle2 className="h-3 w-3" />
               <span>Saved</span>
             </div>
           )}
-          {draftStatus === 'error' && (
+          {draftStatus.autoSaveError && (
             <div className="flex items-center space-x-1 text-destructive text-sm">
               <AlertCircle className="h-3 w-3" />
               <span>Error</span>
@@ -996,7 +1002,13 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
                     } else {
                       const signature = signatures.find(sig => sig.id === value);
                       if (signature) {
-                        insertSignature(signature);
+                        insertSignature({ 
+                          ...signature, 
+                          accountId: signature.accountId || null,
+                          contentHtml: signature.contentHtml || null,
+                          contentText: signature.contentText || null,
+                          templateType: signature.templateType || null
+                        });
                       }
                     }
                   }}
@@ -1085,19 +1097,19 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
               </div>
               
               {/* Draft status */}
-              {draftStatus === 'saving' && (
+              {draftStatus.isAutoSaving && (
                 <div className="flex items-center space-x-1 text-muted-foreground text-sm">
                   <Clock className="h-3 w-3 animate-spin" />
                   <span>Saving...</span>
                 </div>
               )}
-              {draftStatus === 'saved' && (
+              {!draftStatus.isAutoSaving && !draftStatus.hasUnsavedChanges && !draftStatus.autoSaveError && (
                 <div className="flex items-center space-x-1 text-green-600 text-sm">
                   <CheckCircle2 className="h-3 w-3" />
                   <span>Saved</span>
                 </div>
               )}
-              {draftStatus === 'error' && (
+              {draftStatus.autoSaveError && (
                 <div className="flex items-center space-x-1 text-destructive text-sm">
                   <AlertCircle className="h-3 w-3" />
                   <span>Error saving</span>
@@ -1110,7 +1122,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
               {mobileCompose.isMobile && (
                 <Button 
                   variant="outline"
-                  onClick={() => saveDraftManually()}
+                  onClick={() => saveDraftManually(formData)}
                   className="flex-1"
                   disabled={!formData.to && !formData.subject && !formData.body}
                   data-testid="button-save-draft"

@@ -1196,12 +1196,12 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 <div 
                   className="flex-1"
                   data-scroll-container
-                  onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
-                  onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
-                  onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
-                  onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
-                  onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
-                  onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
+                  onTouchStart={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
+                  onTouchMove={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
+                  onTouchEnd={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
+                  onPointerDown={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
+                  onPointerMove={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
+                  onPointerUp={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
                 >
                   <OptimizedEmailList
                     emails={filteredEmails}
@@ -1215,9 +1215,18 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                     }}
                     onToggleRead={handleToggleRead}
                     onToggleFlagged={handleToggleFlagged}
-                    onToggleStar={handleStar}
-                    onArchive={handleArchive}
-                    onDelete={handleDelete}
+                    onToggleStar={(id: string) => {
+                      const email = filteredEmails.find(e => e.id === id);
+                      if (email) handleStar(email);
+                    }}
+                    onArchive={(id: string) => {
+                      const email = filteredEmails.find(e => e.id === id);
+                      if (email) handleArchive(email);
+                    }}
+                    onDelete={(id: string) => {
+                      const email = filteredEmails.find(e => e.id === id);
+                      if (email) handleDelete(email);
+                    }}
                     enableSwipeGestures={isMobile}
                     isLoading={emailsLoading}
                     searchQuery={searchQuery}
