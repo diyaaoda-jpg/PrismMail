@@ -13,9 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { X, Send, Paperclip, Bold, Italic, Underline } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { SendEmailRequest, SendEmailResponse } from "@shared/schema";
+import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings } from "@shared/schema";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 
@@ -42,6 +42,45 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     subject: replyTo?.subject || "",
     body: replyTo?.body || ""
   });
+
+  // Fetch account information for the From field
+  const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
+    queryKey: ['/api/accounts'],
+    enabled: !!accountId && isOpen, // Only fetch when dialog is open and accountId is provided
+  });
+
+  // Find the current account from the accounts list
+  const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData ? (accountsData as any).data as AccountConnection[] : undefined;
+  const currentAccount = accountsList?.find((account: AccountConnection) => account.id === accountId);
+
+  // Extract email from account settings
+  const getAccountEmail = (account: AccountConnection | undefined): string => {
+    if (!account) return '';
+    
+    try {
+      const settings = JSON.parse(account.settingsJson);
+      if (account.protocol === 'IMAP') {
+        const imapSettings = settings as ImapSettings;
+        return imapSettings.username; // For IMAP, username is typically the email
+      } else if (account.protocol === 'EWS') {
+        const ewsSettings = settings as EwsSettings;
+        // For EWS, username might be email or DOMAIN\username format
+        const username = ewsSettings.username;
+        // If it contains @, it's likely an email
+        if (username.includes('@')) {
+          return username;
+        }
+        // If it's DOMAIN\username format, we can't determine email easily
+        return username;
+      }
+    } catch (error) {
+      console.error('Error parsing account settings:', error);
+    }
+    return '';
+  };
+
+  const accountEmail = getAccountEmail(currentAccount);
+  const fromDisplay = currentAccount ? `${currentAccount.name} <${accountEmail}>` : '';
 
   // Initialize TipTap editor
   const editor = useEditor({
@@ -85,13 +124,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest(`/api/accounts/${accountId}/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(emailData),
-      });
+      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -167,6 +200,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
 
     // Prepare email data for API
     const emailData: SendEmailRequest = {
+      accountId: accountId,
       to: formData.to,
       cc: formData.cc || undefined,
       bcc: formData.bcc || undefined,
@@ -212,6 +246,21 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
         <div className="flex-1 space-y-4 overflow-y-auto">
           {/* Recipient Fields */}
           <div className="space-y-3">
+            {/* From Field - Read-only */}
+            <div className="flex items-center space-x-2">
+              <Label htmlFor="from" className="w-12 text-sm text-muted-foreground">
+                From:
+              </Label>
+              <Input
+                id="from"
+                value={fromDisplay}
+                readOnly
+                placeholder={isLoadingAccounts ? "Loading account..." : "No account selected"}
+                className="flex-1 bg-muted/50 cursor-default"
+                data-testid="input-from"
+              />
+            </div>
+            
             <div className="flex items-center space-x-2">
               <Label htmlFor="to" className="w-12 text-sm text-muted-foreground">
                 To:
