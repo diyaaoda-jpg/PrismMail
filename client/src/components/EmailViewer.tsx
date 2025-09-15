@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, memo } from "react";
+import * as React from "react";
 import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
@@ -38,15 +38,15 @@ interface EmailViewerProps {
 }
 
 // Memoized attachment component for performance
-const AttachmentItem = memo(function AttachmentItem({ attachment, onDownload }: {
+const AttachmentItem = React.memo(function AttachmentItem({ attachment, onDownload }: {
   attachment: { id: string; fileName: string; fileSize: number; mimeType: string };
   onDownload: (id: string) => void;
 }) {
-  const handleDownload = useCallback(() => {
+  const handleDownload = React.useCallback(() => {
     onDownload(attachment.id);
   }, [attachment.id, onDownload]);
 
-  const formatFileSize = useCallback((bytes: number) => {
+  const formatFileSize = React.useCallback((bytes: number) => {
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -82,7 +82,7 @@ const AttachmentItem = memo(function AttachmentItem({ attachment, onDownload }: 
   );
 });
 
-export const EmailViewer = memo(function EmailViewer({
+export const EmailViewer = React.memo(function EmailViewer({
   email,
   currentUserEmail,
   onReply,
@@ -102,23 +102,23 @@ export const EmailViewer = memo(function EmailViewer({
   const { toast } = useToast();
   const { effectiveMode } = useTheme();
   const isMobile = useIsMobile();
-  const contentRef = useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
   
   // State hooks first
-  const [fontSize, setFontSize] = useState(100);
-  const [showImages, setShowImages] = useState(false);
-  const [isLoadingContent, setIsLoadingContent] = useState(false);
-  const [contentLoaded, setContentLoaded] = useState(false);
+  const [fontSize, setFontSize] = React.useState(100);
+  const [showImages, setShowImages] = React.useState(false);
+  const [isLoadingContent, setIsLoadingContent] = React.useState(false);
+  const [contentLoaded, setContentLoaded] = React.useState(false);
   
   // Zoom and gesture state
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [isZooming, setIsZooming] = useState(false);
-  const [lastDoubleTapTime, setLastDoubleTapTime] = useState(0);
-  const [showNavigationHints, setShowNavigationHints] = useState(false);
+  const [zoomLevel, setZoomLevel] = React.useState(1);
+  const [isZooming, setIsZooming] = React.useState(false);
+  const [lastDoubleTapTime, setLastDoubleTapTime] = React.useState(0);
+  const [showNavigationHints, setShowNavigationHints] = React.useState(false);
   
   // Gesture refs
-  const viewerRef = useRef<HTMLDivElement>(null);
-  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const viewerRef = React.useRef<HTMLDivElement>(null);
+  const contentScrollRef = React.useRef<HTMLDivElement>(null);
 
   // Query hooks
   const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
@@ -140,7 +140,7 @@ export const EmailViewer = memo(function EmailViewer({
     : [];
 
   // Dark mode style transformation - MUST be declared before sanitizeHtml
-  const applyDarkModeStyles = useCallback((html: string) => {
+  const applyDarkModeStyles = React.useCallback((html: string) => {
     // Transform common problematic styles for dark mode
     return html
       .replace(/color:\s*black/gi, 'color: var(--foreground)')
@@ -154,7 +154,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, []);
 
   // Secure HTML sanitization with minimal allowed tags/attributes
-  const sanitizeHtml = useMemo(() => {
+  const sanitizeHtml = React.useMemo(() => {
     return (html: string) => {
       const config = {
         // Minimal allowed tags for email content
@@ -198,7 +198,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, [showImages, effectiveMode, applyDarkModeStyles]);
   
   // Print functionality
-  const handlePrint = useCallback(() => {
+  const handlePrint = React.useCallback(() => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
     
@@ -240,15 +240,15 @@ export const EmailViewer = memo(function EmailViewer({
   }, [email]);
   
   // Font size controls
-  const increaseFontSize = useCallback(() => {
+  const increaseFontSize = React.useCallback(() => {
     setFontSize(prev => Math.min(prev + 10, 150));
   }, []);
   
-  const decreaseFontSize = useCallback(() => {
+  const decreaseFontSize = React.useCallback(() => {
     setFontSize(prev => Math.max(prev - 10, 70));
   }, []);
   
-  const resetFontSize = useCallback(() => {
+  const resetFontSize = React.useCallback(() => {
     setFontSize(100);
   }, []);
   
@@ -293,7 +293,7 @@ export const EmailViewer = memo(function EmailViewer({
   );
 
   // Zoom functionality
-  const handlePinchZoom = useCallback((scaleFactor: number) => {
+  const handlePinchZoom = React.useCallback((scaleFactor: number) => {
     if (!enableGestures) return;
     
     setZoomLevel(prev => {
@@ -307,7 +307,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, [enableGestures]);
 
   // Double tap to zoom
-  const handleDoubleTap = useCallback((event: React.TouchEvent | React.PointerEvent) => {
+  const handleDoubleTap = React.useCallback((event: React.TouchEvent | React.PointerEvent) => {
     if (!enableGestures || !isMobile) return;
     
     const currentTime = Date.now();
@@ -334,7 +334,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, [enableGestures, isMobile, lastDoubleTapTime, zoomLevel]);
 
   // Handle swipe down to close
-  const handleSwipeDown = useCallback((event: TouchEvent) => {
+  const handleSwipeDown = React.useCallback((event: TouchEvent) => {
     if (!enableGestures || !isMobile || !onBack) return;
     
     const touch = event.touches[0];
@@ -366,7 +366,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, [enableGestures, isMobile, onBack]);
 
   // Enhanced image loading with lazy loading simulation
-  useEffect(() => {
+  React.useEffect(() => {
     if (email?.bodyHtml) {
       setIsLoadingContent(true);
       // Simulate processing time for complex emails
@@ -381,7 +381,7 @@ export const EmailViewer = memo(function EmailViewer({
   }, [email]);
 
   // Show navigation hints on mobile
-  useEffect(() => {
+  React.useEffect(() => {
     if (isMobile && enableGestures && (hasNext || hasPrevious)) {
       setShowNavigationHints(true);
       const timer = setTimeout(() => setShowNavigationHints(false), 3000);
@@ -390,11 +390,11 @@ export const EmailViewer = memo(function EmailViewer({
   }, [email, isMobile, enableGestures, hasNext, hasPrevious]);
   
   // CRITICAL: All useMemo hooks must be called before any early returns to maintain hooks order
-  const contextualLabels = useMemo(() => {
+  const contextualLabels = React.useMemo(() => {
     return email ? getContextualLabels(email) : { reply: 'Reply', replyAll: 'Reply All', forward: 'Forward' };
   }, [email]);
 
-  const showReplyAll = useMemo(() => {
+  const showReplyAll = React.useMemo(() => {
     return email ? shouldShowReplyAll(email, currentUserEmail) : true;
   }, [email, currentUserEmail]);
   

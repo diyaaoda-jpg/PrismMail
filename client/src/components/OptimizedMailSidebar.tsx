@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, memo } from "react";
+import * as React from "react";
 import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,7 @@ const organizationFolders: MailFolder[] = [
 ];
 
 // Memoized folder item component for virtual scrolling performance
-const FolderItem = memo(function FolderItem({ 
+const FolderItem = React.memo(function FolderItem({ 
   folder, 
   accountId, 
   indent, 
@@ -132,7 +132,7 @@ const FolderItem = memo(function FolderItem({
 });
 
 // Memoized virtual folder list for performance
-const VirtualFolderList = memo(function VirtualFolderList({ 
+const VirtualFolderList = React.memo(function VirtualFolderList({ 
   folders, 
   accountId, 
   selectedFolder, 
@@ -149,10 +149,10 @@ const VirtualFolderList = memo(function VirtualFolderList({
   unreadCounts: Record<string, number>;
   onFolderSelect?: (folderId: string, accountId?: string) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const { containerHeight } = useVirtualScrollList(folders, containerRef, 48); // 48px per folder item
 
-  const handleFolderClick = useCallback((folderId: string) => {
+  const handleFolderClick = React.useCallback((folderId: string) => {
     onFolderSelect?.(folderId, accountId);
   }, [onFolderSelect, accountId]);
 
@@ -215,7 +215,7 @@ const VirtualFolderList = memo(function VirtualFolderList({
 });
 
 // Memoized account item for performance
-const AccountItem = memo(function AccountItem({ 
+const AccountItem = React.memo(function AccountItem({ 
   account, 
   isExpanded, 
   onToggle, 
@@ -276,7 +276,7 @@ const AccountItem = memo(function AccountItem({
   );
 });
 
-export const OptimizedMailSidebar = memo(function OptimizedMailSidebar({
+export const OptimizedMailSidebar = React.memo(function OptimizedMailSidebar({
   selectedFolder = 'inbox',
   selectedAccount,
   onFolderSelect,
@@ -288,28 +288,28 @@ export const OptimizedMailSidebar = memo(function OptimizedMailSidebar({
   accountFolderCounts = {},
   accounts = [],
 }: MailSidebarProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
-  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
-  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = useState(true);
-  const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [allAccountsExpanded, setAllAccountsExpanded] = React.useState(true);
+  const [smartFoldersExpanded, setSmartFoldersExpanded] = React.useState(false);
+  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = React.useState(true);
+  const [individualAccountsExpanded, setIndividualAccountsExpanded] = React.useState<Record<string, boolean>>(
     accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
   );
 
   // Memoized handlers for performance
-  const handleFolderClick = useCallback((folderId: string, accountId?: string) => {
+  const handleFolderClick = React.useCallback((folderId: string, accountId?: string) => {
     onFolderSelect?.(folderId, accountId);
     console.log('Selected folder:', folderId, accountId ? `from account ${accountId}` : 'unified');
   }, [onFolderSelect]);
 
-  const handleIndividualAccountToggle = useCallback((accountId: string) => {
+  const handleIndividualAccountToggle = React.useCallback((accountId: string) => {
     setIndividualAccountsExpanded(prev => ({
       ...prev,
       [accountId]: !prev[accountId]
     }));
   }, []);
 
-  const handleSearch = useCallback((e: React.FormEvent) => {
+  const handleSearch = React.useCallback((e: React.FormEvent) => {
     e.preventDefault();
     performanceMonitor.measureSearchTime(async () => {
       onSearch?.(searchQuery);
@@ -317,18 +317,18 @@ export const OptimizedMailSidebar = memo(function OptimizedMailSidebar({
     });
   }, [onSearch, searchQuery]);
 
-  const handleCompose = useCallback(() => {
+  const handleCompose = React.useCallback(() => {
     onCompose?.();
     console.log('Compose clicked');
   }, [onCompose]);
 
-  const handleSettings = useCallback(() => {
+  const handleSettings = React.useCallback(() => {
     onSettings?.();
     console.log('Settings clicked');
   }, [onSettings]);
 
   // Memoized account list for performance
-  const memoizedAccountsList = useMemo(() => {
+  const memoizedAccountsList = React.useMemo(() => {
     return accounts.map(account => (
       <AccountItem
         key={account.id}

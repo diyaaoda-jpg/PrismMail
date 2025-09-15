@@ -20,7 +20,7 @@ interface OptimizedEmailListProps {
 }
 
 // Memoized email item component for virtual scrolling performance
-const MemoizedEmailItem = memo(function MemoizedEmailItem({
+const MemoizedEmailItem = React.memo(function MemoizedEmailItem({
   email,
   isSelected,
   onSelect,
@@ -59,7 +59,7 @@ const MemoizedEmailItem = memo(function MemoizedEmailItem({
 });
 
 // Skeleton loading component for better perceived performance - LAYOUT SHIFT FIX: Fixed dimensions
-const EmailListSkeleton = memo(function EmailListSkeleton({ count = 10 }: { count?: number }) {
+const EmailListSkeleton = React.memo(function EmailListSkeleton({ count = 10 }: { count?: number }) {
   return (
     <div className="space-y-1 p-4">
       {Array.from({ length: count }).map((_, index) => (
@@ -78,7 +78,7 @@ const EmailListSkeleton = memo(function EmailListSkeleton({ count = 10 }: { coun
   );
 });
 
-export const OptimizedEmailList = memo(function OptimizedEmailList({
+export const OptimizedEmailList = React.memo(function OptimizedEmailList({
   emails,
   selectedEmail,
   onEmailSelect,
