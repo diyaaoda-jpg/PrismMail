@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import * as React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import type { SaveDraftRequest, SaveDraftResponse, DraftAutoSaveStatus, DraftContent } from '@shared/schema';
@@ -38,11 +38,11 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   const queryClient = useQueryClient();
   
   // State for draft status and current draft ID
-  const [status, setStatus] = useState<DraftAutoSaveStatus>({
+  const [status, setStatus] = React.useState<DraftAutoSaveStatus>({
     isAutoSaving: false,
     hasUnsavedChanges: false
   });
-  const [currentDraftId, setCurrentDraftId] = useState<string | undefined>(initialDraftId);
+  const [currentDraftId, setCurrentDraftId] = React.useState<string | undefined>(initialDraftId);
 
   // Refs for managing timers and current draft data
   const debounceTimerRef = useRef<NodeJS.Timeout>();
@@ -51,7 +51,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   const pendingDraftDataRef = useRef<Partial<DraftContent>>({});
 
   // Local storage key based on account and draft
-  const getLocalStorageKey = useCallback((drafId?: string) => {
+  const getLocalStorageKey = React.useCallback((drafId?: string) => {
     if (drafId) {
       return `${DRAFT_STORAGE_PREFIX}${drafId}`;
     }
@@ -59,7 +59,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [accountId]);
 
   // Save to local storage
-  const saveToLocalStorage = useCallback((draftData: Partial<DraftContent>) => {
+  const saveToLocalStorage = React.useCallback((draftData: Partial<DraftContent>) => {
     if (!enableLocalStorage) return;
     
     try {
@@ -76,7 +76,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [enableLocalStorage, getLocalStorageKey, currentDraftId, accountId]);
 
   // Load from local storage
-  const loadFromLocalStorage = useCallback((): Partial<DraftContent> | null => {
+  const loadFromLocalStorage = React.useCallback((): Partial<DraftContent> | null => {
     if (!enableLocalStorage) return null;
     
     try {
@@ -92,7 +92,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [enableLocalStorage, getLocalStorageKey, currentDraftId]);
 
   // Clear local storage
-  const clearLocalStorage = useCallback(() => {
+  const clearLocalStorage = React.useCallback(() => {
     if (!enableLocalStorage) return;
     
     try {
@@ -229,7 +229,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   });
 
   // Debounced save function
-  const saveDraft = useCallback((draftData: Partial<DraftContent>) => {
+  const saveDraft = React.useCallback((draftData: Partial<DraftContent>) => {
     // Store the data for later use
     pendingDraftDataRef.current = { ...pendingDraftDataRef.current, ...draftData };
     
@@ -264,7 +264,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [accountId, debounceDelay, saveToLocalStorage, saveDraftMutation]);
 
   // Manual save function (immediate)
-  const saveDraftManually = useCallback(async (draftData: Partial<DraftContent>) => {
+  const saveDraftManually = React.useCallback(async (draftData: Partial<DraftContent>) => {
     pendingDraftDataRef.current = { ...pendingDraftDataRef.current, ...draftData };
     
     if (!accountId) {
@@ -286,12 +286,12 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [accountId, saveDraftMutation]);
 
   // Delete draft function
-  const deleteDraft = useCallback(async (draftIdToDelete: string) => {
+  const deleteDraft = React.useCallback(async (draftIdToDelete: string) => {
     await deleteDraftMutation.mutateAsync(draftIdToDelete);
   }, [deleteDraftMutation]);
 
   // Clear draft function (clears local storage and resets state)
-  const clearDraft = useCallback(() => {
+  const clearDraft = React.useCallback(() => {
     // Clear timers
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -314,20 +314,20 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [clearLocalStorage]);
 
   // Refs to hold current values for auto-save timer to avoid stale closures
-  const statusRef = useRef(status);
-  const isPendingRef = useRef(saveDraftMutation.isPending);
+  const statusRef = React.useRef(status);
+  const isPendingRef = React.useRef(saveDraftMutation.isPending);
 
   // Update refs when values change
-  useEffect(() => {
+  React.useEffect(() => {
     statusRef.current = status;
   }, [status]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     isPendingRef.current = saveDraftMutation.isPending;
   }, [saveDraftMutation.isPending]);
 
   // Set up periodic auto-save with refs to avoid stale closures
-  useEffect(() => {
+  React.useEffect(() => {
     if (!accountId) return;
 
     const setupAutoSave = () => {
@@ -361,7 +361,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   }, [accountId, autoSaveInterval, saveDraftMutation]); // Include saveDraftMutation for .mutate reference
 
   // Cleanup on unmount
-  useEffect(() => {
+  React.useEffect(() => {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
