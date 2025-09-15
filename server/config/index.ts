@@ -33,7 +33,7 @@ const EmailConfigSchema = z.object({
 
 const SecurityConfigSchema = z.object({
   rateLimitWindowMs: z.coerce.number().min(60000).max(3600000).default(900000), // 15 minutes
-  rateLimitMaxRequests: z.coerce.number().min(10).max(1000).default(process.env.NODE_ENV === 'development' ? 1000 : 100),
+  rateLimitMaxRequests: z.coerce.number().min(10).max(1000).default(100),
   enableCors: z.boolean().default(false),
   corsOrigins: z.string().optional(),
   enableHelmet: z.boolean().default(true),

@@ -63,10 +63,9 @@ export function useWebSocket(): UseWebSocketReturn {
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // SECURITY FIX: Remove spoofable userId parameter - use session cookies instead
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      const wsUrl = `${protocol}//${window.location.host}/ws?userId=${encodeURIComponent(user.data.id)}`;
 
-      console.log('Connecting to WebSocket with session authentication...');
+      console.log('Connecting to WebSocket with authentication...');
       ws.current = new WebSocket(wsUrl);
 
       ws.current.onopen = () => {

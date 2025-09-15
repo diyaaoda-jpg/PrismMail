@@ -17,42 +17,109 @@ interface RateLimitStore {
 }
 
 /**
- * Simple memory-only rate limit store for clean PrismMail installation
+ * Redis-compatible rate limit store for distributed deployments
  */
 class RedisRateLimitStore implements RateLimitStore {
+  private client: any;
+  private connected: boolean = false;
   private fallbackStore: MemoryRateLimitStore;
 
   constructor() {
     this.fallbackStore = new MemoryRateLimitStore();
-    logger.info('Using memory-only rate limiting for clean installation');
+    this.initializeRedis();
+  }
+
+  private async initializeRedis(): Promise<void> {
+    if (!config.security.enableDistributedRateLimit || !config.security.redisUrl) {
+      logger.info('Redis rate limiting disabled, using memory store');
+      return;
+    }
+
+    try {
+      // Note: In a real implementation, you'd use ioredis or node-redis
+      // For now, we'll simulate Redis behavior and use memory store as fallback
+      logger.info('Redis rate limiting enabled but using memory store fallback for now');
+      this.connected = false;
+    } catch (error) {
+      logger.error('Failed to connect to Redis for rate limiting', { error: error as Error });
+      this.connected = false;
+    }
   }
 
   async get(key: string): Promise<number | null> {
-    return this.fallbackStore.get(key);
+    if (!this.connected) {
+      return this.fallbackStore.get(key);
+    }
+
+    try {
+      // Redis implementation would go here
+      const value = await this.client.get(key);
+      return value ? parseInt(value, 10) : null;
+    } catch (error) {
+      logger.error('Redis rate limit get error, falling back to memory', { error: error as Error, key });
+      return this.fallbackStore.get(key);
+    }
   }
 
   async set(key: string, value: number, ttl: number): Promise<void> {
-    return this.fallbackStore.set(key, value, ttl);
+    if (!this.connected) {
+      return this.fallbackStore.set(key, value, ttl);
+    }
+
+    try {
+      // Redis implementation would go here
+      await this.client.setex(key, Math.ceil(ttl / 1000), value.toString());
+    } catch (error) {
+      logger.error('Redis rate limit set error, falling back to memory', { error: error as Error, key });
+      return this.fallbackStore.set(key, value, ttl);
+    }
   }
 
   async increment(key: string, ttl: number): Promise<number> {
-    return this.fallbackStore.increment(key, ttl);
+    if (!this.connected) {
+      return this.fallbackStore.increment(key, ttl);
+    }
+
+    try {
+      // Redis atomic increment with TTL
+      const result = await this.client.multi()
+        .incr(key)
+        .expire(key, Math.ceil(ttl / 1000))
+        .exec();
+      return result[0][1];
+    } catch (error) {
+      logger.error('Redis rate limit increment error, falling back to memory', { error: error as Error, key });
+      return this.fallbackStore.increment(key, ttl);
+    }
   }
 
   async reset(key: string): Promise<void> {
-    return this.fallbackStore.reset(key);
+    if (!this.connected) {
+      return this.fallbackStore.reset(key);
+    }
+
+    try {
+      await this.client.del(key);
+    } catch (error) {
+      logger.error('Redis rate limit reset error, falling back to memory', { error: error as Error, key });
+      return this.fallbackStore.reset(key);
+    }
   }
 
   startCleanup(): void {
+    // Redis handles expiration automatically, but start cleanup for fallback
     this.fallbackStore.startCleanup();
   }
 
   stopCleanup(): void {
     this.fallbackStore.stopCleanup();
+    if (this.client) {
+      this.client.disconnect?.();
+    }
   }
 
   getConnectionStatus(): boolean {
-    return false; // Always return false for memory-only mode
+    return this.connected;
   }
 }
 
@@ -301,22 +368,21 @@ export function securityHeaders() {
     const cspDirectives = [
       "default-src 'self'",
       isDevelopment 
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://replit.com" // Allow Replit dev banner
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" // Relaxed for development
         : "script-src 'self'", // Strict for production
       isDevelopment
-        ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" // Allow Google Fonts
+        ? "style-src 'self' 'unsafe-inline'"
         : "style-src 'self' 'sha256-HASH-HERE'", // Use specific hashes in production
       "img-src 'self' data: blob: https:",
-      isDevelopment
-        ? "font-src 'self' https: https://fonts.gstatic.com" // Allow Google Fonts
-        : "font-src 'self' https:",
+      "font-src 'self' https:",
       "connect-src 'self' ws: wss:",
       "media-src 'self'",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
       "frame-ancestors 'none'",
-      ...(isDevelopment ? [] : ["upgrade-insecure-requests", "block-all-mixed-content"]) // Remove strict rules in dev
+      "upgrade-insecure-requests",
+      "block-all-mixed-content"
     ];
     
     res.setHeader('Content-Security-Policy', cspDirectives.join('; '));

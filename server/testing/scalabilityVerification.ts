@@ -1,7 +1,7 @@
 import { storage } from '../storage';
 import { distributedJobService } from '../services/distributedJobs';
 import { priorityEngine } from '../services/priorityEngine';
-// Redis dependency removed for clean installation
+import { redis, checkRedisHealth } from '../config/redis';
 import { initializeOptimizations, verifyIndexPerformance } from '../database/indexes';
 import { performanceMonitor, healthMonitor } from '../monitoring/performanceGuards';
 
@@ -79,17 +79,49 @@ export class ScalabilityVerification {
   private async testRedisConnection(): Promise<void> {
     const startTime = Date.now();
     
-    console.log('Skipping Redis connection test - using in-memory fallback for clean installation');
-    
-    this.results.push({
-      testName: 'Redis Connection & Performance',
-      success: true,
-      duration: Date.now() - startTime,
-      metrics: { 
-        mode: 'in-memory-fallback',
-        note: 'Redis disabled for clean installation'
+    try {
+      console.log('Testing Redis connection and distributed infrastructure...');
+      
+      const isHealthy = await checkRedisHealth();
+      if (!isHealthy) {
+        throw new Error('Redis health check failed');
       }
-    });
+      
+      // Test basic Redis operations
+      await redis.set('scalability:test', 'test-value', 'EX', 10);
+      const value = await redis.get('scalability:test');
+      
+      if (value !== 'test-value') {
+        throw new Error('Redis read/write test failed');
+      }
+      
+      // Test Redis performance with concurrent operations
+      const promises = Array.from({ length: 100 }, (_, i) => 
+        redis.set(`perf:test:${i}`, `value-${i}`, 'EX', 5)
+      );
+      
+      await Promise.all(promises);
+      
+      this.results.push({
+        testName: 'Redis Connection & Performance',
+        success: true,
+        duration: Date.now() - startTime,
+        metrics: { concurrentOperations: 100 }
+      });
+      
+    } catch (error) {
+      this.results.push({
+        testName: 'Redis Connection & Performance',
+        success: false,
+        duration: Date.now() - startTime,
+        error: (error as Error).message,
+        recommendations: [
+          'Ensure Redis is running and accessible',
+          'Check Redis memory and performance settings',
+          'Verify network connectivity to Redis instance'
+        ]
+      });
+    }
   }
 
   private async testDatabaseOptimizations(): Promise<void> {

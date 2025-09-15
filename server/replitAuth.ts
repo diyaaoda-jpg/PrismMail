@@ -8,7 +8,9 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { storage } from "./storage";
 
-// Remove top-level throw to prevent server crashes - will be handled in setupAuth
+if (!process.env.REPLIT_DOMAINS) {
+  throw new Error("Environment variable REPLIT_DOMAINS not provided");
+}
 
 const getOidcConfig = memoize(
   async () => {
@@ -22,38 +24,21 @@ const getOidcConfig = memoize(
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  
-  // Use MemoryStore in development if DATABASE_URL is missing
-  if (!process.env.DATABASE_URL || !process.env.SESSION_SECRET) {
-    console.warn('Missing DATABASE_URL or SESSION_SECRET, using fallback session store for development');
-    return session({
-      secret: process.env.SESSION_SECRET || 'dev-fallback-secret-32-chars-long',
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        httpOnly: true,
-        secure: !isDevelopment, // Allow insecure cookies in development
-        maxAge: sessionTtl,
-      },
-    });
-  }
-  
   const pgStore = connectPg(session);
   const sessionStore = new pgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: true, // Auto-create sessions table
+    createTableIfMissing: false,
     ttl: sessionTtl,
     tableName: "sessions",
   });
   return session({
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET!,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: !isDevelopment, // Allow insecure cookies in development
+      secure: true,
       maxAge: sessionTtl,
     },
   });
@@ -87,95 +72,59 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // Check if auth environment variables are configured
-  if (!process.env.REPLIT_DOMAINS || !process.env.REPL_ID) {
-    console.warn('Auth environment variables not configured, setting up development fallback');
-    
-    // Setup fallback routes for development
-    app.get("/api/login", (req, res) => {
-      res.status(501).json({ message: "Authentication not configured in development" });
-    });
-    
-    app.get("/api/callback", (req, res) => {
-      res.redirect("/");
-    });
-    
-    app.get("/api/logout", (req, res) => {
-      res.status(501).json({ message: "Authentication not configured in development" });
-    });
-    
-    return; // Skip OIDC setup
-  }
+  const config = await getOidcConfig();
 
-  try {
-    const config = await getOidcConfig();
+  const verify: VerifyFunction = async (
+    tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
+    verified: passport.AuthenticateCallback
+  ) => {
+    const user = {};
+    updateUserSession(user, tokens);
+    await upsertUser(tokens.claims());
+    verified(null, user);
+  };
 
-    const verify: VerifyFunction = async (
-      tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
-      verified: passport.AuthenticateCallback
-    ) => {
-      const user = {};
-      updateUserSession(user, tokens);
-      await upsertUser(tokens.claims());
-      verified(null, user);
-    };
-
-    for (const domain of process.env.REPLIT_DOMAINS.split(",")) {
-      const strategy = new Strategy(
-        {
-          name: `replitauth:${domain}`,
-          config,
-          scope: "openid email profile offline_access",
-          callbackURL: `https://${domain}/api/callback`,
-        },
-        verify,
-      );
-      passport.use(strategy);
-    }
-
-    passport.serializeUser((user: Express.User, cb) => cb(null, user));
-    passport.deserializeUser((user: Express.User, cb) => cb(null, user));
-
-    app.get("/api/login", (req, res, next) => {
-      passport.authenticate(`replitauth:${req.hostname}`, {
-        prompt: "login consent",
+  for (const domain of process.env
+    .REPLIT_DOMAINS!.split(",")) {
+    const strategy = new Strategy(
+      {
+        name: `replitauth:${domain}`,
+        config,
         scope: "openid email profile offline_access",
-      })(req, res, next);
-    });
-
-    app.get("/api/callback", (req, res, next) => {
-      passport.authenticate(`replitauth:${req.hostname}`, {
-        successReturnToOrRedirect: "/",
-        failureRedirect: "/api/login",
-      })(req, res, next);
-    });
-
-    app.get("/api/logout", (req, res) => {
-      req.logout(() => {
-        res.redirect(
-          client.buildEndSessionUrl(config, {
-            client_id: process.env.REPL_ID!,
-            post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
-          }).href
-        );
-      });
-    });
-  } catch (error) {
-    console.warn('Failed to setup OIDC auth, using fallback routes:', error);
-    
-    // Setup fallback routes if OIDC fails
-    app.get("/api/login", (req, res) => {
-      res.status(501).json({ message: "Authentication temporarily unavailable" });
-    });
-    
-    app.get("/api/callback", (req, res) => {
-      res.redirect("/");
-    });
-    
-    app.get("/api/logout", (req, res) => {
-      res.status(501).json({ message: "Authentication temporarily unavailable" });
-    });
+        callbackURL: `https://${domain}/api/callback`,
+      },
+      verify,
+    );
+    passport.use(strategy);
   }
+
+  passport.serializeUser((user: Express.User, cb) => cb(null, user));
+  passport.deserializeUser((user: Express.User, cb) => cb(null, user));
+
+  app.get("/api/login", (req, res, next) => {
+    passport.authenticate(`replitauth:${req.hostname}`, {
+      prompt: "login consent",
+      scope: ["openid", "email", "profile", "offline_access"],
+    })(req, res, next);
+  });
+
+  app.get("/api/callback", (req, res, next) => {
+    passport.authenticate(`replitauth:${req.hostname}`, {
+      successReturnToOrRedirect: "/",
+      failureRedirect: "/api/login",
+    })(req, res, next);
+  });
+
+  app.get("/api/logout", (req, res) => {
+    req.logout(() => {
+      res.redirect(
+        client.buildEndSessionUrl(config, {
+          client_id: process.env.REPL_ID!,
+          post_logout_redirect_uri: `${req.protocol}://${req.hostname}`,
+        }).href
+      );
+    });
+  });
 }
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {

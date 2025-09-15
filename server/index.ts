@@ -1,6 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { WebSocketServer } from "ws";
-import { IncomingMessage, createServer } from "http";
+import { IncomingMessage } from "http";
 import { parse as parseCookie } from "cookie";
 import { parse as parseUrl } from "url";
 import { registerRoutes } from "./routes";
@@ -12,9 +12,6 @@ import { initializeImapIdleService } from "./imapIdle";
 import { storage } from "./storage";
 import { emailEventEmitter, EMAIL_EVENTS } from "./events";
 import { getSession } from "./replitAuth";
-import { db } from "./db";
-import { sessions } from "@shared/schema";
-import { sql } from "drizzle-orm";
 
 // Production-grade architecture imports
 import { ArchitectureIntegration, BackwardCompatibility } from "./integration/index.js";
@@ -24,19 +21,12 @@ import { metrics, EmailMetrics } from "./monitoring/metrics.js";
 
 const app = express();
 
-// Set trust proxy for external domain access (Replit hosting)
-app.set('trust proxy', 1);
-
-// Initialize production-grade architecture FIRST
+// Initialize production-grade architecture
 const architectureIntegration = new ArchitectureIntegration(app);
 
-// Basic middleware (before routes)
+// Basic middleware (before architecture integration)
 app.use(express.json({ limit: config.performance.requestTimeout ? '10mb' : '1mb' }));
 app.use(express.urlencoded({ extended: false }));
-
-// CRITICAL FIX: Register ALL API routes BEFORE Vite setup
-// This ensures API routes get priority over Vite's catch-all
-const server = createServer(app);
 
 (async () => {
   try {
@@ -53,53 +43,27 @@ const server = createServer(app);
     logger.error('Failed to initialize production-grade architecture', { error: error as Error });
     process.exit(1);
   }
-  try {
-    await registerRoutes(app);
-  } catch (error) {
-    logger.error('Failed to register routes (possibly auth misconfiguration), continuing with basic server', { error: error as Error });
-    // Continue with basic server setup to serve frontend
-  }
+  const server = await registerRoutes(app);
   
   // Setup enhanced attachment routes with comprehensive security
   setupAttachmentRoutes(app);
 
-  // ARCHITECT FIX: Setup Vite AFTER routes but BEFORE 404 fallback
-  if (config.server.nodeEnv === 'development') {
-    // CRITICAL FIX: Set Vite HMR port to prevent WebSocket connection issues
-    process.env.VITE_HMR_PORT = '5000';
-    process.env.VITE_DEV_SERVER_URL = `http://localhost:5000`;
-    
-    // CRITICAL FIX: Prevent Content-Encoding mismatch causing net::ERR_CONTENT_DECODING_FAILED
-    app.use((req, res, next) => {
-      const originalEnd = res.end.bind(res);
-      const originalSend = res.send.bind(res);
-      
-      res.end = function(chunk?: any, encoding?: any, cb?: any) {
-        const contentType = res.getHeader('Content-Type');
-        if (typeof contentType === 'string' && (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('css'))) {
-          res.removeHeader('Content-Encoding');
-          res.setHeader('Cache-Control', 'no-transform');
-        }
-        return originalEnd(chunk, encoding, cb);
-      };
-      
-      res.send = function(body?: any) {
-        const contentType = res.getHeader('Content-Type');
-        if (typeof contentType === 'string' && (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('css'))) {
-          res.removeHeader('Content-Encoding');
-          res.setHeader('Cache-Control', 'no-transform');
-        }
-        return originalSend(body);
-      };
-      
-      next();
+  // CRITICAL: Add guaranteed health check endpoints before any other middleware
+  app.get('/healthz', (_req: Request, res: Response) => {
+    res.status(200).json({ 
+      status: 'ok', 
+      timestamp: Date.now(),
+      message: 'PrismMail server is running' 
     });
-    
-    await setupVite(app, server);
-    log('🎯 CONTENT-ENCODING FIX: Stripped compression headers to prevent decoding errors');
-  }
+  });
 
-  // Health check endpoints are already handled in registerRoutes()
+  app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({ 
+      status: 'healthy', 
+      timestamp: Date.now(),
+      service: 'PrismMail'
+    });
+  });
 
   // CRITICAL: Enforce platform-assigned PORT environment variable
   const envPort = process.env.PORT;
@@ -142,63 +106,28 @@ const server = createServer(app);
   // Store authenticated WebSocket connections
   const authenticatedConnections = new Map<any, AuthenticatedWebSocket>();
 
-  // SECURITY FIX: Authenticate WebSocket connection using session validation
-  // Replaced spoofable userId query parameter with secure session-based authentication
+  // Helper function to authenticate WebSocket connection using query parameter
+  // For simplicity, we'll require the client to pass userId as a query parameter
+  // In a production system, you'd want more robust session validation
   async function authenticateWebSocket(req: IncomingMessage): Promise<{ userId: string; userEmail?: string } | null> {
     try {
-      // Extract and validate session from cookies
-      const cookieHeader = req.headers.cookie;
-      if (!cookieHeader) {
-        console.log('WebSocket authentication failed: No session cookie');
-        return null;
-      }
-
-      // Parse cookies properly using imported cookie parser
-      const cookies = parseCookie(cookieHeader);
-      const connectSidCookie = cookies['connect.sid'];
-      
-      if (!connectSidCookie) {
-        console.log('WebSocket authentication failed: No valid session cookie');
-        return null;
-      }
-
-      // Handle signed cookies (format: s:<sid>.<signature>)
-      let sessionId = connectSidCookie;
-      if (connectSidCookie.startsWith('s:')) {
-        // Extract the raw session ID from signed cookie (before first dot)
-        const signedPart = connectSidCookie.slice(2); // Remove 's:' prefix
-        sessionId = signedPart.split('.')[0]; // Get sid before signature
-      }
-      
-      // Query sessions table directly to validate session
-      const [sessionRecord] = await db.select()
-        .from(sessions)
-        .where(sql`sid = ${sessionId} AND expire > NOW()`);
-      
-      if (!sessionRecord || !sessionRecord.sess) {
-        console.log('WebSocket authentication failed: Invalid or expired session');
-        return null;
-      }
-
-      // Parse session data to extract user information (handle multiple auth formats)
-      const sessionData = sessionRecord.sess as any;
-      const userId = sessionData.passport?.user?.id || 
-                     sessionData.user?.id || 
-                     sessionData.userId;
+      // Parse URL and get query parameters  
+      const url = parseUrl(req.url || '', true);
+      const userId = url.query.userId as string;
       
       if (!userId) {
-        console.log('WebSocket authentication failed: No authenticated user in session');
+        console.log('WebSocket authentication failed: No userId provided');
         return null;
       }
 
-      // Get user details from validated session
+      // Validate that the user exists in our system
       const user = await storage.getUser(userId);
       if (!user) {
         console.log(`WebSocket authentication failed: User ${userId} not found`);
         return null;
       }
 
-      console.log(`WebSocket authentication success: ${user.email} (${user.id})`);
+      console.log(`WebSocket authentication success: ${user.email} (${userId})`);
       return {
         userId: user.id,
         userEmail: user.email ?? undefined
@@ -425,20 +354,13 @@ const server = createServer(app);
       process.on('SIGINT', () => gracefulShutdown('SIGINT'));
       process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
       
-      // FINAL FIX: Vite setup removed from here - will be called before 404 fallback
-      
+      await setupVite(app, server);
       log('Vite development server initialized with permanent exit protection');
       log('Use Ctrl+C (SIGINT) or SIGTERM for graceful shutdown', 'vite-protection');
       
     } catch (error) {
-      console.error('CRITICAL: Failed to setup Vite dev server:', error);
+      console.error('Failed to setup Vite dev server:', error);
       logger.error('Vite setup failed', { error: error as Error });
-      // Log the full error details for debugging
-      console.error('Vite setup error details:', {
-        message: (error as Error).message,
-        stack: (error as Error).stack,
-        name: (error as Error).name
-      });
       // Fallback to basic static serving if Vite fails
       serveBasicStatic(app);
     }
