@@ -58,6 +58,9 @@ export const mailIndex = pgTable("mail_index", {
   isRead: boolean("is_read").default(false),
   isFlagged: boolean("is_flagged").default(false),
   priority: integer("priority").default(0), // 0-3 star rating
+  isStarred: boolean("is_starred").default(false), // Star status for user organization
+  isArchived: boolean("is_archived").default(false), // Archive status (removes from inbox)
+  isDeleted: boolean("is_deleted").default(false), // Soft delete status (moves to trash)
   snippet: text("snippet"),
   bodyHtml: text("body_html"),
   bodyText: text("body_text"),
@@ -142,6 +145,22 @@ export const attachments = pgTable("attachments", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Email signatures
+export const signatures = pgTable("signatures", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").references(() => accountConnections.id, { onDelete: "cascade" }), // Optional: account-specific signatures
+  name: varchar("name").notNull(), // Display name for the signature
+  contentHtml: text("content_html"), // Rich HTML content for the signature
+  contentText: text("content_text"), // Plain text version of the signature
+  isDefault: boolean("is_default").default(false), // Whether this is the user's default signature
+  isActive: boolean("is_active").default(true), // Whether the signature is enabled
+  sortOrder: integer("sort_order").default(0), // For ordering signatures in UI
+  templateType: varchar("template_type"), // Optional: built-in template type (business, casual, personal)
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert and select schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
@@ -151,6 +170,7 @@ export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id:
 export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAttachmentSchema = createInsertSchema(attachments).omit({ id: true, createdAt: true });
+export const insertSignatureSchema = createInsertSchema(signatures).omit({ id: true, createdAt: true, updatedAt: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -170,6 +190,8 @@ export type AccountFolder = typeof accountFolders.$inferSelect;
 export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
 export type Attachment = typeof attachments.$inferSelect;
 export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
+export type Signature = typeof signatures.$inferSelect;
+export type InsertSignature = z.infer<typeof insertSignatureSchema>;
 
 // Enhanced validation schemas for account settings
 
@@ -397,3 +419,191 @@ export interface EmailAttachment {
   contentType: string;
   size: number;
 }
+
+// Draft management schemas and types
+export const saveDraftRequestSchema = z.object({
+  accountId: z.string().min(1, "Account ID is required"),
+  to: z.string().optional(),
+  cc: z.string().optional(),
+  bcc: z.string().optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+  bodyHtml: z.string().optional(), // Rich HTML content
+  attachmentIds: z.array(z.string()).optional().default([]), // IDs of uploaded attachments
+  draftId: z.string().optional(), // If updating existing draft
+});
+
+export const saveDraftResponseSchema = z.object({
+  success: z.boolean(),
+  draftId: z.string(),
+  savedAt: z.date(),
+  error: z.string().optional(),
+});
+
+export const loadDraftResponseSchema = z.object({
+  success: z.boolean(),
+  draft: z.object({
+    id: z.string(),
+    accountId: z.string(),
+    to: z.string().optional(),
+    cc: z.string().optional(),
+    bcc: z.string().optional(),
+    subject: z.string().optional(),
+    body: z.string().optional(),
+    bodyHtml: z.string().optional(),
+    attachmentIds: z.array(z.string()).optional(),
+    createdAt: z.date(),
+    updatedAt: z.date(),
+  }).optional(),
+  error: z.string().optional(),
+});
+
+export const listDraftsResponseSchema = z.object({
+  success: z.boolean(),
+  drafts: z.array(z.object({
+    id: z.string(),
+    accountId: z.string(),
+    to: z.string().optional(),
+    cc: z.string().optional(),
+    subject: z.string().optional(),
+    snippet: z.string().optional(),
+    hasAttachments: z.boolean(),
+    createdAt: z.date(),
+    updatedAt: z.date(),
+  })),
+  error: z.string().optional(),
+});
+
+export const deleteDraftResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.string().optional(),
+});
+
+// Draft-specific types
+export type SaveDraftRequest = z.infer<typeof saveDraftRequestSchema>;
+export type SaveDraftResponse = z.infer<typeof saveDraftResponseSchema>;
+export type LoadDraftResponse = z.infer<typeof loadDraftResponseSchema>;
+export type ListDraftsResponse = z.infer<typeof listDraftsResponseSchema>;
+export type DeleteDraftResponse = z.infer<typeof deleteDraftResponseSchema>;
+
+// Draft content interface for internal use
+export interface DraftContent {
+  id?: string;
+  accountId: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject?: string;
+  body?: string;
+  bodyHtml?: string;
+  attachmentIds?: string[];
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// Auto-save status interface for UI feedback
+export interface DraftAutoSaveStatus {
+  isAutoSaving: boolean;
+  lastSavedAt?: Date;
+  hasUnsavedChanges: boolean;
+  autoSaveError?: string;
+}
+
+// Signature management schemas and types
+// Base schema without refinement for extending
+export const baseCreateSignatureRequestSchema = z.object({
+  name: z.string()
+    .min(1, "Signature name is required")
+    .max(100, "Signature name is too long"),
+  contentHtml: z.string().optional(),
+  contentText: z.string().optional(),
+  accountId: z.string().optional(), // Account-specific signature
+  isDefault: z.boolean().optional().default(false),
+  isActive: z.boolean().optional().default(true),
+  sortOrder: z.number().optional().default(0),
+  templateType: z.string().optional()
+});
+
+// Refined schema for validation
+export const createSignatureRequestSchema = baseCreateSignatureRequestSchema.refine(
+  (data) => data.contentHtml || data.contentText,
+  {
+    message: "Signature must have either HTML or text content",
+    path: ["contentHtml"]
+  }
+);
+
+export const updateSignatureRequestSchema = z.object({
+  name: z.string()
+    .min(1, "Signature name is required")
+    .max(100, "Signature name is too long")
+    .optional(),
+  contentHtml: z.string().optional(),
+  contentText: z.string().optional(),
+  accountId: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().optional(),
+  templateType: z.string().optional()
+});
+
+export const signatureResponseSchema = z.object({
+  success: z.boolean(),
+  signature: z.object({
+    id: z.string(),
+    userId: z.string(),
+    accountId: z.string().optional(),
+    name: z.string(),
+    contentHtml: z.string().optional(),
+    contentText: z.string().optional(),
+    isDefault: z.boolean(),
+    isActive: z.boolean(),
+    sortOrder: z.number(),
+    templateType: z.string().optional(),
+    createdAt: z.date(),
+    updatedAt: z.date(),
+  }).optional(),
+  error: z.string().optional(),
+});
+
+export const listSignaturesResponseSchema = z.object({
+  success: z.boolean(),
+  signatures: z.array(z.object({
+    id: z.string(),
+    userId: z.string(),
+    accountId: z.string().optional(),
+    name: z.string(),
+    contentHtml: z.string().optional(),
+    contentText: z.string().optional(),
+    isDefault: z.boolean(),
+    isActive: z.boolean(),
+    sortOrder: z.number(),
+    templateType: z.string().optional(),
+    createdAt: z.date(),
+    updatedAt: z.date(),
+  })),
+  error: z.string().optional(),
+});
+
+export const deleteSignatureResponseSchema = z.object({
+  success: z.boolean(),
+  error: z.string().optional(),
+});
+
+// Signature template definitions
+export interface SignatureTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: 'business' | 'casual' | 'personal';
+  contentHtml: string;
+  contentText: string;
+  variables: string[]; // Variables that can be replaced (name, email, etc.)
+}
+
+// Signature-specific types
+export type CreateSignatureRequest = z.infer<typeof createSignatureRequestSchema>;
+export type UpdateSignatureRequest = z.infer<typeof updateSignatureRequestSchema>;
+export type SignatureResponse = z.infer<typeof signatureResponseSchema>;
+export type ListSignaturesResponse = z.infer<typeof listSignaturesResponseSchema>;
+export type DeleteSignatureResponse = z.infer<typeof deleteSignatureResponseSchema>;

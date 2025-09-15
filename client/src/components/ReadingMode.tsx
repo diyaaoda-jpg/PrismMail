@@ -274,7 +274,7 @@ export function ReadingMode({
             data-testid="button-quick-star"
             className="hover-elevate active-elevate-2"
           >
-            <Star className={`h-4 w-4 mr-2 ${email?.isFlagged ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+            <Star className={`h-4 w-4 mr-2 ${email?.isFlagged ? 'fill-amber-500 text-amber-500 dark:fill-amber-400 dark:text-amber-400' : ''}`} />
             {email?.isFlagged ? 'Unstar' : 'Star'}
           </Button>
           

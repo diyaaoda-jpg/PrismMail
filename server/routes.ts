@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, type SearchEmailsParams } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertAttachmentSchema } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertAttachmentSchema, saveDraftRequestSchema, type SaveDraftRequest, type SaveDraftResponse, type LoadDraftResponse, type ListDraftsResponse, type DeleteDraftResponse, createSignatureRequestSchema, updateSignatureRequestSchema, type CreateSignatureRequest, type UpdateSignatureRequest, type SignatureResponse, type ListSignaturesResponse, type DeleteSignatureResponse } from "@shared/schema";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
 import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
@@ -101,7 +101,13 @@ const ErrorCodes = {
   FILE_NOT_FOUND: 'FILE_NOT_FOUND',
   FILE_SIZE_EXCEEDED: 'FILE_SIZE_EXCEEDED',
   INVALID_FILE_TYPE: 'INVALID_FILE_TYPE',
-  ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND'
+  ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND',
+  
+  // Draft errors
+  DRAFT_NOT_FOUND: 'DRAFT_NOT_FOUND',
+  DRAFT_SAVE_FAILED: 'DRAFT_SAVE_FAILED',
+  DRAFT_DELETE_FAILED: 'DRAFT_DELETE_FAILED',
+  INVALID_DRAFT_DATA: 'INVALID_DRAFT_DATA'
 } as const;
 
 /**
@@ -1490,10 +1496,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Configure multer for file uploads
-  const uploadDir = path.join(process.cwd(), 'uploads', 'attachments');
+  // Configure secure upload directory with randomized path
+  const baseUploadDir = path.join(process.cwd(), 'uploads');
+  const uploadDir = path.join(baseUploadDir, 'attachments', Date.now().toString());
   if (!existsSync(uploadDir)) {
-    mkdirSync(uploadDir, { recursive: true });
+    mkdirSync(uploadDir, { recursive: true, mode: 0o700 }); // Restrict permissions
   }
 
   const storage_multer = multer.diskStorage({
@@ -1501,24 +1508,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
       cb(null, uploadDir);
     },
     filename: (req, file, cb) => {
-      // Generate unique filename with timestamp and random string
-      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
-      const extension = path.extname(file.originalname);
-      cb(null, `${file.fieldname}-${uniqueSuffix}${extension}`);
+      // Generate completely random filename for security (no original filename preserved)
+      const randomBytes = require('crypto').randomBytes(16).toString('hex');
+      const timestamp = Date.now();
+      const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv'];
+      const originalExt = path.extname(file.originalname).toLowerCase();
+      
+      // Only use extension if it's in our allowed list
+      const safeExtension = allowedExtensions.includes(originalExt) ? originalExt : '.bin';
+      
+      cb(null, `attachment_${timestamp}_${randomBytes}${safeExtension}`);
     }
   });
 
-  // File filter for security
+  // Secure file filter with comprehensive validation
   const fileFilter = (req: any, file: any, cb: any) => {
-    // Allowed file types - expand as needed
+    // Allowed file types - restrictive whitelist for security
     const allowedMimeTypes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-      'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // Safe image formats (excluding SVG which can contain scripts)
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      // Documents
+      'application/pdf',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain', 'text/csv', 'application/zip', 'application/x-zip-compressed'
+      // Text files
+      'text/plain', 'text/csv'
+      // Removed: SVG (can contain JavaScript), ZIP (can contain executables)
     ];
-
+    
+    // Dangerous extensions to block regardless of MIME type
+    const blockedExtensions = [
+      '.exe', '.bat', '.cmd', '.scr', '.com', '.pif', '.vbs', '.js', '.jar',
+      '.app', '.deb', '.pkg', '.dmg', '.sh', '.ps1', '.msi', '.dll', '.so',
+      '.svg' // Blocked due to potential script content
+    ];
+    
+    const fileExtension = path.extname(file.originalname).toLowerCase();
+    
+    // Check blocked extensions first
+    if (blockedExtensions.includes(fileExtension)) {
+      cb(new ApiError(
+        ErrorCodes.INVALID_FILE_TYPE,
+        'File extension not allowed',
+        400,
+        `Files with ${fileExtension} extension are blocked for security`,
+        'file',
+        ['Please upload only safe file types: images (PNG, JPG, GIF, WebP), PDFs, Office documents, or text files']
+      ));
+      return;
+    }
+    
+    // Check MIME type
     if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -1528,7 +1569,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         400,
         `File type ${file.mimetype} is not supported`,
         'file',
-        ['Please upload only supported file types: images, PDFs, Office documents, text files, or ZIP archives']
+        ['Please upload only safe file types: images (PNG, JPG, GIF, WebP), PDFs, Office documents, or text files']
       ));
     }
   };
@@ -1567,14 +1608,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const attachments = [];
       for (const file of files) {
+        // Additional server-side validation
+        if (file.size > 25 * 1024 * 1024) {
+          throw new ApiError(
+            ErrorCodes.FILE_SIZE_EXCEEDED,
+            'File size exceeds limit',
+            400,
+            `File ${file.originalname} is ${Math.round(file.size / 1024 / 1024)}MB, maximum allowed is 25MB`
+          );
+        }
+        
+        // Sanitize original filename to prevent path traversal
+        const sanitizedFileName = file.originalname
+          .replace(/[^a-zA-Z0-9.-]/g, '_')
+          .substring(0, 100); // Limit filename length
+        
         const attachmentData = {
           emailId: emailId || null, // Can be null for temporary uploads
-          fileName: file.originalname,
+          fileName: sanitizedFileName, // Store sanitized version of original name for user display
           fileSize: file.size,
           mimeType: file.mimetype,
           filePath: file.path,
           isInline: false,
-          contentId: null
+          contentId: null,
+          uploadedBy: userId // Track who uploaded the file
         };
 
         const attachment = await storage.createAttachment(attachmentData);
@@ -1783,6 +1840,325 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       handleApiError(error, res, 'GET /api/emails/:emailId/attachments', requestId);
+    }
+  });
+
+  // Email organization routes
+  // Star/Unstar email
+  app.patch('/api/mail/:emailId/star', isAuthenticated, async (req: any, res) => {
+    const requestId = `star-email-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const emailId = req.params.emailId;
+      const { starred } = req.body;
+
+      if (typeof starred !== 'boolean') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid starred parameter',
+          400,
+          'starred must be a boolean value',
+          'starred'
+        );
+      }
+
+      // Verify user has access to this email
+      const email = await storage.getMailMessage(emailId);
+      if (!email) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Email not found',
+          404,
+          `Email with ID ${emailId} does not exist`
+        );
+      }
+
+      const accounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = accounts.some(acc => acc.id === email.accountId);
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to modify this email'
+        );
+      }
+
+      // Update star status
+      const updatedEmail = starred 
+        ? await storage.starEmail(emailId)
+        : await storage.unstarEmail(emailId);
+
+      if (!updatedEmail) {
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to update email star status',
+          500,
+          'Email star status could not be updated'
+        );
+      }
+
+      res.json(createSuccessResponse(
+        updatedEmail,
+        `Email ${starred ? 'starred' : 'unstarred'} successfully`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'PATCH /api/mail/:emailId/star', requestId);
+    }
+  });
+
+  // Archive/Unarchive email
+  app.patch('/api/mail/:emailId/archive', isAuthenticated, async (req: any, res) => {
+    const requestId = `archive-email-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const emailId = req.params.emailId;
+      const { archived } = req.body;
+
+      if (typeof archived !== 'boolean') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid archived parameter',
+          400,
+          'archived must be a boolean value',
+          'archived'
+        );
+      }
+
+      // Verify user has access to this email
+      const email = await storage.getMailMessage(emailId);
+      if (!email) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Email not found',
+          404,
+          `Email with ID ${emailId} does not exist`
+        );
+      }
+
+      const accounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = accounts.some(acc => acc.id === email.accountId);
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to modify this email'
+        );
+      }
+
+      // Update archive status
+      const updatedEmail = archived 
+        ? await storage.archiveEmail(emailId)
+        : await storage.unarchiveEmail(emailId);
+
+      if (!updatedEmail) {
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to update email archive status',
+          500,
+          'Email archive status could not be updated'
+        );
+      }
+
+      res.json(createSuccessResponse(
+        updatedEmail,
+        `Email ${archived ? 'archived' : 'unarchived'} successfully`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'PATCH /api/mail/:emailId/archive', requestId);
+    }
+  });
+
+  // Delete/Restore email (soft delete)
+  app.patch('/api/mail/:emailId/delete', isAuthenticated, async (req: any, res) => {
+    const requestId = `delete-email-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const emailId = req.params.emailId;
+      const { deleted } = req.body;
+
+      if (typeof deleted !== 'boolean') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid deleted parameter',
+          400,
+          'deleted must be a boolean value',
+          'deleted'
+        );
+      }
+
+      // Verify user has access to this email
+      const email = await storage.getMailMessage(emailId);
+      if (!email) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Email not found',
+          404,
+          `Email with ID ${emailId} does not exist`
+        );
+      }
+
+      const accounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = accounts.some(acc => acc.id === email.accountId);
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to modify this email'
+        );
+      }
+
+      // Update delete status
+      const updatedEmail = deleted 
+        ? await storage.softDeleteEmail(emailId)
+        : await storage.restoreEmail(emailId);
+
+      if (!updatedEmail) {
+        throw new ApiError(
+          ErrorCodes.DATABASE_ERROR,
+          'Failed to update email delete status',
+          500,
+          'Email delete status could not be updated'
+        );
+      }
+
+      res.json(createSuccessResponse(
+        updatedEmail,
+        `Email ${deleted ? 'deleted' : 'restored'} successfully`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'PATCH /api/mail/:emailId/delete', requestId);
+    }
+  });
+
+  // Get starred emails
+  app.get('/api/mail/starred', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-starred-emails-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { limit = 25, offset = 0 } = req.query;
+      
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 200',
+          'limit'
+        );
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
+        );
+      }
+
+      const emails = await storage.getStarredEmails(userId, limitNum, offsetNum);
+      
+      res.json(createSuccessResponse(
+        emails,
+        `Found ${emails.length} starred email(s)`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/mail/starred', requestId);
+    }
+  });
+
+  // Get archived emails
+  app.get('/api/mail/archived', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-archived-emails-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { limit = 25, offset = 0 } = req.query;
+      
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 200',
+          'limit'
+        );
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
+        );
+      }
+
+      const emails = await storage.getArchivedEmails(userId, limitNum, offsetNum);
+      
+      res.json(createSuccessResponse(
+        emails,
+        `Found ${emails.length} archived email(s)`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/mail/archived', requestId);
+    }
+  });
+
+  // Get deleted emails (trash)
+  app.get('/api/mail/deleted', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-deleted-emails-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { limit = 25, offset = 0 } = req.query;
+      
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 200',
+          'limit'
+        );
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
+        );
+      }
+
+      const emails = await storage.getDeletedEmails(userId, limitNum, offsetNum);
+      
+      res.json(createSuccessResponse(
+        emails,
+        `Found ${emails.length} deleted email(s)`
+      ));
+
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/mail/deleted', requestId);
     }
   });
 
@@ -2263,6 +2639,829 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/sync`, requestId);
+    }
+  });
+
+  // Draft management routes
+  app.post('/api/accounts/:accountId/drafts', isAuthenticated, async (req: any, res) => {
+    const requestId = `save-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const accountId = req.params.accountId;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      // Validate request body
+      const validationResult = saveDraftRequestSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid draft data',
+          400,
+          validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', '),
+          undefined,
+          ['Ensure all required fields are provided', 'Check data format and types']
+        );
+      }
+
+      const draftData = validationResult.data;
+
+      // Extract account email for the "from" field
+      let fromEmail = '';
+      try {
+        const settings = JSON.parse(account.settingsJson);
+        if (account.protocol === 'IMAP') {
+          fromEmail = settings.username;
+        } else if (account.protocol === 'EWS') {
+          const username = settings.username;
+          fromEmail = username.includes('@') ? username : username;
+        }
+      } catch (error) {
+        console.error('Error parsing account settings:', error);
+        fromEmail = account.name; // Fallback to account name
+      }
+
+      // Create draft message
+      const draft = await storage.saveDraft(accountId, {
+        to: draftData.to || '',
+        cc: draftData.cc || '',
+        bcc: draftData.bcc || '',
+        subject: draftData.subject || '',
+        from: fromEmail,
+        bodyHtml: draftData.bodyHtml || draftData.body || '',
+        bodyText: draftData.body || '',
+        snippet: draftData.subject || (draftData.body ? draftData.body.substring(0, 100) : ''),
+        hasAttachments: draftData.attachmentIds && draftData.attachmentIds.length > 0
+      });
+
+      // Handle attachments if provided
+      if (draftData.attachmentIds && draftData.attachmentIds.length > 0) {
+        for (const attachmentId of draftData.attachmentIds) {
+          try {
+            // Update attachment to reference this draft
+            await storage.updateMailMessage(draft.id, { hasAttachments: true });
+          } catch (error) {
+            console.warn(`Failed to link attachment ${attachmentId} to draft:`, error);
+          }
+        }
+      }
+
+      const response: SaveDraftResponse = {
+        success: true,
+        draftId: draft.id,
+        savedAt: draft.updatedAt || draft.createdAt!
+      };
+
+      res.json(createSuccessResponse(response, 'Draft saved successfully'));
+    } catch (error) {
+      handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/drafts`, requestId);
+    }
+  });
+
+  app.put('/api/accounts/:accountId/drafts/:draftId', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, draftId } = req.params;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      // Validate request body
+      const validationResult = saveDraftRequestSchema.safeParse(req.body);
+      if (!validationResult.success) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid draft data',
+          400,
+          validationResult.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')
+        );
+      }
+
+      const draftData = validationResult.data;
+
+      // Update draft
+      const updatedDraft = await storage.updateDraft(draftId, {
+        to: draftData.to || '',
+        cc: draftData.cc || '',
+        bcc: draftData.bcc || '',
+        subject: draftData.subject || '',
+        bodyHtml: draftData.bodyHtml || draftData.body || '',
+        bodyText: draftData.body || '',
+        snippet: draftData.subject || (draftData.body ? draftData.body.substring(0, 100) : ''),
+        hasAttachments: draftData.attachmentIds && draftData.attachmentIds.length > 0
+      });
+
+      if (!updatedDraft) {
+        throw new ApiError(
+          ErrorCodes.DRAFT_NOT_FOUND,
+          'Draft not found',
+          404,
+          `Draft with ID ${draftId} does not exist or is not a draft`
+        );
+      }
+
+      const response: SaveDraftResponse = {
+        success: true,
+        draftId: updatedDraft.id,
+        savedAt: updatedDraft.updatedAt!
+      };
+
+      res.json(createSuccessResponse(response, 'Draft updated successfully'));
+    } catch (error) {
+      handleApiError(error, res, `PUT /api/accounts/${req.params.accountId}/drafts/${req.params.draftId}`, requestId);
+    }
+  });
+
+  app.get('/api/accounts/:accountId/drafts', isAuthenticated, async (req: any, res) => {
+    const requestId = `list-account-drafts-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const accountId = req.params.accountId;
+      const { limit = 50, offset = 0 } = req.query;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Validate parameters
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 100',
+          'limit'
+        );
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      const drafts = await storage.listAccountDrafts(accountId, limitNum, offsetNum);
+      
+      const response: ListDraftsResponse = {
+        success: true,
+        drafts: drafts.map(draft => ({
+          id: draft.id,
+          accountId: draft.accountId,
+          to: draft.to || undefined,
+          cc: draft.cc || undefined,
+          subject: draft.subject || undefined,
+          snippet: draft.snippet || undefined,
+          hasAttachments: draft.hasAttachments,
+          createdAt: draft.createdAt!,
+          updatedAt: draft.updatedAt!
+        }))
+      };
+
+      res.json(createSuccessResponse(response, `Retrieved ${drafts.length} drafts`));
+    } catch (error) {
+      handleApiError(error, res, `GET /api/accounts/${req.params.accountId}/drafts`, requestId);
+    }
+  });
+
+  app.get('/api/accounts/:accountId/drafts/:draftId', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, draftId } = req.params;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      const draft = await storage.getDraft(draftId);
+      
+      if (!draft || draft.accountId !== accountId) {
+        throw new ApiError(
+          ErrorCodes.DRAFT_NOT_FOUND,
+          'Draft not found',
+          404,
+          `Draft with ID ${draftId} does not exist in this account`
+        );
+      }
+
+      const response: LoadDraftResponse = {
+        success: true,
+        draft: {
+          id: draft.id,
+          accountId: draft.accountId,
+          to: draft.to || undefined,
+          cc: draft.cc || undefined,
+          bcc: draft.bcc || undefined,
+          subject: draft.subject || undefined,
+          body: draft.bodyText || undefined,
+          bodyHtml: draft.bodyHtml || undefined,
+          attachmentIds: [], // TODO: Implement attachment linking
+          createdAt: draft.createdAt!,
+          updatedAt: draft.updatedAt!
+        }
+      };
+
+      res.json(createSuccessResponse(response, 'Draft retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, `GET /api/accounts/${req.params.accountId}/drafts/${req.params.draftId}`, requestId);
+    }
+  });
+
+  app.delete('/api/accounts/:accountId/drafts/:draftId', isAuthenticated, async (req: any, res) => {
+    const requestId = `delete-draft-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId, draftId } = req.params;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify account belongs to user
+      const accounts = await storage.getUserAccountConnections(userId);
+      const account = accounts.find(acc => acc.id === accountId);
+      
+      if (!account) {
+        throw new ApiError(
+          ErrorCodes.ACCOUNT_NOT_FOUND,
+          'Account not found',
+          404,
+          `Account with ID ${accountId} does not exist or does not belong to the user`
+        );
+      }
+
+      // Verify draft exists and belongs to account
+      const draft = await storage.getDraft(draftId);
+      if (!draft || draft.accountId !== accountId) {
+        throw new ApiError(
+          ErrorCodes.DRAFT_NOT_FOUND,
+          'Draft not found',
+          404,
+          `Draft with ID ${draftId} does not exist in this account`
+        );
+      }
+
+      await storage.deleteDraft(draftId);
+
+      const response: DeleteDraftResponse = {
+        success: true
+      };
+
+      res.json(createSuccessResponse(response, 'Draft deleted successfully'));
+    } catch (error) {
+      handleApiError(error, res, `DELETE /api/accounts/${req.params.accountId}/drafts/${req.params.draftId}`, requestId);
+    }
+  });
+
+  app.get('/api/drafts', isAuthenticated, async (req: any, res) => {
+    const requestId = `list-user-drafts-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { limit = 50, offset = 0 } = req.query;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Validate parameters
+      const limitNum = parseInt(limit as string);
+      const offsetNum = parseInt(offset as string);
+      
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid limit parameter',
+          400,
+          'Limit must be a number between 1 and 100',
+          'limit'
+        );
+      }
+      
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Invalid offset parameter',
+          400,
+          'Offset must be a non-negative number',
+          'offset'
+        );
+      }
+
+      const drafts = await storage.listUserDrafts(userId, limitNum, offsetNum);
+      
+      const response: ListDraftsResponse = {
+        success: true,
+        drafts: drafts.map(draft => ({
+          id: draft.id,
+          accountId: draft.accountId,
+          to: draft.to || undefined,
+          cc: draft.cc || undefined,
+          subject: draft.subject || undefined,
+          snippet: draft.snippet || undefined,
+          hasAttachments: draft.hasAttachments,
+          createdAt: draft.createdAt!,
+          updatedAt: draft.updatedAt!
+        }))
+      };
+
+      res.json(createSuccessResponse(response, `Retrieved ${drafts.length} drafts across all accounts`));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/drafts', requestId);
+    }
+  });
+
+  // Signature management endpoints
+  
+  // Get user signatures
+  app.get('/api/signatures', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-signatures-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId } = req.query;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const signatures = await storage.getUserSignatures(userId, accountId);
+      
+      const response: ListSignaturesResponse = {
+        success: true,
+        signatures: signatures.map(sig => ({
+          id: sig.id,
+          userId: sig.userId,
+          accountId: sig.accountId || undefined,
+          name: sig.name,
+          contentHtml: sig.contentHtml || undefined,
+          contentText: sig.contentText || undefined,
+          isDefault: sig.isDefault,
+          isActive: sig.isActive,
+          sortOrder: sig.sortOrder,
+          templateType: sig.templateType || undefined,
+          createdAt: sig.createdAt!,
+          updatedAt: sig.updatedAt!
+        }))
+      };
+
+      res.json(createSuccessResponse(response, `Retrieved ${signatures.length} signatures`));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/signatures', requestId);
+    }
+  });
+
+  // Get specific signature
+  app.get('/api/signatures/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const signatureId = req.params.id;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const signature = await storage.getSignature(signatureId);
+      if (!signature) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Signature not found',
+          404,
+          `Signature with ID ${signatureId} does not exist`
+        );
+      }
+
+      // Verify ownership
+      if (signature.userId !== userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to access this signature'
+        );
+      }
+
+      const response: SignatureResponse = {
+        success: true,
+        signature: {
+          id: signature.id,
+          userId: signature.userId,
+          accountId: signature.accountId || undefined,
+          name: signature.name,
+          contentHtml: signature.contentHtml || undefined,
+          contentText: signature.contentText || undefined,
+          isDefault: signature.isDefault,
+          isActive: signature.isActive,
+          sortOrder: signature.sortOrder,
+          templateType: signature.templateType || undefined,
+          createdAt: signature.createdAt!,
+          updatedAt: signature.updatedAt!
+        }
+      };
+
+      res.json(createSuccessResponse(response, 'Signature retrieved successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/signatures/:id', requestId);
+    }
+  });
+
+  // Create new signature
+  app.post('/api/signatures', isAuthenticated, async (req: any, res) => {
+    const requestId = `create-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Validate request body
+      const signatureData = createSignatureRequestSchema.parse(req.body);
+
+      // If accountId is provided, verify user owns it
+      if (signatureData.accountId) {
+        const accounts = await storage.getUserAccountConnections(userId);
+        const hasAccess = accounts.some(acc => acc.id === signatureData.accountId);
+        if (!hasAccess) {
+          throw new ApiError(
+            ErrorCodes.AUTHORIZATION_FAILED,
+            'Invalid account ID',
+            403,
+            'You do not have permission to create signatures for this account'
+          );
+        }
+      }
+
+      const signature = await storage.createSignature({
+        ...signatureData,
+        userId
+      });
+
+      const response: SignatureResponse = {
+        success: true,
+        signature: {
+          id: signature.id,
+          userId: signature.userId,
+          accountId: signature.accountId || undefined,
+          name: signature.name,
+          contentHtml: signature.contentHtml || undefined,
+          contentText: signature.contentText || undefined,
+          isDefault: signature.isDefault,
+          isActive: signature.isActive,
+          sortOrder: signature.sortOrder,
+          templateType: signature.templateType || undefined,
+          createdAt: signature.createdAt!,
+          updatedAt: signature.updatedAt!
+        }
+      };
+
+      res.json(createSuccessResponse(response, 'Signature created successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/signatures', requestId);
+    }
+  });
+
+  // Update signature
+  app.put('/api/signatures/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `update-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const signatureId = req.params.id;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Validate request body
+      const updates = updateSignatureRequestSchema.parse(req.body);
+
+      // Verify signature exists and belongs to user
+      const existingSignature = await storage.getSignature(signatureId);
+      if (!existingSignature) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Signature not found',
+          404,
+          `Signature with ID ${signatureId} does not exist`
+        );
+      }
+
+      if (existingSignature.userId !== userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to modify this signature'
+        );
+      }
+
+      // If accountId is being changed, verify user owns the new account
+      if (updates.accountId && updates.accountId !== existingSignature.accountId) {
+        const accounts = await storage.getUserAccountConnections(userId);
+        const hasAccess = accounts.some(acc => acc.id === updates.accountId);
+        if (!hasAccess) {
+          throw new ApiError(
+            ErrorCodes.AUTHORIZATION_FAILED,
+            'Invalid account ID',
+            403,
+            'You do not have permission to assign signatures to this account'
+          );
+        }
+      }
+
+      const signature = await storage.updateSignature(signatureId, updates);
+      if (!signature) {
+        throw new ApiError(
+          ErrorCodes.INTERNAL_SERVER_ERROR,
+          'Failed to update signature',
+          500,
+          'Signature update operation failed'
+        );
+      }
+
+      const response: SignatureResponse = {
+        success: true,
+        signature: {
+          id: signature.id,
+          userId: signature.userId,
+          accountId: signature.accountId || undefined,
+          name: signature.name,
+          contentHtml: signature.contentHtml || undefined,
+          contentText: signature.contentText || undefined,
+          isDefault: signature.isDefault,
+          isActive: signature.isActive,
+          sortOrder: signature.sortOrder,
+          templateType: signature.templateType || undefined,
+          createdAt: signature.createdAt!,
+          updatedAt: signature.updatedAt!
+        }
+      };
+
+      res.json(createSuccessResponse(response, 'Signature updated successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'PUT /api/signatures/:id', requestId);
+    }
+  });
+
+  // Delete signature
+  app.delete('/api/signatures/:id', isAuthenticated, async (req: any, res) => {
+    const requestId = `delete-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const signatureId = req.params.id;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify signature exists and belongs to user
+      const existingSignature = await storage.getSignature(signatureId);
+      if (!existingSignature) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Signature not found',
+          404,
+          `Signature with ID ${signatureId} does not exist`
+        );
+      }
+
+      if (existingSignature.userId !== userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to delete this signature'
+        );
+      }
+
+      await storage.deleteSignature(signatureId);
+
+      const response: DeleteSignatureResponse = {
+        success: true
+      };
+
+      res.json(createSuccessResponse(response, 'Signature deleted successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'DELETE /api/signatures/:id', requestId);
+    }
+  });
+
+  // Set default signature
+  app.post('/api/signatures/:id/set-default', isAuthenticated, async (req: any, res) => {
+    const requestId = `set-default-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const signatureId = req.params.id;
+      const { accountId } = req.body;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // Verify signature exists and belongs to user
+      const existingSignature = await storage.getSignature(signatureId);
+      if (!existingSignature) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Signature not found',
+          404,
+          `Signature with ID ${signatureId} does not exist`
+        );
+      }
+
+      if (existingSignature.userId !== userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to modify this signature'
+        );
+      }
+
+      // If accountId is provided, verify user owns it
+      if (accountId) {
+        const accounts = await storage.getUserAccountConnections(userId);
+        const hasAccess = accounts.some(acc => acc.id === accountId);
+        if (!hasAccess) {
+          throw new ApiError(
+            ErrorCodes.AUTHORIZATION_FAILED,
+            'Invalid account ID',
+            403,
+            'You do not have permission to set defaults for this account'
+          );
+        }
+      }
+
+      await storage.setDefaultSignature(userId, signatureId, accountId);
+
+      res.json(createSuccessResponse({}, 'Default signature set successfully'));
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/signatures/:id/set-default', requestId);
+    }
+  });
+
+  // Get default signature
+  app.get('/api/signatures/default', isAuthenticated, async (req: any, res) => {
+    const requestId = `get-default-signature-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { accountId } = req.query;
+
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      // If accountId is provided, verify user owns it
+      if (accountId) {
+        const accounts = await storage.getUserAccountConnections(userId);
+        const hasAccess = accounts.some(acc => acc.id === accountId);
+        if (!hasAccess) {
+          throw new ApiError(
+            ErrorCodes.AUTHORIZATION_FAILED,
+            'Invalid account ID',
+            403,
+            'You do not have permission to access this account'
+          );
+        }
+      }
+
+      const signature = await storage.getDefaultSignature(userId, accountId as string);
+
+      const response: SignatureResponse = {
+        success: true,
+        signature: signature ? {
+          id: signature.id,
+          userId: signature.userId,
+          accountId: signature.accountId || undefined,
+          name: signature.name,
+          contentHtml: signature.contentHtml || undefined,
+          contentText: signature.contentText || undefined,
+          isDefault: signature.isDefault,
+          isActive: signature.isActive,
+          sortOrder: signature.sortOrder,
+          templateType: signature.templateType || undefined,
+          createdAt: signature.createdAt!,
+          updatedAt: signature.updatedAt!
+        } : undefined
+      };
+
+      res.json(createSuccessResponse(response, signature ? 'Default signature retrieved' : 'No default signature set'));
+    } catch (error) {
+      handleApiError(error, res, 'GET /api/signatures/default', requestId);
     }
   });
 

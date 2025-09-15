@@ -57,6 +57,12 @@ const smartFolders: MailFolder[] = [
   { id: 'priority', name: 'High Priority', icon: Star, color: 'text-destructive' },
 ];
 
+const organizationFolders: MailFolder[] = [
+  { id: 'starred', name: 'Starred', icon: Star, color: 'text-amber-500 dark:text-amber-400' },
+  { id: 'archived', name: 'Archive', icon: Archive, color: 'text-chart-1' },
+  { id: 'deleted', name: 'Trash', icon: Trash, color: 'text-destructive' },
+];
+
 export function MailSidebar({
   selectedFolder = 'inbox',
   selectedAccount,
@@ -72,6 +78,7 @@ export function MailSidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
   const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
+  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = useState(true);
   const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
     accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
   );
@@ -291,6 +298,29 @@ export function MailSidebar({
               </CollapsibleTrigger>
               <CollapsibleContent className="space-y-1">
                 {smartFolders.map(folder => renderFolder(folder))}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+
+          {/* Organization Folders */}
+          <div className="mb-6">
+            <Collapsible open={organizationFoldersExpanded} onOpenChange={setOrganizationFoldersExpanded}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start gap-2 mb-3 text-sm font-medium hover-elevate active-elevate-2"
+                  data-testid="button-organization-folders-toggle"
+                >
+                  {organizationFoldersExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
+                  Organization
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-1">
+                {organizationFolders.map(folder => renderFolder(folder))}
               </CollapsibleContent>
             </Collapsible>
           </div>

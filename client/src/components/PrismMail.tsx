@@ -41,6 +41,9 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T14:30:00'),
     isRead: false,
     isFlagged: true,
+    isStarred: true,
+    isArchived: false,
+    isDeleted: false,
     priority: 3,
     hasAttachments: true,
     snippet: 'Hi team, we need to finalize the Q4 budget allocations before the board meeting next week. Please review the attached documents and come prepared with your department\'s requirements.',
@@ -53,6 +56,9 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T10:15:00'),
     isRead: false,
     isFlagged: false,
+    isStarred: false,
+    isArchived: false,
+    isDeleted: false,
     priority: 2,
     hasAttachments: false,
     snippet: 'Great news! The project proposal has been approved by the executive committee. We can now proceed with the implementation phase.',
@@ -65,6 +71,9 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T09:45:00'),
     isRead: true,
     isFlagged: false,
+    isStarred: false,
+    isArchived: false,
+    isDeleted: false,
     priority: 0,
     hasAttachments: false,
     snippet: 'A new pull request has been opened for the authentication feature by @developer123. Please review when you have a chance.',
@@ -77,6 +86,9 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-09T16:20:00'),
     isRead: true,
     isFlagged: true,
+    isStarred: true,
+    isArchived: false,
+    isDeleted: false,
     priority: 1,
     hasAttachments: true,
     snippet: 'Check out the latest product updates, feature releases, and upcoming events in this week\'s newsletter.',
@@ -89,6 +101,9 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-09T11:10:00'),
     isRead: false,
     isFlagged: false,
+    isStarred: false,
+    isArchived: false,
+    isDeleted: false,
     priority: 3,
     hasAttachments: false,
     snippet: 'We detected a login attempt from an unrecognized device. Please verify this was you or secure your account immediately.',
@@ -540,79 +555,129 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [emails, handleEmailSelect]);
 
-  const handleArchive = useCallback(async (email: EmailMessage) => {
-    if (!primaryAccount) return;
-    
-    // Clear selection if we archived the currently selected email
-    if (selectedEmail?.id === email.id) {
-      setSelectedEmail(null);
-    }
-    
-    try {
-      // Move to archive folder (only for real emails)
-      if (emails.length > 0) {
-        const response = await fetch(`/api/mail/${email.id}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ folder: 'ARCHIVE' })
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to archive email');
-        }
+  // Organization mutations using React Query
+  const starMutation = useMutation({
+    mutationFn: async ({ emailId, isStarred }: { emailId: string; isStarred: boolean }) => {
+      return apiRequest('PATCH', `/api/mail/${emailId}/star`, { isStarred: !isStarred });
+    },
+    onMutate: async ({ emailId, isStarred }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
+      
+      // Snapshot the previous value
+      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
+      
+      // Optimistically update to the new value
+      queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], (old: any) => {
+        if (!old?.data) return old;
+        return {
+          ...old,
+          data: old.data.map((email: EmailMessage) =>
+            email.id === emailId ? { ...email, isStarred: !isStarred } : email
+          )
+        };
+      });
+      
+      return { previousEmails };
+    },
+    onError: (err, variables, context) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousEmails) {
+        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
+      }
+      toast({
+        title: "Star failed",
+        description: "Failed to update star status",
+        variant: "destructive"
+      });
+    },
+    onSettled: () => {
+      // Always refetch after error or success
+      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async ({ emailId, isArchived }: { emailId: string; isArchived: boolean }) => {
+      return apiRequest('PATCH', `/api/mail/${emailId}/archive`, { isArchived: !isArchived });
+    },
+    onMutate: async ({ emailId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
+      
+      // Clear selection if we archived the currently selected email
+      if (selectedEmail?.id === emailId) {
+        setSelectedEmail(null);
       }
       
-      // Refresh the email list to remove archived email from current view
-      refetchEmails();
-    } catch (error) {
-      console.error('Failed to archive email:', error);
+      // Snapshot the previous value
+      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
+      
+      return { previousEmails };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previousEmails) {
+        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
+      }
       toast({
         title: "Archive failed",
-        description: "Failed to archive the email",
+        description: "Failed to archive email",
         variant: "destructive"
       });
-    }
-    console.log('Archived:', email.subject);
-  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
+    },
+  });
 
-  const handleDelete = useCallback(async (email: EmailMessage) => {
-    if (!primaryAccount) return;
-    
-    // If we deleted the selected email, clear selection
-    if (selectedEmail?.id === email.id) {
-      setSelectedEmail(null);
-    }
-    
-    try {
-      // Move to trash folder (only for real emails)
-      if (emails.length > 0) {
-        const response = await fetch(`/api/mail/${email.id}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ folder: 'TRASH' })
-        });
-        
-        if (!response.ok) {
-          throw new Error('Failed to delete email');
-        }
+  const deleteMutation = useMutation({
+    mutationFn: async ({ emailId, isDeleted }: { emailId: string; isDeleted: boolean }) => {
+      return apiRequest('PATCH', `/api/mail/${emailId}/delete`, { isDeleted: !isDeleted });
+    },
+    onMutate: async ({ emailId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
+      
+      // Clear selection if we deleted the currently selected email
+      if (selectedEmail?.id === emailId) {
+        setSelectedEmail(null);
       }
       
-      // Refresh the email list to remove deleted email from current view
-      refetchEmails();
-    } catch (error) {
-      console.error('Failed to delete email:', error);
+      // Snapshot the previous value
+      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
+      
+      return { previousEmails };
+    },
+    onError: (err, variables, context) => {
+      if (context?.previousEmails) {
+        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
+      }
       toast({
         title: "Delete failed",
-        description: "Failed to delete the email",
+        description: "Failed to delete email",
         variant: "destructive"
       });
-    }
-    console.log('Deleted:', email.subject);
-  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
+    },
+  });
+
+  // Organization action handlers
+  const handleStar = useCallback((email: EmailMessage) => {
+    starMutation.mutate({ emailId: email.id, isStarred: email.isStarred });
+    console.log('Starred:', email.subject, !email.isStarred);
+  }, [starMutation]);
+
+  const handleArchive = useCallback((email: EmailMessage) => {
+    archiveMutation.mutate({ emailId: email.id, isArchived: email.isArchived });
+    console.log('Archived:', email.subject, !email.isArchived);
+  }, [archiveMutation]);
+
+  const handleDelete = useCallback((email: EmailMessage) => {
+    deleteMutation.mutate({ emailId: email.id, isDeleted: email.isDeleted });
+    console.log('Deleted:', email.subject, !email.isDeleted);
+  }, [deleteMutation]);
 
   const getUserDisplayName = () => {
     if (user?.firstName || user?.lastName) {
@@ -780,7 +845,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               onForward={handleForward}
               onArchive={handleArchive}
               onDelete={handleDelete}
-              onToggleFlagged={(email) => handleToggleFlagged(email.id)}
+              onToggleStar={handleStar}
             />
             
             {/* Inline Composer for Replies */}

@@ -15,6 +15,9 @@ export interface EmailMessage {
   date: Date;
   isRead: boolean;
   isFlagged: boolean;
+  isStarred: boolean;
+  isArchived: boolean;
+  isDeleted: boolean;
   priority: number;
   hasAttachments: boolean;
   snippet: string;
@@ -111,7 +114,7 @@ export function EmailListItem({
         <Star 
           className={cn(
             "h-3 w-3",
-            email.isFlagged ? "fill-chart-4 text-chart-4" : "text-muted-foreground"
+            email.isStarred ? "fill-amber-500 text-amber-500 dark:fill-amber-400 dark:text-amber-400" : "text-muted-foreground"
           )} 
         />
       </Button>

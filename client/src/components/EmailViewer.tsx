@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image } from "lucide-react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useTheme } from "@/components/ThemeProvider";
 import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
@@ -21,6 +22,7 @@ interface EmailViewerProps {
   onArchive?: (email: EmailMessage) => void;
   onDelete?: (email: EmailMessage) => void;
   onToggleFlagged?: (email: EmailMessage) => void;
+  onToggleStar?: (email: EmailMessage) => void;
 }
 
 export function EmailViewer({
@@ -33,18 +35,173 @@ export function EmailViewer({
   onDelete,
   onToggleFlagged,
 }: EmailViewerProps) {
+  // All hooks must be declared at the top in consistent order
   const { toast } = useToast();
+  const { effectiveMode } = useTheme();
+  const contentRef = useRef<HTMLDivElement>(null);
+  
+  // State hooks first
+  const [fontSize, setFontSize] = useState(100);
+  const [showImages, setShowImages] = useState(false);
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [contentLoaded, setContentLoaded] = useState(false);
 
-  // Fetch attachments for the current email
+  // Query hooks
   const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
     queryKey: ['/api/emails', email?.id, 'attachments'],
     enabled: !!email?.id,
   });
 
+  interface AttachmentResponse {
+    data: Array<{
+      id: string;
+      fileName: string;
+      fileSize: number;
+      mimeType: string;
+    }>;
+  }
+  
   const attachments = attachmentsData && typeof attachmentsData === 'object' && attachmentsData !== null && 'data' in attachmentsData 
-    ? (attachmentsData as any).data 
+    ? (attachmentsData as AttachmentResponse).data 
     : [];
 
+  // Dark mode style transformation - MUST be declared before sanitizeHtml
+  const applyDarkModeStyles = useCallback((html: string) => {
+    // Transform common problematic styles for dark mode
+    return html
+      .replace(/color:\s*black/gi, 'color: var(--foreground)')
+      .replace(/color:\s*#000000/gi, 'color: var(--foreground)')
+      .replace(/color:\s*#000/gi, 'color: var(--foreground)')
+      .replace(/background-color:\s*white/gi, 'background-color: var(--background)')
+      .replace(/background-color:\s*#ffffff/gi, 'background-color: var(--background)')
+      .replace(/background-color:\s*#fff/gi, 'background-color: var(--background)')
+      .replace(/border-color:\s*#cccccc/gi, 'border-color: var(--border)')
+      .replace(/border-color:\s*#ccc/gi, 'border-color: var(--border)');
+  }, []);
+
+  // Secure HTML sanitization with minimal allowed tags/attributes
+  const sanitizeHtml = useMemo(() => {
+    return (html: string) => {
+      const config = {
+        // Minimal allowed tags for email content
+        ALLOWED_TAGS: [
+          'p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's',
+          'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+          'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
+          'a', 'hr', 'sub', 'sup', 'small'
+        ],
+        // Minimal allowed attributes - removed style, class, id for security
+        ALLOWED_ATTR: [
+          'href', 'title', 'alt', 'target', 'rel', 'colspan', 'rowspan', 'align',
+          'width', 'height'
+        ],
+        // Restrict data URIs to safe image formats only
+        ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid):|data:image\/(png|jpeg|jpg|gif|webp);base64,|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+        ALLOW_DATA_ATTR: false,
+        ALLOW_UNKNOWN_PROTOCOLS: false,
+        SANITIZE_DOM: true,
+        KEEP_CONTENT: true,
+        transformCaseFunc: (tagName: string) => tagName.toLowerCase(),
+      };
+      
+      let sanitized = DOMPurify.sanitize(html, config);
+      
+      // Remove images if not explicitly allowed - use clean placeholder
+      if (!showImages) {
+        sanitized = sanitized.replace(
+          /<img[^>]*>/gi,
+          '<div class="image-placeholder">Image content hidden - click "Show Images" to display</div>'
+        );
+      }
+      
+      // Apply dark mode compatible styles
+      if (effectiveMode === 'dark') {
+        sanitized = applyDarkModeStyles(sanitized);
+      }
+      
+      return sanitized;
+    };
+  }, [showImages, effectiveMode, applyDarkModeStyles]);
+  
+  // Print functionality
+  const handlePrint = useCallback(() => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+    
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Email: ${email?.subject || 'Untitled'}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 2rem; line-height: 1.6; color: #000; }
+            .email-header { border-bottom: 1px solid #ccc; padding-bottom: 1rem; margin-bottom: 1rem; }
+            .email-content { max-width: none; }
+            .email-content img { max-width: 100%; height: auto; }
+            .email-content table { border-collapse: collapse; width: 100%; }
+            .email-content td, .email-content th { border: 1px solid #ddd; padding: 0.5rem; }
+            @media print { body { margin: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="email-header">
+            <h2>${email?.subject || 'Untitled'}</h2>
+            <p><strong>From:</strong> ${email?.from || 'Unknown'}</p>
+            <p><strong>Date:</strong> ${email?.date ? new Date(email.date).toLocaleString() : 'Unknown'}</p>
+            ${email?.to ? `<p><strong>To:</strong> ${email.to}</p>` : ''}
+            ${email?.cc ? `<p><strong>CC:</strong> ${email.cc}</p>` : ''}
+          </div>
+          <div class="email-content">
+            ${email?.bodyHtml ? sanitizeHtml(email.bodyHtml) : (email?.bodyText || email?.snippet || '').replace(/\n/g, '<br>')}
+          </div>
+        </body>
+      </html>
+    `;
+    
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    printWindow.close();
+  }, [email]);
+  
+  // Font size controls
+  const increaseFontSize = useCallback(() => {
+    setFontSize(prev => Math.min(prev + 10, 150));
+  }, []);
+  
+  const decreaseFontSize = useCallback(() => {
+    setFontSize(prev => Math.max(prev - 10, 70));
+  }, []);
+  
+  const resetFontSize = useCallback(() => {
+    setFontSize(100);
+  }, []);
+  
+  // Enhanced image loading with lazy loading simulation
+  useEffect(() => {
+    if (email?.bodyHtml) {
+      setIsLoadingContent(true);
+      // Simulate processing time for complex emails
+      const timer = setTimeout(() => {
+        setIsLoadingContent(false);
+        setContentLoaded(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      setContentLoaded(true);
+    }
+  }, [email]);
+  
+  // CRITICAL: All useMemo hooks must be called before any early returns to maintain hooks order
+  const contextualLabels = useMemo(() => {
+    return email ? getContextualLabels(email) : { reply: 'Reply', replyAll: 'Reply All', forward: 'Forward' };
+  }, [email]);
+
+  const showReplyAll = useMemo(() => {
+    return email ? shouldShowReplyAll(email, currentUserEmail) : true;
+  }, [email, currentUserEmail]);
+  
   // Utility functions for attachments
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -95,6 +252,7 @@ export function EmailViewer({
     }
   };
 
+  // Early return AFTER all hooks have been called
   if (!email) {
     return (
       <div className="flex-1 flex items-center justify-center bg-muted/30">
@@ -136,6 +294,11 @@ export function EmailViewer({
     console.log('Toggle flagged:', email.id);
   };
 
+  const handleToggleStar = () => {
+    onToggleStar?.(email);
+    console.log('Toggle star:', email.id);
+  };
+
   const priorityLabel = {
     0: '',
     1: 'Low Priority',
@@ -143,16 +306,8 @@ export function EmailViewer({
     3: 'High Priority'
   };
 
-  const contextualLabels = useMemo(() => {
-    return email ? getContextualLabels(email) : { reply: 'Reply', replyAll: 'Reply All', forward: 'Forward' };
-  }, [email]);
-
-  const showReplyAll = useMemo(() => {
-    return email ? shouldShowReplyAll(email, currentUserEmail) : true;
-  }, [email, currentUserEmail]);
-
   return (
-    <div className="flex-1 flex flex-col bg-background">
+    <div className="flex-1 flex flex-col bg-background email-viewer-enhanced">
       {/* Header */}
       <div className="p-4 border-b bg-card">
         <div className="flex items-center justify-between mb-4">
@@ -177,16 +332,65 @@ export function EmailViewer({
           </div>
           
           <div className="flex items-center gap-1">
+            {/* Accessibility Controls */}
+            <div className="flex items-center gap-1 border-r pr-2 mr-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={decreaseFontSize}
+                title="Decrease font size"
+                data-testid="button-font-decrease"
+                className="hover-elevate active-elevate-2"
+                disabled={fontSize <= 70}
+              >
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground min-w-[3ch] text-center">{fontSize}%</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={increaseFontSize}
+                title="Increase font size"
+                data-testid="button-font-increase"
+                className="hover-elevate active-elevate-2"
+                disabled={fontSize >= 150}
+              >
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+              {email?.bodyHtml && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowImages(!showImages)}
+                  title={showImages ? "Hide images" : "Show images"}
+                  data-testid="button-toggle-images"
+                  className="hover-elevate active-elevate-2"
+                >
+                  {showImages ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handlePrint}
+                title="Print email"
+                data-testid="button-print"
+                className="hover-elevate active-elevate-2"
+              >
+                <Printer className="h-4 w-4" />
+              </Button>
+            </div>
+            
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleToggleFlagged}
+              onClick={handleToggleStar}
               data-testid="button-toggle-star-viewer"
               className="hover-elevate active-elevate-2"
             >
               <Star className={cn(
                 "h-4 w-4",
-                email.isFlagged ? "fill-chart-4 text-chart-4" : "text-muted-foreground"
+                email.isStarred ? "fill-amber-500 text-amber-500 dark:fill-amber-400 dark:text-amber-400" : "text-muted-foreground"
               )} />
             </Button>
             
@@ -197,6 +401,10 @@ export function EmailViewer({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={resetFontSize} data-testid="button-reset-font">
+                  <ZoomIn className="h-4 w-4 mr-2" />
+                  Reset Font Size
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleArchive} data-testid="button-archive">
                   <Archive className="h-4 w-4 mr-2" />
                   Archive
@@ -229,18 +437,59 @@ export function EmailViewer({
       {/* Content */}
       <div className="flex-1 flex flex-col">
         <ScrollArea className="flex-1">
-          <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
-            <div data-testid="text-email-content">
-              {email.bodyHtml ? (
-                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }} />
-              ) : email.bodyText ? (
-                <div style={{ whiteSpace: 'pre-wrap' }}>{email.bodyText}</div>
-              ) : (
-                <div>
-                  <p>{email.snippet}</p>
-                </div>
-              )}
-            </div>
+          <div 
+            ref={contentRef}
+            className="p-6 prose prose-sm max-w-none dark:prose-invert email-content-container"
+            style={{ fontSize: `${fontSize}%` }}
+          >
+            {isLoadingContent && email?.bodyHtml ? (
+              <div className="flex items-center justify-center py-8" data-testid="email-loading">
+                <div className="text-muted-foreground">Loading email content...</div>
+              </div>
+            ) : (
+              <div data-testid="text-email-content" className="email-content">
+                {email.bodyHtml ? (
+                  <>
+                    {!showImages && email.bodyHtml.includes('<img') && (
+                      <div className="mb-4 p-3 bg-muted/50 border border-border rounded-md flex items-center gap-2" data-testid="images-blocked-notice">
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Images are hidden for security</span>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => setShowImages(true)}
+                          data-testid="button-show-images-inline"
+                        >
+                          Show Images
+                        </Button>
+                      </div>
+                    )}
+                    <div 
+                      className="email-html-content"
+                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(email.bodyHtml) }} 
+                    />
+                  </>
+                ) : email.bodyText ? (
+                  <div 
+                    className="email-text-content"
+                    style={{ 
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'inherit',
+                      lineHeight: '1.6',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    {email.bodyText}
+                  </div>
+                ) : (
+                  <div className="email-snippet-content">
+                    <p style={{ fontStyle: 'italic', color: 'var(--muted-foreground)' }}>
+                      {email.snippet || 'No content available'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </ScrollArea>
 
@@ -255,7 +504,12 @@ export function EmailViewer({
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {attachments.map((attachment: any, index: number) => {
+                {attachments.map((attachment: {
+                  id: string;
+                  fileName: string;
+                  fileSize: number;
+                  mimeType: string;
+                }, index: number) => {
                   const FileIcon = getFileIcon(attachment.mimeType);
                   return (
                     <div
@@ -311,6 +565,44 @@ export function EmailViewer({
             <Button variant="outline" onClick={handleForward} data-testid="button-forward" className="hover-elevate active-elevate-2">
               <Forward className="h-4 w-4 mr-2" />
               {contextualLabels.forward}
+            </Button>
+            
+            <Separator orientation="vertical" className="h-6" />
+            
+            <Button 
+              variant={email.isStarred ? "default" : "ghost"} 
+              size="sm"
+              onClick={handleToggleStar}
+              data-testid="button-star"
+              className={cn(
+                "hover-elevate active-elevate-2",
+                email.isStarred && "text-amber-600 bg-amber-50 hover:bg-amber-100 dark:text-amber-400 dark:bg-amber-950/50"
+              )}
+            >
+              <Star className={cn("h-4 w-4 mr-2", email.isStarred && "fill-current")} />
+              {email.isStarred ? "Starred" : "Star"}
+            </Button>
+            
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={handleArchive}
+              data-testid="button-archive"
+              className="hover-elevate active-elevate-2"
+            >
+              <Archive className="h-4 w-4 mr-2" />
+              Archive
+            </Button>
+            
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={handleDelete}
+              data-testid="button-delete"
+              className="hover-elevate active-elevate-2 text-destructive hover:text-destructive"
+            >
+              <Trash className="h-4 w-4 mr-2" />
+              Delete
             </Button>
           </div>
         </div>

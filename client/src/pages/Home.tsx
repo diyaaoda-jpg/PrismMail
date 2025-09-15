@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { PrismMail } from "@/components/PrismMail";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
+import type { User } from "@shared/schema";
 
 export default function Home() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -39,18 +40,23 @@ export default function Home() {
   }
 
   const handleLogout = () => {
-    console.log('Logging out user:', (user as any)?.email || (user as any)?.id);
+    const typedUser = user as User | undefined;
+    console.log('Logging out user:', typedUser?.email || typedUser?.id);
+  };
+
+  // Safely cast user data with proper type checking
+  const typedUser = user as User | undefined;
+  const safeUser = {
+    id: typedUser?.id || 'demo-user',
+    firstName: typedUser?.firstName || 'Demo',
+    lastName: typedUser?.lastName || 'User',
+    email: typedUser?.email || 'demo@example.com',
+    profileImageUrl: typedUser?.profileImageUrl || undefined
   };
 
   return (
     <PrismMail 
-      user={{
-        id: (user as any)?.id || 'demo-user',
-        firstName: (user as any)?.firstName || 'Demo',
-        lastName: (user as any)?.lastName || 'User',
-        email: (user as any)?.email || 'demo@example.com',
-        profileImageUrl: (user as any)?.profileImageUrl
-      }}
+      user={safeUser}
       onLogout={handleLogout}
     />
   );

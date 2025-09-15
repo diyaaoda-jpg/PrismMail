@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,8 +14,9 @@ import { X, Search, Filter, Clock, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 interface SearchDialogProps {
   isOpen: boolean;
@@ -47,62 +48,76 @@ interface SearchResponse {
 export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchType, setSearchType] = useState("all");
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [recentSearches] = useState([
     "Project proposal",
-    "Meeting notes",
+    "Meeting notes", 
     "Budget review",
     "Security alert"
   ]);
+  const { toast } = useToast();
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  // Debounce search query to avoid too many API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-    setIsSearching(true);
-    
-    // Simulate search
-    setTimeout(() => {
-      const mockResults: SearchResult[] = [
-        {
-          id: "1",
-          subject: "Q4 Budget Review Meeting - Action Required",
-          sender: "sarah.johnson@company.com",
-          preview: "The quarterly budget review meeting has been scheduled for next Friday...",
-          date: "2 hours ago",
-          isRead: false
-        },
-        {
-          id: "2", 
-          subject: "Project Proposal Approved - Next Steps",
-          sender: "mike.chen@company.com",
-          preview: "Great news! The project proposal has been approved by the board...",
-          date: "4 hours ago",
-          isRead: true
-        },
-        {
-          id: "3",
-          subject: "Security Alert: Suspicious Login Detected", 
-          sender: "security@company.com",
-          preview: "We detected a login attempt from an unrecognized device...",
-          date: "1 day ago",
-          isRead: false
-        }
-      ].filter(email => 
-        email.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        email.sender.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        email.preview.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+  // Real-time search using React Query
+  const { data: searchResponse, isLoading: isSearching, error } = useQuery({
+    queryKey: ['/api/mail/search', debouncedQuery, searchType],
+    enabled: !!debouncedQuery.trim() && debouncedQuery.length >= 2,
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: 1,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        q: debouncedQuery.trim(),
+        limit: '20',
+        offset: '0'
+      });
+      
+      // Add search fields based on search type
+      if (searchType !== 'all') {
+        params.append('searchFields', searchType);
+      }
+      
+      const response = await fetch(`/api/mail/search?${params}`);
+      if (!response.ok) {
+        throw new Error('Search failed');
+      }
+      const data = await response.json();
+      if (!data.success) {
+        throw new Error(data.error?.message || 'Search failed');
+      }
+      return data.data;
+    }
+  });
 
-      setSearchResults(mockResults);
-      setIsSearching(false);
-      console.log(`Search performed: "${searchQuery}" in ${searchType}`);
-    }, 800);
+  // Handle search errors
+  useEffect(() => {
+    if (error) {
+      console.error('Search error:', error);
+      toast({
+        title: "Search Error",
+        description: error.message || "Failed to search emails",
+        variant: "destructive"
+      });
+    }
+  }, [error, toast]);
+
+  const searchResults = searchResponse?.results || [];
+  
+  const handleManualSearch = () => {
+    if (searchQuery.trim()) {
+      setDebouncedQuery(searchQuery);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      handleSearch();
+      handleManualSearch();
     }
   };
 
@@ -117,7 +132,7 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
     // Reset search after close
     setTimeout(() => {
       setSearchQuery("");
-      setSearchResults([]);
+      setDebouncedQuery("");
     }, 300);
   };
 
@@ -151,21 +166,22 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="Search emails..."
+                  placeholder="Search emails... (type at least 2 characters)"
                   className="pl-10"
                   data-testid="input-search"
                 />
+                {isSearching && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+                  </div>
+                )}
               </div>
               <Button 
-                onClick={handleSearch} 
-                disabled={isSearching || !searchQuery.trim()}
+                onClick={handleManualSearch} 
+                disabled={isSearching || !searchQuery.trim() || searchQuery.length < 2}
                 data-testid="button-perform-search"
               >
-                {isSearching ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
+                <Search className="h-4 w-4" />
               </Button>
             </div>
 
@@ -181,7 +197,8 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
                   <SelectContent>
                     <SelectItem value="all">All Fields</SelectItem>
                     <SelectItem value="subject">Subject</SelectItem>
-                    <SelectItem value="sender">Sender</SelectItem>
+                    <SelectItem value="from">From</SelectItem>
+                    <SelectItem value="to">To</SelectItem>
                     <SelectItem value="body">Body</SelectItem>
                   </SelectContent>
                 </Select>
@@ -213,17 +230,22 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
           )}
 
           {/* Search Results */}
-          {searchResults.length > 0 && (
+          {(searchResults.length > 0 || isSearching) && (
             <div className="flex-1 space-y-3 overflow-hidden">
               <div className="flex items-center justify-between">
                 <Label className="text-sm font-medium">
-                  Search Results ({searchResults.length})
+                  {isSearching ? 'Searching...' : `Search Results (${searchResults.length}${searchResponse?.hasMore ? '+' : ''})`}
                 </Label>
+                {searchResponse?.totalCount && (
+                  <span className="text-xs text-muted-foreground">
+                    {searchResponse.totalCount} total
+                  </span>
+                )}
               </div>
               
               <ScrollArea className="flex-1 h-[400px]">
                 <div className="space-y-2">
-                  {searchResults.map((email) => (
+                  {searchResults.map((email: SearchResult) => (
                     <div
                       key={email.id}
                       className="p-3 border rounded-lg cursor-pointer hover-elevate active-elevate-2 transition-colors"
@@ -243,15 +265,18 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
                             </h4>
                           </div>
                           <p className="text-xs text-muted-foreground truncate">
-                            From: {email.sender}
+                            From: {email.from}
                           </p>
                         </div>
                         <div className="text-xs text-muted-foreground flex-shrink-0 ml-2">
-                          {email.date}
+                          {email.date ? new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(
+                            Math.floor((email.date.getTime() - Date.now()) / (1000 * 60 * 60)), 
+                            'hour'
+                          ) : 'Unknown'}
                         </div>
                       </div>
                       <p className="text-sm text-muted-foreground line-clamp-2">
-                        {email.preview}
+                        {email.snippet}
                       </p>
                     </div>
                   ))}
@@ -261,7 +286,7 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
           )}
 
           {/* No Results */}
-          {searchQuery && searchResults.length === 0 && !isSearching && (
+          {searchQuery && searchQuery.length >= 2 && searchResults.length === 0 && !isSearching && (
             <div className="flex-1 flex items-center justify-center py-12">
               <div className="text-center space-y-2">
                 <Search className="h-12 w-12 text-muted-foreground mx-auto" />
@@ -269,6 +294,39 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
                 <p className="text-sm text-muted-foreground">
                   Try adjusting your search terms or filters
                 </p>
+              </div>
+            </div>
+          )}
+          
+          {/* Search hint */}
+          {searchQuery && searchQuery.length > 0 && searchQuery.length < 2 && (
+            <div className="flex-1 flex items-center justify-center py-12">
+              <div className="text-center space-y-2">
+                <Search className="h-8 w-8 text-muted-foreground mx-auto" />
+                <p className="text-sm text-muted-foreground">
+                  Type at least 2 characters to search
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {/* Error state */}
+          {error && (
+            <div className="flex-1 flex items-center justify-center py-12">
+              <div className="text-center space-y-2">
+                <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+                <h3 className="text-lg font-medium text-destructive">Search Error</h3>
+                <p className="text-sm text-muted-foreground">
+                  {error.message || 'Failed to search emails'}
+                </p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => handleManualSearch()}
+                  data-testid="button-retry-search"
+                >
+                  Try Again
+                </Button>
               </div>
             </div>
           )}

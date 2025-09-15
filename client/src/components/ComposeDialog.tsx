@@ -7,23 +7,36 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { X, Send, Paperclip, Bold, Italic, Underline, FileText, Image, Download, Trash2 } from "lucide-react";
+import { X, Send, Paperclip, Bold, Italic, Underline, FileText, Image, Download, Trash2, Save, Clock, CheckCircle2, AlertCircle, Edit2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings } from "@shared/schema";
+import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings, LoadDraftResponse, DraftContent, Signature, ListSignaturesResponse } from "@shared/schema";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
 
 interface ComposeDialogProps {
   isOpen: boolean;
   onClose: () => void;
   accountId?: string; // Account ID for sending emails
+  draftId?: string; // Draft ID to load when opening
   replyTo?: {
     to: string;
     cc?: string;
@@ -44,7 +57,7 @@ interface AttachmentFile {
   uploading?: boolean;
 }
 
-export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDialogProps) {
+export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
@@ -54,6 +67,15 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     subject: replyTo?.subject || "",
     body: replyTo?.body || ""
   });
+
+  // Draft management states
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
+
+  // Signature management states
+  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
+  const [signatureInserted, setSignatureInserted] = useState(false);
 
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
@@ -66,8 +88,14 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     enabled: isOpen, // Fetch accounts whenever dialog is open
   });
 
-  // Find the current account from the accounts list
-  const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData ? (accountsData as any).data as AccountConnection[] : undefined;
+  // Find the current account from the accounts list with proper typing - MUST be before signatures query
+  interface AccountsResponse {
+    data: AccountConnection[];
+  }
+  
+  const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData 
+    ? (accountsData as AccountsResponse).data 
+    : undefined;
   
   // Auto-select account: use provided accountId, or fall back to first active account
   let currentAccount = accountsList?.find((account: AccountConnection) => account.id === accountId);
@@ -79,6 +107,18 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
                      accountsList.find(account => account.isActive) ||
                      accountsList[0];
   }
+
+  // Fetch signatures for current account - MUST be after currentAccount is computed
+  const { data: signaturesResponse } = useQuery<ListSignaturesResponse>({
+    queryKey: ['/api/signatures', currentAccount?.id],
+    enabled: isOpen && !!currentAccount,
+  });
+
+  const signatures = signaturesResponse?.signatures || [];
+  const defaultSignature = signatures.find(sig => 
+    sig.isDefault && sig.isActive && 
+    (sig.accountId === currentAccount?.id || !sig.accountId)
+  );
 
   // Extract email from account settings
   const getAccountEmail = (account: AccountConnection | undefined): string => {
@@ -109,6 +149,39 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
   const accountEmail = getAccountEmail(currentAccount);
   const fromDisplay = currentAccount ? `${currentAccount.name} <${accountEmail}>` : '';
 
+  // Initialize draft auto-save hook
+  const {
+    saveDraft,
+    saveDraftManually,
+    deleteDraft,
+    status: draftStatus,
+    currentDraftId,
+    clearDraft
+  } = useDraftAutoSave({
+    accountId: accountId || currentAccount?.id,
+    draftId,
+    autoSaveInterval: 30000, // 30 seconds
+    debounceDelay: 2000, // 2 seconds
+    enableLocalStorage: true
+  });
+
+  // Load draft when dialog opens with draftId
+  const { data: draftData, isLoading: isDraftLoading } = useQuery({
+    queryKey: ['/api/accounts', accountId || currentAccount?.id, 'drafts', draftId],
+    queryFn: async () => {
+      if (!draftId || !accountId || !currentAccount?.id) return null;
+      
+      const response = await apiRequest('GET', `/api/accounts/${accountId || currentAccount?.id}/drafts/${draftId}`);
+      if (!response.ok) {
+        throw new Error('Failed to load draft');
+      }
+      
+      const result = await response.json();
+      return result.data as LoadDraftResponse;
+    },
+    enabled: isOpen && !!draftId && !!(accountId || currentAccount?.id),
+  });
+
   // Initialize TipTap editor
   const editor = useEditor({
     extensions: [StarterKit],
@@ -120,20 +193,160 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-      setFormData(prev => ({ ...prev, body: html }));
+      setFormData(prev => {
+        const newData = { ...prev, body: html };
+        // Trigger auto-save when body changes
+        triggerAutoSave(newData);
+        return newData;
+      });
     },
   });
 
+  // Enhanced signature insertion with race condition prevention
+  const insertSignature = useCallback((signature: Signature, preventAutoSave = false) => {
+    if (!editor) return;
+
+    const signatureHtml = signature.contentHtml || `<p>${signature.contentText || ''}</p>`;
+    
+    // Get current content
+    const currentContent = editor.getHTML();
+    
+    // Check if signature already exists to prevent duplication
+    const hasExistingSignature = currentContent.includes('data-signature-id=');
+    
+    // Remove any existing signature (look for signature wrapper)
+    const contentWithoutSignature = currentContent.replace(
+      /<div data-signature-id="[^"]*">[\s\S]*?<\/div>/g, 
+      ''
+    ).trim();
+    
+    // Add signature wrapper with ID for easy removal/replacement
+    const signatureMarker = `<!-- SIGNATURE_START:${signature.id} -->`;
+    const signatureEndMarker = `<!-- SIGNATURE_END:${signature.id} -->`;
+    const signatureWithWrapper = `<br/>${signatureMarker}<div data-signature-id="${signature.id}">${signatureHtml}</div>${signatureEndMarker}`;
+    
+    // Insert at the end of content
+    const newContent = contentWithoutSignature + signatureWithWrapper;
+    
+    // Temporarily disable auto-save to prevent race condition
+    if (preventAutoSave) {
+      const originalOnUpdate = editor.options.onUpdate;
+      editor.setOptions({ onUpdate: () => {} });
+      
+      editor.commands.setContent(newContent);
+      
+      // Re-enable auto-save after a brief delay
+      setTimeout(() => {
+        editor.setOptions({ onUpdate: originalOnUpdate });
+      }, 100);
+    } else {
+      editor.commands.setContent(newContent);
+    }
+    
+    setSelectedSignatureId(signature.id);
+    setSignatureInserted(true);
+  }, [editor]);
+
+  // Auto-insert default signature with improved race condition handling
+  useEffect(() => {
+    if (editor && defaultSignature && !signatureInserted && !replyTo && !draftId && isOpen && isDraftLoaded !== null) {
+      // Use a timeout to ensure editor is fully initialized and draft loading is complete
+      const signatureTimeout = setTimeout(() => {
+        const currentContent = editor.getHTML();
+        // Only insert signature if content doesn't already contain one
+        if (!currentContent.includes('data-signature-id=')) {
+          insertSignature(defaultSignature, true); // Prevent auto-save during insertion
+        } else {
+          setSignatureInserted(true);
+        }
+      }, 150);
+      
+      return () => clearTimeout(signatureTimeout);
+    }
+  }, [editor, defaultSignature, signatureInserted, replyTo, draftId, isOpen, isDraftLoaded, insertSignature]);
+
+  // Reset signature state when dialog opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setSignatureInserted(false);
+      setSelectedSignatureId(null);
+    }
+  }, [isOpen]);
+
+  // Auto-save trigger function with signature state tracking
+  const triggerAutoSave = useCallback((data: typeof formData) => {
+    if (!currentAccount?.id || (!draftId && !data.to && !data.subject && !data.body)) {
+      return; // Don't save empty drafts
+    }
+    
+    // Skip auto-save if we're still in the process of loading draft or inserting signature
+    if (!isDraftLoaded && draftId) {
+      return; // Don't auto-save while draft is loading
+    }
+
+    const draftContent: Partial<DraftContent> = {
+      accountId: currentAccount.id,
+      to: data.to,
+      cc: data.cc,
+      bcc: data.bcc,
+      subject: data.subject,
+      body: data.body,
+      bodyHtml: data.body,
+      attachmentIds: attachments.filter(att => att.id).map(att => att.id!),
+    };
+
+    saveDraft(draftContent);
+  }, [currentAccount?.id, draftId, attachments, saveDraft, isDraftLoaded]);
+
+  // Load draft when dialog opens with signature detection
+  useEffect(() => {
+    if (draftData?.draft && !isDraftLoaded) {
+      const draft = draftData.draft;
+      const draftBody = draft.bodyHtml || draft.body || '';
+      
+      setFormData({
+        to: draft.to || "",
+        cc: draft.cc || "",
+        bcc: draft.bcc || "",
+        subject: draft.subject || "",
+        body: draftBody
+      });
+
+      // Update editor content and check for existing signature
+      if (editor) {
+        editor.commands.setContent(draftBody);
+        
+        // Check if draft already contains a signature
+        const hasSignature = draftBody.includes('data-signature-id=');
+        if (hasSignature) {
+          setSignatureInserted(true);
+          // Extract signature ID if present
+          const signatureIdMatch = draftBody.match(/data-signature-id="([^"]*)"/)
+          if (signatureIdMatch) {
+            setSelectedSignatureId(signatureIdMatch[1]);
+          }
+        }
+      }
+
+      setIsDraftLoaded(true);
+      
+      toast({
+        title: "Draft Loaded",
+        description: "Your draft has been restored.",
+      });
+    }
+  }, [draftData, isDraftLoaded, editor, toast]);
+
   // Update editor content when replyTo changes
   useEffect(() => {
-    if (editor && replyTo?.body) {
+    if (editor && replyTo?.body && !isDraftLoaded) {
       editor.commands.setContent(replyTo.body);
     }
-  }, [editor, replyTo]);
+  }, [editor, replyTo, isDraftLoaded]);
 
   // Update form data when replyTo changes
   useEffect(() => {
-    if (replyTo) {
+    if (replyTo && !isDraftLoaded) {
       setFormData({
         to: replyTo.to || "",
         cc: replyTo.cc || "",
@@ -150,11 +363,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       const formData = new FormData();
       formData.append('attachments', file);
       
-      const response = await apiRequest('POST', '/api/attachments/upload', formData, {
-        headers: {
-          // Don't set Content-Type, let the browser set it with boundary for FormData
-        }
-      });
+      const response = await apiRequest('POST', '/api/attachments/upload', formData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -633,6 +842,63 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
               <Underline className="h-4 w-4" />
             </Button>
             <Separator orientation="vertical" className="h-6 mx-2" />
+            
+            {/* Signature Selection */}
+            {signatures.length > 0 && (
+              <>
+                <Select
+                  value={selectedSignatureId || ""}
+                  onValueChange={(value) => {
+                    if (value === "none") {
+                      // Remove signature
+                      if (editor) {
+                        const currentContent = editor.getHTML();
+                        const contentWithoutSignature = currentContent.replace(
+                          /<div data-signature-id="[^"]*">[\s\S]*?<\/div>/g, 
+                          ''
+                        );
+                        editor.commands.setContent(contentWithoutSignature);
+                        setSelectedSignatureId(null);
+                      }
+                    } else {
+                      const signature = signatures.find(sig => sig.id === value);
+                      if (signature) {
+                        insertSignature(signature);
+                      }
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-32 h-8" data-testid="select-signature">
+                    <Edit2 className="h-3 w-3 mr-1" />
+                    <SelectValue placeholder="Signature" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Signature</SelectItem>
+                    {signatures
+                      .filter(sig => sig.isActive)
+                      .sort((a, b) => {
+                        // Put default signature first
+                        if (a.isDefault && !b.isDefault) return -1;
+                        if (!a.isDefault && b.isDefault) return 1;
+                        return a.name.localeCompare(b.name);
+                      })
+                      .map((signature) => (
+                        <SelectItem key={signature.id} value={signature.id}>
+                          {signature.name}
+                          {signature.isDefault && (
+                            <Badge variant="secondary" className="ml-2 text-xs">
+                              Default
+                            </Badge>
+                          )}
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+                <Separator orientation="vertical" className="h-6 mx-2" />
+              </>
+            )}
+            
             <Button 
               variant="ghost" 
               size="sm" 

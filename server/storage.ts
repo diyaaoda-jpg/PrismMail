@@ -7,6 +7,7 @@ import {
   vipContacts,
   userPrefs,
   attachments,
+  signatures,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -23,6 +24,8 @@ import {
   type InsertUserPrefs,
   type Attachment,
   type InsertAttachment,
+  type Signature,
+  type InsertSignature,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, like, ilike, gte, lte, desc, asc, sql } from "drizzle-orm";
@@ -45,9 +48,20 @@ export interface IStorage {
   deleteAccountConnection(id: string): Promise<void>;
   // Mail operations
   getMailMessages(accountId: string, folder?: string, limit?: number, offset?: number): Promise<MailMessage[]>;
+  getMailMessage(id: string): Promise<MailMessage | undefined>;
   createMailMessage(message: InsertMailMessage): Promise<MailMessage>;
   updateMailMessage(id: string, updates: Partial<MailMessage>): Promise<MailMessage | undefined>;
   deleteMailMessage(id: string): Promise<void>;
+  // Email organization operations
+  starEmail(id: string): Promise<MailMessage | undefined>;
+  unstarEmail(id: string): Promise<MailMessage | undefined>;
+  archiveEmail(id: string): Promise<MailMessage | undefined>;
+  unarchiveEmail(id: string): Promise<MailMessage | undefined>;
+  softDeleteEmail(id: string): Promise<MailMessage | undefined>;
+  restoreEmail(id: string): Promise<MailMessage | undefined>;
+  getStarredEmails(userId: string, limit?: number, offset?: number): Promise<MailMessage[]>;
+  getArchivedEmails(userId: string, limit?: number, offset?: number): Promise<MailMessage[]>;
+  getDeletedEmails(userId: string, limit?: number, offset?: number): Promise<MailMessage[]>;
   // Priority rules
   getPriorityRules(accountId: string): Promise<PriorityRule[]>;
   createPriorityRule(rule: InsertPriorityRule): Promise<PriorityRule>;
@@ -75,6 +89,21 @@ export interface IStorage {
   deleteEmailAttachments(emailId: string): Promise<void>;
   // Search operations
   searchEmails(params: SearchEmailsParams): Promise<SearchEmailsResult>;
+  // Draft operations
+  saveDraft(accountId: string, draftData: Partial<InsertMailMessage>): Promise<MailMessage>;
+  getDraft(draftId: string): Promise<MailMessage | undefined>;
+  listUserDrafts(userId: string, limit?: number, offset?: number): Promise<MailMessage[]>;
+  listAccountDrafts(accountId: string, limit?: number, offset?: number): Promise<MailMessage[]>;
+  deleteDraft(draftId: string): Promise<void>;
+  updateDraft(draftId: string, updates: Partial<MailMessage>): Promise<MailMessage | undefined>;
+  // Signature operations
+  getUserSignatures(userId: string, accountId?: string): Promise<Signature[]>;
+  getSignature(id: string): Promise<Signature | undefined>;
+  createSignature(signature: InsertSignature): Promise<Signature>;
+  updateSignature(id: string, updates: Partial<Signature>): Promise<Signature | undefined>;
+  deleteSignature(id: string): Promise<void>;
+  setDefaultSignature(userId: string, signatureId: string, accountId?: string): Promise<void>;
+  getDefaultSignature(userId: string, accountId?: string): Promise<Signature | undefined>;
 }
 
 export interface SearchEmailsParams {
@@ -316,6 +345,11 @@ export class DatabaseStorage implements IStorage {
       .limit(limit).offset(offset);
   }
 
+  async getMailMessage(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db.select().from(mailIndex).where(eq(mailIndex.id, id));
+    return result;
+  }
+
   async createMailMessage(message: InsertMailMessage): Promise<MailMessage> {
     const [result] = await db.insert(mailIndex).values(message).returning();
     return result;
@@ -332,6 +366,123 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMailMessage(id: string): Promise<void> {
     await db.delete(mailIndex).where(eq(mailIndex.id, id));
+  }
+
+  // Email organization operations
+  async starEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isStarred: true, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async unstarEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isStarred: false, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async archiveEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isArchived: true, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async unarchiveEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isArchived: false, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async softDeleteEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isDeleted: true, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async restoreEmail(id: string): Promise<MailMessage | undefined> {
+    const [result] = await db
+      .update(mailIndex)
+      .set({ isDeleted: false, isArchived: false, updatedAt: new Date() })
+      .where(eq(mailIndex.id, id))
+      .returning();
+    return result;
+  }
+
+  async getStarredEmails(userId: string, limit = 50, offset = 0): Promise<MailMessage[]> {
+    // Get all accounts for this user
+    const userAccounts = await db.select({ id: accountConnections.id })
+      .from(accountConnections)
+      .where(eq(accountConnections.userId, userId));
+    
+    if (userAccounts.length === 0) return [];
+    
+    const accountIds = userAccounts.map(acc => acc.id);
+    
+    return await db.select().from(mailIndex)
+      .where(and(
+        sql`${mailIndex.accountId} = ANY(${accountIds})`,
+        eq(mailIndex.isStarred, true),
+        eq(mailIndex.isDeleted, false)
+      ))
+      .orderBy(sql`${mailIndex.date} DESC NULLS LAST`)
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async getArchivedEmails(userId: string, limit = 50, offset = 0): Promise<MailMessage[]> {
+    // Get all accounts for this user
+    const userAccounts = await db.select({ id: accountConnections.id })
+      .from(accountConnections)
+      .where(eq(accountConnections.userId, userId));
+    
+    if (userAccounts.length === 0) return [];
+    
+    const accountIds = userAccounts.map(acc => acc.id);
+    
+    return await db.select().from(mailIndex)
+      .where(and(
+        sql`${mailIndex.accountId} = ANY(${accountIds})`,
+        eq(mailIndex.isArchived, true),
+        eq(mailIndex.isDeleted, false)
+      ))
+      .orderBy(sql`${mailIndex.date} DESC NULLS LAST`)
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async getDeletedEmails(userId: string, limit = 50, offset = 0): Promise<MailMessage[]> {
+    // Get all accounts for this user
+    const userAccounts = await db.select({ id: accountConnections.id })
+      .from(accountConnections)
+      .where(eq(accountConnections.userId, userId));
+    
+    if (userAccounts.length === 0) return [];
+    
+    const accountIds = userAccounts.map(acc => acc.id);
+    
+    return await db.select().from(mailIndex)
+      .where(and(
+        sql`${mailIndex.accountId} = ANY(${accountIds})`,
+        eq(mailIndex.isDeleted, true)
+      ))
+      .orderBy(sql`${mailIndex.date} DESC NULLS LAST`)
+      .limit(limit)
+      .offset(offset);
   }
 
   // Priority rules
@@ -661,7 +812,7 @@ export class DatabaseStorage implements IStorage {
           const regex = new RegExp(`(${searchTerm})`, 'gi');
           result.highlightedSnippet = snippet.replace(regex, '<mark>$1</mark>');
         } else {
-          result.highlightedSnippet = email.snippet;
+          result.highlightedSnippet = email.snippet ?? undefined;
         }
 
         return result;
@@ -677,6 +828,239 @@ export class DatabaseStorage implements IStorage {
       console.error('Error in searchEmails:', error);
       throw new Error(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  // Draft operations
+  async saveDraft(accountId: string, draftData: Partial<InsertMailMessage>): Promise<MailMessage> {
+    const draftMessage: InsertMailMessage = {
+      accountId,
+      folder: 'drafts', // Always save to drafts folder
+      messageId: draftData.messageId || `draft-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      threadId: draftData.threadId || undefined,
+      subject: draftData.subject || '',
+      from: draftData.from || '',
+      to: draftData.to || '',
+      cc: draftData.cc || '',
+      bcc: draftData.bcc || '',
+      replyTo: draftData.replyTo || undefined,
+      date: new Date(),
+      size: draftData.size || 0,
+      hasAttachments: draftData.hasAttachments || false,
+      isRead: false, // Drafts are unread
+      isFlagged: false,
+      priority: draftData.priority || 0,
+      isStarred: draftData.isStarred || false,
+      isArchived: false,
+      isDeleted: false,
+      snippet: draftData.snippet || draftData.subject || '',
+      bodyHtml: draftData.bodyHtml || '',
+      bodyText: draftData.bodyText || '',
+    };
+
+    const [result] = await db.insert(mailIndex).values(draftMessage).returning();
+    return result;
+  }
+
+  async getDraft(draftId: string): Promise<MailMessage | undefined> {
+    const [draft] = await db.select().from(mailIndex)
+      .where(and(eq(mailIndex.id, draftId), sql`UPPER(${mailIndex.folder}) = 'DRAFTS'`));
+    return draft;
+  }
+
+  async listUserDrafts(userId: string, limit = 50, offset = 0): Promise<MailMessage[]> {
+    // Get all account IDs for this user
+    const userAccounts = await db.select({ id: accountConnections.id })
+      .from(accountConnections)
+      .where(eq(accountConnections.userId, userId));
+    
+    if (userAccounts.length === 0) {
+      return [];
+    }
+
+    const accountIds = userAccounts.map(acc => acc.id);
+    
+    return await db.select().from(mailIndex)
+      .where(and(
+        sql`${mailIndex.accountId} = ANY(${accountIds})`,
+        sql`UPPER(${mailIndex.folder}) = 'DRAFTS'`,
+        eq(mailIndex.isDeleted, false)
+      ))
+      .orderBy(desc(mailIndex.updatedAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async listAccountDrafts(accountId: string, limit = 50, offset = 0): Promise<MailMessage[]> {
+    return await db.select().from(mailIndex)
+      .where(and(
+        eq(mailIndex.accountId, accountId),
+        sql`UPPER(${mailIndex.folder}) = 'DRAFTS'`,
+        eq(mailIndex.isDeleted, false)
+      ))
+      .orderBy(desc(mailIndex.updatedAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async deleteDraft(draftId: string): Promise<void> {
+    // First verify this is actually a draft
+    const draft = await this.getDraft(draftId);
+    if (!draft) {
+      throw new Error('Draft not found');
+    }
+    
+    // Delete attachments first
+    await this.deleteEmailAttachments(draftId);
+    
+    // Then delete the draft
+    await db.delete(mailIndex).where(eq(mailIndex.id, draftId));
+  }
+
+  async updateDraft(draftId: string, updates: Partial<MailMessage>): Promise<MailMessage | undefined> {
+    // Verify this is actually a draft before updating
+    const existingDraft = await this.getDraft(draftId);
+    if (!existingDraft) {
+      return undefined;
+    }
+
+    const [result] = await db
+      .update(mailIndex)
+      .set({ 
+        ...updates, 
+        updatedAt: new Date(),
+        folder: 'drafts' // Ensure it stays in drafts folder
+      })
+      .where(eq(mailIndex.id, draftId))
+      .returning();
+    return result;
+  }
+
+  // Signature operations
+  async getUserSignatures(userId: string, accountId?: string): Promise<Signature[]> {
+    const whereClause = accountId
+      ? and(eq(signatures.userId, userId), eq(signatures.accountId, accountId))
+      : and(eq(signatures.userId, userId), eq(signatures.isActive, true));
+
+    const results = await db
+      .select()
+      .from(signatures)
+      .where(whereClause)
+      .orderBy(desc(signatures.isDefault), asc(signatures.sortOrder), asc(signatures.name));
+
+    return results;
+  }
+
+  async getSignature(id: string): Promise<Signature | undefined> {
+    const [result] = await db
+      .select()
+      .from(signatures)
+      .where(eq(signatures.id, id));
+    return result;
+  }
+
+  async createSignature(signature: InsertSignature): Promise<Signature> {
+    // If this is being set as default, clear other defaults for the same user/account
+    if (signature.isDefault) {
+      const whereClause = signature.accountId
+        ? and(eq(signatures.userId, signature.userId), eq(signatures.accountId, signature.accountId))
+        : eq(signatures.userId, signature.userId);
+
+      await db
+        .update(signatures)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(whereClause);
+    }
+
+    const [result] = await db
+      .insert(signatures)
+      .values({
+        ...signature,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return result;
+  }
+
+  async updateSignature(id: string, updates: Partial<Signature>): Promise<Signature | undefined> {
+    // If setting as default, clear other defaults for the same user/account
+    if (updates.isDefault) {
+      const existingSignature = await this.getSignature(id);
+      if (existingSignature) {
+        const whereClause = existingSignature.accountId
+          ? and(
+              eq(signatures.userId, existingSignature.userId),
+              eq(signatures.accountId, existingSignature.accountId),
+              sql`${signatures.id} != ${id}`
+            )
+          : and(
+              eq(signatures.userId, existingSignature.userId),
+              sql`${signatures.id} != ${id}`
+            );
+
+        await db
+          .update(signatures)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(whereClause);
+      }
+    }
+
+    const [result] = await db
+      .update(signatures)
+      .set({ 
+        ...updates, 
+        updatedAt: new Date() 
+      })
+      .where(eq(signatures.id, id))
+      .returning();
+
+    return result;
+  }
+
+  async deleteSignature(id: string): Promise<void> {
+    await db.delete(signatures).where(eq(signatures.id, id));
+  }
+
+  async setDefaultSignature(userId: string, signatureId: string, accountId?: string): Promise<void> {
+    // Clear all existing defaults for the user/account
+    const whereClause = accountId
+      ? and(eq(signatures.userId, userId), eq(signatures.accountId, accountId))
+      : eq(signatures.userId, userId);
+
+    await db
+      .update(signatures)
+      .set({ isDefault: false, updatedAt: new Date() })
+      .where(whereClause);
+
+    // Set the specified signature as default
+    await db
+      .update(signatures)
+      .set({ isDefault: true, updatedAt: new Date() })
+      .where(eq(signatures.id, signatureId));
+  }
+
+  async getDefaultSignature(userId: string, accountId?: string): Promise<Signature | undefined> {
+    const whereClause = accountId
+      ? and(
+          eq(signatures.userId, userId),
+          eq(signatures.accountId, accountId),
+          eq(signatures.isDefault, true),
+          eq(signatures.isActive, true)
+        )
+      : and(
+          eq(signatures.userId, userId),
+          eq(signatures.isDefault, true),
+          eq(signatures.isActive, true)
+        );
+
+    const [result] = await db
+      .select()
+      .from(signatures)
+      .where(whereClause)
+      .limit(1);
+
+    return result;
   }
 }
 
