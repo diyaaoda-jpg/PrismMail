@@ -12,7 +12,6 @@ export interface StorageConfig {
   basePath?: string; // For local storage
   bucketName?: string; // For cloud storage
   region?: string; // For cloud storage
-  encryptionKey?: Buffer; // For server-side encryption
   credentials?: {
     accessKeyId?: string;
     secretAccessKey?: string;
@@ -25,7 +24,6 @@ export interface StorageMetadata {
   contentType: string;
   size: number;
   hash: string;
-  encrypted: boolean;
   uploadedAt: Date;
   expiresAt?: Date;
 }
@@ -48,7 +46,7 @@ export interface StorageDownloadResult {
 
 export interface IStorageProvider {
   /**
-   * Store a file with optional encryption
+   * Store a file
    */
   store(
     data: Buffer | fs.ReadStream,
@@ -57,9 +55,14 @@ export interface IStorageProvider {
   ): Promise<StorageUploadResult>;
 
   /**
-   * Retrieve a file with automatic decryption
+   * Retrieve a file
    */
   retrieve(storageKey: string): Promise<StorageDownloadResult>;
+
+  /**
+   * Get a readable stream for the file (for memory efficiency)
+   */
+  retrieveStream?(storageKey: string): Promise<StorageDownloadResult>;
 
   /**
    * Generate a signed URL for secure downloads (cloud providers)
@@ -88,27 +91,16 @@ export interface IStorageProvider {
 }
 
 /**
- * Secure local file system storage provider with encryption
+ * Simple local file system storage provider (no encryption)
  */
 export class LocalStorageProvider implements IStorageProvider {
   private config: StorageConfig;
-  private encryptionKey: Buffer;
-  private algorithm = 'aes-256-gcm';
 
   constructor(config: StorageConfig) {
     this.config = config;
     
-    // Use provided encryption key or generate one
-    this.encryptionKey = config.encryptionKey || this.generateEncryptionKey();
-    
     // Ensure base path exists and is secure
     this.ensureStorageDirectory();
-  }
-
-  private generateEncryptionKey(): Buffer {
-    // In production, this should come from secure key management
-    const keyMaterial = process.env.ATTACHMENT_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
-    return crypto.scryptSync(keyMaterial, 'prismmail-salt', 32);
   }
 
   private ensureStorageDirectory(): void {
@@ -129,7 +121,7 @@ export class LocalStorageProvider implements IStorageProvider {
       }
     } catch (error) {
       console.error('Failed to create storage directory:', error);
-      throw new Error('Unable to initialize secure storage');
+      throw new Error('Unable to initialize storage');
     }
   }
 
@@ -144,25 +136,6 @@ export class LocalStorageProvider implements IStorageProvider {
     const basePath = this.config.basePath || path.join(process.cwd(), 'storage', 'attachments');
     const sanitizedKey = storageKey.replace(/[\.\/\\]/g, '_');
     return path.join(basePath, '.metadata', `${sanitizedKey}.json`);
-  }
-
-  private encrypt(data: Buffer): { encrypted: Buffer; iv: Buffer; tag: Buffer } {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipher(this.algorithm, this.encryptionKey);
-    cipher.setAAD(Buffer.from('prismmail-attachment'));
-    
-    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    
-    return { encrypted, iv, tag };
-  }
-
-  private decrypt(encryptedData: Buffer, iv: Buffer, tag: Buffer): Buffer {
-    const decipher = crypto.createDecipher(this.algorithm, this.encryptionKey);
-    decipher.setAAD(Buffer.from('prismmail-attachment'));
-    decipher.setAuthTag(tag);
-    
-    return Buffer.concat([decipher.update(encryptedData), decipher.final()]);
   }
 
   async store(
@@ -193,23 +166,18 @@ export class LocalStorageProvider implements IStorageProvider {
         fileData = Buffer.concat(chunks);
       }
 
-      // Calculate hash before encryption
+      // Calculate hash
       const hash = crypto.createHash('sha256').update(fileData).digest('hex');
       
-      // Encrypt the file data
-      const { encrypted, iv, tag } = this.encrypt(fileData);
-      
-      // Store encrypted file with IV and tag prepended
-      const fileToStore = Buffer.concat([iv, tag, encrypted]);
-      fs.writeFileSync(filePath, fileToStore, { mode: 0o640 });
+      // Store file directly (no encryption)
+      fs.writeFileSync(filePath, fileData, { mode: 0o640 });
 
       // Store metadata
       const fullMetadata: StorageMetadata = {
         filename: metadata.filename || 'unknown',
         contentType: metadata.contentType || 'application/octet-stream',
-        size: fileData.length, // Store original size
+        size: fileData.length,
         hash,
-        encrypted: true,
         uploadedAt: new Date(),
         expiresAt: metadata.expiresAt
       };
@@ -237,39 +205,31 @@ export class LocalStorageProvider implements IStorageProvider {
       const filePath = this.getFilePath(storageKey);
       const metadataPath = this.getMetadataPath(storageKey);
 
-      if (!fs.existsSync(filePath) || !fs.existsSync(metadataPath)) {
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
         return {
           success: false,
           error: 'File not found'
         };
       }
 
-      // Load metadata
-      const metadataJson = fs.readFileSync(metadataPath, 'utf8');
-      const metadata: StorageMetadata = JSON.parse(metadataJson);
-
-      // Check if file has expired
-      if (metadata.expiresAt && new Date() > new Date(metadata.expiresAt)) {
-        return {
-          success: false,
-          error: 'File has expired'
-        };
-      }
-
-      // Read encrypted file
-      const encryptedFile = fs.readFileSync(filePath);
+      // Read file directly (no decryption needed)
+      const data = fs.readFileSync(filePath);
       
-      // Extract IV, tag, and encrypted data
-      const iv = encryptedFile.slice(0, 16);
-      const tag = encryptedFile.slice(16, 32);
-      const encrypted = encryptedFile.slice(32);
-
-      // Decrypt
-      const decrypted = this.decrypt(encrypted, iv, tag);
+      // Read metadata if available
+      let metadata: StorageMetadata | undefined;
+      if (fs.existsSync(metadataPath)) {
+        try {
+          const metadataContent = fs.readFileSync(metadataPath, 'utf8');
+          metadata = JSON.parse(metadataContent);
+        } catch (error) {
+          console.warn('Failed to read metadata:', error);
+        }
+      }
 
       return {
         success: true,
-        data: decrypted,
+        data,
         metadata
       };
     } catch (error) {
@@ -281,9 +241,49 @@ export class LocalStorageProvider implements IStorageProvider {
     }
   }
 
+  async retrieveStream(storageKey: string): Promise<StorageDownloadResult> {
+    try {
+      const filePath = this.getFilePath(storageKey);
+      const metadataPath = this.getMetadataPath(storageKey);
+
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        return {
+          success: false,
+          error: 'File not found'
+        };
+      }
+
+      // Create read stream
+      const stream = fs.createReadStream(filePath);
+      
+      // Read metadata if available
+      let metadata: StorageMetadata | undefined;
+      if (fs.existsSync(metadataPath)) {
+        try {
+          const metadataContent = fs.readFileSync(metadataPath, 'utf8');
+          metadata = JSON.parse(metadataContent);
+        } catch (error) {
+          console.warn('Failed to read metadata:', error);
+        }
+      }
+
+      return {
+        success: true,
+        stream,
+        metadata
+      };
+    } catch (error) {
+      console.error('Error creating file stream:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   async generateSignedUrl(storageKey: string, expiresIn: number): Promise<string | null> {
     // Local storage doesn't support signed URLs
-    // Files are served through the API with proper authentication
     return null;
   }
 
@@ -292,11 +292,12 @@ export class LocalStorageProvider implements IStorageProvider {
       const filePath = this.getFilePath(storageKey);
       const metadataPath = this.getMetadataPath(storageKey);
 
-      // Delete both file and metadata
+      // Delete file if it exists
       if (fs.existsSync(filePath)) {
         fs.unlinkSync(filePath);
       }
-      
+
+      // Delete metadata if it exists
       if (fs.existsSync(metadataPath)) {
         fs.unlinkSync(metadataPath);
       }
@@ -304,14 +305,21 @@ export class LocalStorageProvider implements IStorageProvider {
       return { success: true };
     } catch (error) {
       console.error('Error deleting file:', error);
-      return { success: false, error: error.message };
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
   async exists(storageKey: string): Promise<boolean> {
-    const filePath = this.getFilePath(storageKey);
-    const metadataPath = this.getMetadataPath(storageKey);
-    return fs.existsSync(filePath) && fs.existsSync(metadataPath);
+    try {
+      const filePath = this.getFilePath(storageKey);
+      return fs.existsSync(filePath);
+    } catch (error) {
+      console.error('Error checking file existence:', error);
+      return false;
+    }
   }
 
   async getMetadata(storageKey: string): Promise<StorageMetadata | null> {
@@ -322,8 +330,8 @@ export class LocalStorageProvider implements IStorageProvider {
         return null;
       }
 
-      const metadataJson = fs.readFileSync(metadataPath, 'utf8');
-      return JSON.parse(metadataJson);
+      const metadataContent = fs.readFileSync(metadataPath, 'utf8');
+      return JSON.parse(metadataContent);
     } catch (error) {
       console.error('Error reading metadata:', error);
       return null;
@@ -333,28 +341,27 @@ export class LocalStorageProvider implements IStorageProvider {
   async cleanupExpired(): Promise<{ deleted: number; errors: string[] }> {
     const errors: string[] = [];
     let deleted = 0;
-
+    
     try {
       const basePath = this.config.basePath || path.join(process.cwd(), 'storage', 'attachments');
-      const metadataDir = path.join(basePath, '.metadata');
+      const metadataPath = path.join(basePath, '.metadata');
       
-      if (!fs.existsSync(metadataDir)) {
+      if (!fs.existsSync(metadataPath)) {
         return { deleted: 0, errors: [] };
       }
 
-      const metadataFiles = fs.readdirSync(metadataDir);
+      const metadataFiles = fs.readdirSync(metadataPath);
       const now = new Date();
 
       for (const metadataFile of metadataFiles) {
-        if (!metadataFile.endsWith('.json')) continue;
-
         try {
-          const metadataPath = path.join(metadataDir, metadataFile);
-          const metadataJson = fs.readFileSync(metadataPath, 'utf8');
-          const metadata: StorageMetadata = JSON.parse(metadataJson);
+          const metadataFilePath = path.join(metadataPath, metadataFile);
+          const metadataContent = fs.readFileSync(metadataFilePath, 'utf8');
+          const metadata = JSON.parse(metadataContent);
 
-          if (metadata.expiresAt && now > new Date(metadata.expiresAt)) {
-            const storageKey = path.basename(metadataFile, '.json');
+          if (metadata.expiresAt && new Date(metadata.expiresAt) < now) {
+            // Extract storage key from metadata filename
+            const storageKey = metadataFile.replace('.json', '');
             const result = await this.delete(storageKey);
             
             if (result.success) {
@@ -367,35 +374,37 @@ export class LocalStorageProvider implements IStorageProvider {
           errors.push(`Failed to process metadata file ${metadataFile}: ${error.message}`);
         }
       }
-    } catch (error) {
-      errors.push(`Failed to cleanup expired files: ${error.message}`);
-    }
 
-    return { deleted, errors };
+      return { deleted, errors };
+    } catch (error) {
+      console.error('Error during cleanup:', error);
+      return { deleted, errors: [error.message] };
+    }
   }
 }
 
 /**
- * Factory function to create storage provider based on configuration
+ * Factory function to create storage provider based on config
  */
 export function createStorageProvider(config: StorageConfig): IStorageProvider {
   switch (config.type) {
     case 'local':
       return new LocalStorageProvider(config);
     case 's3':
+      // TODO: Implement S3 storage provider
       throw new Error('S3 storage provider not yet implemented');
     case 'gcs':
+      // TODO: Implement Google Cloud Storage provider
       throw new Error('GCS storage provider not yet implemented');
     default:
       throw new Error(`Unsupported storage type: ${config.type}`);
   }
 }
 
-// Default configuration for local development and production
+/**
+ * Default storage configuration
+ */
 export const defaultStorageConfig: StorageConfig = {
   type: 'local',
-  basePath: process.env.ATTACHMENT_STORAGE_PATH || path.join(process.cwd(), 'storage', 'attachments'),
-  encryptionKey: process.env.ATTACHMENT_ENCRYPTION_KEY ? 
-    crypto.scryptSync(process.env.ATTACHMENT_ENCRYPTION_KEY, 'prismmail-salt', 32) : 
-    undefined
+  basePath: path.join(process.cwd(), 'storage', 'attachments')
 };

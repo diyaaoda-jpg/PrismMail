@@ -9,7 +9,7 @@ import { z } from "zod";
  * Enhanced secure attachment routes with comprehensive security
  * Features:
  * - Magic-number file type detection
- * - Mandatory virus scanning
+ * - Comprehensive input validation and sanitization
  * - Comprehensive quota enforcement
  * - Secure download with headers
  * - Rate limiting
@@ -140,31 +140,16 @@ export function setupAttachmentRoutes(app: Express): void {
           );
         }
 
-        // CRITICAL SECURITY: Check virus scanner availability BEFORE processing
+        // Service is always available since we removed external dependencies
         if (!enhancedAttachmentService.isServiceAvailable()) {
-          const healthInfo = enhancedAttachmentService.getServiceHealth();
-          
-          logSecurityEvent(userId, 'UPLOAD_BLOCKED_SCANNER_UNAVAILABLE', {
-            requestId,
-            healthInfo,
-            fileCount: req.files?.length || 0,
-            userAgent: req.headers['user-agent']
-          }, 'error');
-          
           return res.status(503).json({
             success: false,
             error: {
-              code: 'VIRUS_SCANNER_UNAVAILABLE',
-              message: 'File uploads are temporarily unavailable due to security service maintenance',
-              details: 'Virus scanning service is not operational',
-              timestamp: new Date().toISOString(),
-              retryAfter: '60' // Suggest retry after 60 seconds
+              code: 'SERVICE_UNAVAILABLE',
+              message: 'Attachment service is temporarily unavailable',
+              timestamp: new Date().toISOString()
             },
-            requestId,
-            serviceHealth: {
-              available: healthInfo.available,
-              environment: healthInfo.environment
-            }
+            requestId
           });
         }
 
