@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertPriorityRuleSchema, insertVipContactSchema, insertUserPrefsSchema, updatePriorityRuleSchema, updateVipContactSchema, updateUserPrefsSchema, reorderRulesSchema, insertMailDraftSchema, insertMailSentSchema } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertPriorityRuleSchema, insertVipContactSchema, insertUserPrefsSchema, updatePriorityRuleSchema, updateVipContactSchema, updateUserPrefsSchema, reorderRulesSchema, insertMailDraftSchema, insertMailSentSchema, attachmentUploadRequestSchema, attachmentDownloadSchema, insertEmailAttachmentSchema } from "@shared/schema";
 import { apiRateLimiter, strictRateLimiter, composeRateLimiter } from "./middleware/security";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
@@ -16,6 +16,10 @@ import { messageFormatter } from "./services/messageFormatter";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { enhancedAttachmentService as attachmentService } from "./services/enhancedAttachmentService";
 
 /**
  * Map folder types to icon names for frontend display
@@ -96,7 +100,16 @@ const ErrorCodes = {
   
   // Email sending errors
   EMAIL_SEND_FAILED: 'EMAIL_SEND_FAILED',
-  EMAIL_VALIDATION_FAILED: 'EMAIL_VALIDATION_FAILED'
+  EMAIL_VALIDATION_FAILED: 'EMAIL_VALIDATION_FAILED',
+  
+  // Attachment errors
+  ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND',
+  ATTACHMENT_UPLOAD_FAILED: 'ATTACHMENT_UPLOAD_FAILED',
+  ATTACHMENT_DOWNLOAD_FAILED: 'ATTACHMENT_DOWNLOAD_FAILED',
+  ATTACHMENT_SIZE_EXCEEDED: 'ATTACHMENT_SIZE_EXCEEDED',
+  ATTACHMENT_TYPE_NOT_ALLOWED: 'ATTACHMENT_TYPE_NOT_ALLOWED',
+  ATTACHMENT_VIRUS_DETECTED: 'ATTACHMENT_VIRUS_DETECTED',
+  ATTACHMENT_ACCESS_DENIED: 'ATTACHMENT_ACCESS_DENIED'
 } as const;
 
 /**
@@ -2523,6 +2536,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleApiError(error, res, 'GET /api/sent-emails', requestId);
     }
   });
+
+  // NOTE: Secure attachment routes are handled via setupAttachmentRoutes() 
+  // in server/attachmentRoutes.ts to ensure comprehensive security features
+  // *** ALL INSECURE ATTACHMENT ROUTES REMOVED - ONLY SECURE ROUTES VIA attachmentRoutes.ts ***
 
   // Global error handler for unhandled errors
   app.use((error: any, req: any, res: any, next: any) => {

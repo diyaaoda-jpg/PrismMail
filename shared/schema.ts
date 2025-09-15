@@ -167,6 +167,55 @@ export const priorityAnalytics = pgTable("priority_analytics", {
   index("idx_analytics_user_period").on(table.userId, table.metricType, table.periodStart),
 ]);
 
+// Enhanced Email Attachments table for comprehensive attachment management
+export const emailAttachments = pgTable("email_attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  accountId: varchar("account_id").references(() => accountConnections.id, { onDelete: "cascade" }),
+  // File metadata
+  filename: varchar("filename").notNull(), // Sanitized filename for storage
+  originalName: varchar("original_name").notNull(), // Original filename from user
+  mimeType: varchar("mime_type").notNull(),
+  size: integer("size").notNull(), // File size in bytes
+  fileHash: varchar("file_hash"), // SHA-256 hash for deduplication and integrity
+  // Storage information
+  storagePath: varchar("storage_path").notNull(), // Secure path where file is stored (legacy)
+  storageKey: varchar("storage_key"), // New storage abstraction key
+  uploadToken: varchar("upload_token"), // Temporary token for upload verification
+  // Relationships and associations
+  messageId: varchar("message_id").references(() => mailIndex.id, { onDelete: "set null" }),
+  draftId: varchar("draft_id").references(() => mailDrafts.id, { onDelete: "cascade" }),
+  sentEmailId: varchar("sent_email_id").references(() => mailSent.id, { onDelete: "set null" }),
+  // Security and tracking
+  virusScanStatus: varchar("virus_scan_status", {
+    enum: ["pending", "clean", "infected", "error", "skipped"]
+  }).default("pending"),
+  virusScanResult: text("virus_scan_result"), // Detailed scan result if applicable
+  virusScanEngine: varchar("virus_scan_engine"), // Which scanner was used (ClamAV, etc.)
+  detectedType: varchar("detected_type"), // Actual MIME type detected by magic numbers
+  securityRisk: varchar("security_risk"), // Security risk classification
+  downloadCount: integer("download_count").default(0),
+  lastDownloaded: timestamp("last_downloaded"),
+  // Status and lifecycle
+  isActive: boolean("is_active").default(true), // Soft delete capability
+  isOrphaned: boolean("is_orphaned").default(false), // Mark orphaned attachments for cleanup
+  expiresAt: timestamp("expires_at"), // Optional expiration for temporary attachments
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [
+  // Security index for user ownership verification
+  index("idx_attachments_user_security").on(table.userId, table.id),
+  // Performance index for draft/message associations
+  index("idx_attachments_draft").on(table.draftId, table.isActive),
+  index("idx_attachments_message").on(table.messageId, table.isActive),
+  // Cleanup index for orphaned attachments
+  index("idx_attachments_cleanup").on(table.isOrphaned, table.expiresAt, table.createdAt),
+  // Deduplication index
+  index("idx_attachments_dedup").on(table.fileHash, table.userId),
+  // Virus scan status index
+  index("idx_attachments_virus_scan").on(table.virusScanStatus, table.createdAt),
+]);
+
 // Account folders catalog
 export const accountFolders = pgTable("account_folders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -664,6 +713,8 @@ export type MailDraft = typeof mailDrafts.$inferSelect;
 export type InsertMailDraft = z.infer<typeof insertMailDraftSchema>;
 export type MailSent = typeof mailSent.$inferSelect;
 export type InsertMailSent = z.infer<typeof insertMailSentSchema>;
+export type EmailAttachment = typeof emailAttachments.$inferSelect;
+export type InsertEmailAttachment = z.infer<typeof insertEmailAttachmentSchema>;
 
 // Email composition schemas and types
 export const sendEmailRequestSchema = z.object({
@@ -692,7 +743,117 @@ export const sendEmailResponseSchema = z.object({
 export type SendEmailRequest = z.infer<typeof sendEmailRequestSchema>;
 export type SendEmailResponse = z.infer<typeof sendEmailResponseSchema>;
 
-export interface EmailAttachment {
+// Attachment validation schemas
+export const insertEmailAttachmentSchema = createInsertSchema(emailAttachments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  uploadToken: true,
+  fileHash: true,
+  virusScanStatus: true,
+  virusScanResult: true,
+  downloadCount: true,
+  lastDownloaded: true,
+  isOrphaned: true,
+}).extend({
+  filename: z.string()
+    .min(1, "Filename is required")
+    .max(255, "Filename is too long")
+    .refine(
+      (filename) => {
+        // Sanitize filename - allow only safe characters
+        const safeFilenameRegex = /^[a-zA-Z0-9._\-\s()]+$/;
+        return safeFilenameRegex.test(filename);
+      },
+      "Filename contains invalid characters. Only letters, numbers, periods, hyphens, underscores, spaces, and parentheses are allowed"
+    ),
+  originalName: z.string()
+    .min(1, "Original filename is required")
+    .max(255, "Original filename is too long"),
+  mimeType: z.string()
+    .min(1, "MIME type is required")
+    .refine(
+      (mimeType) => {
+        // Whitelist of allowed MIME types for security
+        const allowedTypes = [
+          // Documents
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'text/plain',
+          'text/csv',
+          'application/json',
+          'application/xml',
+          'text/xml',
+          // Images
+          'image/jpeg',
+          'image/png',
+          'image/gif',
+          'image/bmp',
+          'image/webp',
+          'image/svg+xml',
+          'image/tiff',
+          // Archives (commonly needed)
+          'application/zip',
+          'application/x-rar-compressed',
+          'application/x-7z-compressed',
+          // Other common types
+          'application/rtf',
+          'text/calendar' // .ics files
+        ];
+        return allowedTypes.includes(mimeType.toLowerCase());
+      },
+      "File type not allowed. Please upload documents, images, or common archive files only"
+    ),
+  size: z.number()
+    .int("File size must be a whole number")
+    .min(1, "File size must be greater than 0")
+    .max(26214400, "File size cannot exceed 25MB"), // 25MB limit per file
+  storagePath: z.string()
+    .min(1, "Storage path is required")
+    .max(500, "Storage path is too long"),
+});
+
+// Enhanced attachment upload request schema
+export const attachmentUploadRequestSchema = z.object({
+  accountId: z.string().min(1, "Account ID is required"),
+  draftId: z.string().optional(), // Optional association with draft
+  files: z.array(z.object({
+    fieldname: z.string(),
+    originalname: z.string(),
+    encoding: z.string(),
+    mimetype: z.string(),
+    size: z.number(),
+    buffer: z.instanceof(Buffer).optional(),
+    destination: z.string().optional(),
+    filename: z.string().optional(),
+    path: z.string().optional()
+  })).min(1, "At least one file is required").max(10, "Cannot upload more than 10 files at once")
+}).refine(
+  (data) => {
+    // Total size validation across all files (100MB total limit)
+    const totalSize = data.files.reduce((sum, file) => sum + file.size, 0);
+    return totalSize <= 104857600; // 100MB total limit
+  },
+  "Total file size cannot exceed 100MB"
+);
+
+// Attachment download response schema
+export const attachmentDownloadSchema = z.object({
+  id: z.string().min(1, "Attachment ID is required"),
+  userId: z.string().min(1, "User ID is required"),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+  downloadToken: z.string().optional() // Optional secure download token
+});
+
+// Legacy interface for backward compatibility
+export interface LegacyEmailAttachment {
   filename: string;
   content: string; // Base64 encoded
   contentType: string;

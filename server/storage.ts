@@ -29,6 +29,9 @@ import {
   type InsertMailDraft,
   type MailSent,
   type InsertMailSent,
+  type EmailAttachment,
+  type InsertEmailAttachment,
+  emailAttachments,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
@@ -129,6 +132,18 @@ export interface IStorage {
   updateSentEmailStatus(id: string, status: string, deliveryError?: string): Promise<MailSent | undefined>;
   // Contact suggestions for autocomplete
   getContactSuggestions(userId: string, query: string, limit?: number): Promise<Array<{email: string, name?: string, source: string}>>;
+  // Enhanced Email attachment operations
+  getEmailAttachments(userId: string, draftId?: string, messageId?: string, limit?: number, offset?: number): Promise<EmailAttachment[]>;
+  getEmailAttachmentWithOwnership(attachmentId: string, userId: string): Promise<EmailAttachment | undefined>;
+  getEmailAttachmentById(attachmentId: string): Promise<EmailAttachment | undefined>;
+  createEmailAttachment(attachment: InsertEmailAttachment): Promise<EmailAttachment>;
+  updateEmailAttachment(id: string, updates: Partial<EmailAttachment>): Promise<EmailAttachment | undefined>;
+  deleteEmailAttachment(id: string): Promise<void>;
+  getAttachmentsByDraft(draftId: string, userId: string): Promise<EmailAttachment[]>;
+  getAttachmentsByMessage(messageId: string, userId: string): Promise<EmailAttachment[]>;
+  getOrphanedEmailAttachments(limit?: number): Promise<EmailAttachment[]>;
+  bulkDeleteEmailAttachments(attachmentIds: string[], userId: string): Promise<{ deleted: number; errors: string[] }>;
+  getAttachmentStats(userId: string): Promise<{ totalCount: number; totalSize: number; avgSize: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1173,6 +1188,148 @@ export class DatabaseStorage implements IStorage {
     }
 
     return suggestions.slice(0, limit);
+  }
+
+  // Enhanced Email attachment operations
+  async getEmailAttachments(userId: string, draftId?: string, messageId?: string, limit?: number, offset?: number): Promise<EmailAttachment[]> {
+    let query = db.select().from(emailAttachments).where(and(
+      eq(emailAttachments.userId, userId),
+      eq(emailAttachments.isActive, true)
+    ));
+
+    if (draftId) {
+      query = query.where(eq(emailAttachments.draftId, draftId));
+    }
+    
+    if (messageId) {
+      query = query.where(eq(emailAttachments.messageId, messageId));
+    }
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    if (offset) {
+      query = query.offset(offset);
+    }
+
+    query = query.orderBy(emailAttachments.createdAt);
+
+    return await query;
+  }
+
+  async getEmailAttachmentWithOwnership(attachmentId: string, userId: string): Promise<EmailAttachment | undefined> {
+    const [attachment] = await db.select().from(emailAttachments).where(
+      and(
+        eq(emailAttachments.id, attachmentId),
+        eq(emailAttachments.userId, userId),
+        eq(emailAttachments.isActive, true)
+      )
+    );
+    return attachment;
+  }
+
+  async getEmailAttachmentById(attachmentId: string): Promise<EmailAttachment | undefined> {
+    const [attachment] = await db.select().from(emailAttachments).where(
+      and(
+        eq(emailAttachments.id, attachmentId),
+        eq(emailAttachments.isActive, true)
+      )
+    );
+    return attachment;
+  }
+
+  async createEmailAttachment(attachment: InsertEmailAttachment): Promise<EmailAttachment> {
+    const [created] = await db.insert(emailAttachments).values(attachment).returning();
+    return created;
+  }
+
+  async updateEmailAttachment(id: string, updates: Partial<EmailAttachment>): Promise<EmailAttachment | undefined> {
+    const [updated] = await db
+      .update(emailAttachments)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(emailAttachments.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteEmailAttachment(id: string): Promise<void> {
+    // Soft delete by setting isActive to false
+    await db
+      .update(emailAttachments)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(emailAttachments.id, id));
+  }
+
+  async getAttachmentsByDraft(draftId: string, userId: string): Promise<EmailAttachment[]> {
+    return await db.select().from(emailAttachments).where(
+      and(
+        eq(emailAttachments.draftId, draftId),
+        eq(emailAttachments.userId, userId),
+        eq(emailAttachments.isActive, true)
+      )
+    ).orderBy(emailAttachments.createdAt);
+  }
+
+  async getAttachmentsByMessage(messageId: string, userId: string): Promise<EmailAttachment[]> {
+    return await db.select().from(emailAttachments).where(
+      and(
+        eq(emailAttachments.messageId, messageId),
+        eq(emailAttachments.userId, userId),
+        eq(emailAttachments.isActive, true)
+      )
+    ).orderBy(emailAttachments.createdAt);
+  }
+
+  async getOrphanedEmailAttachments(limit = 100): Promise<EmailAttachment[]> {
+    const now = new Date();
+    return await db.select().from(emailAttachments).where(
+      and(
+        eq(emailAttachments.isOrphaned, true),
+        eq(emailAttachments.isActive, true),
+        sql`${emailAttachments.expiresAt} < ${now}`
+      )
+    ).limit(limit);
+  }
+
+  async bulkDeleteEmailAttachments(attachmentIds: string[], userId: string): Promise<{ deleted: number; errors: string[] }> {
+    const errors: string[] = [];
+    let deleted = 0;
+
+    for (const id of attachmentIds) {
+      try {
+        // Verify ownership before deletion
+        const attachment = await this.getEmailAttachmentWithOwnership(id, userId);
+        if (attachment) {
+          await this.deleteEmailAttachment(id);
+          deleted++;
+        } else {
+          errors.push(`Attachment ${id} not found or access denied`);
+        }
+      } catch (error) {
+        errors.push(`Failed to delete attachment ${id}: ${error.message}`);
+      }
+    }
+
+    return { deleted, errors };
+  }
+
+  async getAttachmentStats(userId: string): Promise<{ totalCount: number; totalSize: number; avgSize: number }> {
+    const result = await db
+      .select({
+        totalCount: sql<number>`count(*)`,
+        totalSize: sql<number>`coalesce(sum(${emailAttachments.size}), 0)`,
+        avgSize: sql<number>`coalesce(avg(${emailAttachments.size}), 0)`
+      })
+      .from(emailAttachments)
+      .where(
+        and(
+          eq(emailAttachments.userId, userId),
+          eq(emailAttachments.isActive, true)
+        )
+      );
+
+    return result[0] || { totalCount: 0, totalSize: 0, avgSize: 0 };
   }
 }
 

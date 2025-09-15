@@ -4,6 +4,7 @@ import { IncomingMessage } from "http";
 import { parse as parseCookie } from "cookie";
 import { parse as parseUrl } from "url";
 import { registerRoutes } from "./routes";
+import { setupAttachmentRoutes } from "./attachmentRoutes";
 import { setupVite, serveStatic, log } from "./vite";
 import { initializeEwsPushNotifications } from "./ewsPushNotifications";
 import { initializeEwsStreamingService } from "./ewsStreaming";
@@ -43,6 +44,9 @@ app.use(express.urlencoded({ extended: false }));
     process.exit(1);
   }
   const server = await registerRoutes(app);
+  
+  // Setup enhanced attachment routes with comprehensive security
+  setupAttachmentRoutes(app);
   
   // Interface for authenticated WebSocket connections
   interface AuthenticatedWebSocket {
