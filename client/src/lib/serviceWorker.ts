@@ -124,6 +124,15 @@ class ServiceWorkerManager {
     navigator.serviceWorker.controller.postMessage(message);
   }
 
+  sendMessageWithPort(message: ServiceWorkerMessage, port: MessagePort): void {
+    if (!navigator.serviceWorker.controller) {
+      console.warn('[SW Manager] No active service worker to send message to');
+      return;
+    }
+
+    navigator.serviceWorker.controller.postMessage(message, [port]);
+  }
+
   // Queue an action for offline execution
   queueOfflineAction(action: OfflineAction): void {
     console.log('[SW Manager] Queueing offline action:', action.type);
@@ -135,16 +144,23 @@ class ServiceWorkerManager {
 
   // Cache management methods
   async getCacheStatus(): Promise<CacheStatus> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const channel = new MessageChannel();
+      const timeout = setTimeout(() => {
+        reject(new Error('Cache status request timeout'));
+      }, 5000);
       
       channel.port1.onmessage = (event) => {
+        clearTimeout(timeout);
         if (event.data.type === 'CACHE_STATUS') {
           resolve(event.data.data);
+        } else if (event.data.type === 'ERROR') {
+          reject(new Error(event.data.message));
         }
       };
 
-      this.sendMessage({ type: 'GET_CACHE_STATUS' });
+      // Pass port2 to the service worker for response
+      this.sendMessageWithPort({ type: 'GET_CACHE_STATUS' }, channel.port2);
     });
   }
 
@@ -154,6 +170,25 @@ class ServiceWorkerManager {
       type: 'CLEAR_CACHE',
       data: { cacheType }
     });
+  }
+
+  // Security-focused cache management
+  purgeUserCache(userId?: string): void {
+    console.log('[SW Manager] Purging user cache:', userId);
+    this.sendMessage({
+      type: 'PURGE_USER_CACHE',
+      data: { userId }
+    });
+  }
+
+  purgeOnLogout(): void {
+    console.log('[SW Manager] Purging cache on logout');
+    this.sendMessage({ type: 'PURGE_ON_LOGOUT' });
+  }
+
+  clearSensitiveCache(): void {
+    console.log('[SW Manager] Clearing sensitive cache');
+    this.sendMessage({ type: 'CLEAR_SENSITIVE_CACHE' });
   }
 
   prefetchEmails(emails: any[]): void {
