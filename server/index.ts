@@ -27,20 +27,16 @@ const app = express();
 // Set trust proxy for external domain access (Replit hosting)
 app.set('trust proxy', 1);
 
-// CRITICAL FIX: Setup Vite FIRST before any security middleware
-// This ensures Vite handles "/" and assets before security intercepts them
-const server = createServer(app);
-if (config.server.nodeEnv === 'development') {
-  await setupVite(app, server);
-  log('🎯 CRITICAL FIX: Vite middleware setup BEFORE security - ensuring browser access works');
-}
-
-// Initialize production-grade architecture AFTER Vite
+// Initialize production-grade architecture FIRST
 const architectureIntegration = new ArchitectureIntegration(app);
 
-// Basic middleware (after Vite, before architecture integration)
+// Basic middleware (before routes)
 app.use(express.json({ limit: config.performance.requestTimeout ? '10mb' : '1mb' }));
 app.use(express.urlencoded({ extended: false }));
+
+// CRITICAL FIX: Register ALL API routes BEFORE Vite setup
+// This ensures API routes get priority over Vite's catch-all
+const server = createServer(app);
 
 (async () => {
   try {
@@ -57,10 +53,16 @@ app.use(express.urlencoded({ extended: false }));
     logger.error('Failed to initialize production-grade architecture', { error: error as Error });
     process.exit(1);
   }
-  const server = await registerRoutes(app);
+  await registerRoutes(app);
   
   // Setup enhanced attachment routes with comprehensive security
   setupAttachmentRoutes(app);
+
+  // ARCHITECT FIX: Setup Vite AFTER routes but BEFORE 404 fallback
+  if (config.server.nodeEnv === 'development') {
+    await setupVite(app, server);
+    log('🎯 ARCHITECT FIX: Vite setup in correct position - after routes, before 404');
+  }
 
   // Health check endpoints are already handled in registerRoutes()
 
@@ -388,7 +390,7 @@ app.use(express.urlencoded({ extended: false }));
       process.on('SIGINT', () => gracefulShutdown('SIGINT'));
       process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
       
-      // Vite already setup earlier in middleware stack - no need to duplicate
+      // FINAL FIX: Vite setup removed from here - will be called before 404 fallback
       
       log('Vite development server initialized with permanent exit protection');
       log('Use Ctrl+C (SIGINT) or SIGTERM for graceful shutdown', 'vite-protection');
