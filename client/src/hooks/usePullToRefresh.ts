@@ -424,7 +424,7 @@ export function usePullToRefresh(
   }, [pullState.state, pullState.progress, finalConfig]);
 
   // Event handlers - memoized to prevent recreating on every render
-  const handlers = useMemo(() => ({
+  const handlers = React.useMemo(() => ({
     onTouchStart: handleStart as (event: TouchEvent) => void,
     onTouchMove: handleMove as (event: TouchEvent) => void,
     onTouchEnd: handleEnd as (event: TouchEvent) => void,
