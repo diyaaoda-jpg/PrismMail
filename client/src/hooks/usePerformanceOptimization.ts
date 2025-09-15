@@ -3,7 +3,7 @@ import { performanceMonitor } from '@/lib/performanceMonitor';
 
 // Custom hook for performance optimization across components
 export function usePerformanceOptimization(componentName: string) {
-  const renderStartTime = useRef<number>(performance.now());
+  const renderStartTime = React.useRef<number>(performance.now());
   const [isOptimized, setIsOptimized] = React.useState(false);
 
   // Monitor component render performance
@@ -88,8 +88,8 @@ export function useIntersectionObserver(
   callback: (entries: IntersectionObserverEntry[]) => void,
   options: IntersectionObserverInit = {}
 ) {
-  const targetRef = useRef<HTMLElement>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
+  const targetRef = React.useRef<HTMLElement>(null);
+  const observerRef = React.useRef<IntersectionObserver | null>(null);
   const callbackRef = React.useRef(callback);
   const optionsRef = React.useRef(options);
 
@@ -154,7 +154,7 @@ export function useOptimizedScroll(
 // Hook for managing component visibility for performance
 export function useComponentVisibility() {
   const [isVisible, setIsVisible] = React.useState(true);
-  const elementRef = useRef<HTMLElement>(null);
+  const elementRef = React.useRef<HTMLElement>(null);
 
   React.useEffect(() => {
     if (!elementRef.current || !('IntersectionObserver' in window)) {
@@ -208,7 +208,7 @@ export function useOptimizedState<T>(
 
 // Hook for managing background tasks efficiently
 export function useBackgroundTask() {
-  const tasksRef = useRef<Array<() => void>>([]);
+  const tasksRef = React.useRef<Array<() => void>>([]);
   const isProcessing = React.useRef(false);
 
   const scheduleTask = React.useCallback((task: () => void) => {

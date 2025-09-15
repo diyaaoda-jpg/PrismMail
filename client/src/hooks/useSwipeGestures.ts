@@ -84,11 +84,11 @@ const DEFAULT_CONFIG: SwipeConfig = {
 };
 
 export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipeGesturesReturn {
-  const startPointRef = useRef<TouchPoint | null>(null);
-  const currentPointRef = useRef<TouchPoint | null>(null);
-  const elementRef = useRef<HTMLElement | null>(null);
+  const startPointRef = React.useRef<TouchPoint | null>(null);
+  const currentPointRef = React.useRef<TouchPoint | null>(null);
+  const elementRef = React.useRef<HTMLElement | null>(null);
   const isActiveRef = React.useRef(false);
-  const rafRef = useRef<number | null>(null);
+  const rafRef = React.useRef<number | null>(null);
   
   // State for component re-renders and animations
   const [swipeState, setSwipeState] = React.useState<SwipeState>({

@@ -1,7 +1,7 @@
 // Offline Status Hook
 // Provides online/offline status and offline queue management
 
-import { useState, useEffect, useCallback } from 'react';
+import * as React from 'react';
 import serviceWorkerManager, { type OfflineAction } from '@/lib/serviceWorker';
 import { useToast } from '@/hooks/use-toast';
 
@@ -13,7 +13,7 @@ export interface OfflineStatus {
 }
 
 export function useOfflineStatus() {
-  const [status, setStatus] = useState<OfflineStatus>({
+  const [status, setStatus] = React.useState<OfflineStatus>({
     isOnline: serviceWorkerManager.getOnlineStatus(),
     isOfflineCapable: !!navigator.serviceWorker,
     hasQueuedActions: false,
@@ -22,7 +22,7 @@ export function useOfflineStatus() {
   
   const { toast } = useToast();
 
-  useEffect(() => {
+  React.useEffect(() => {
     // Listen for online/offline changes
     const unsubscribeOnline = serviceWorkerManager.addOnlineListener((online) => {
       setStatus(prev => ({ ...prev, isOnline: online }));
@@ -66,7 +66,7 @@ export function useOfflineStatus() {
     };
   }, [toast]);
 
-  const queueAction = useCallback((action: OfflineAction) => {
+  const queueAction = React.useCallback((action: OfflineAction) => {
     serviceWorkerManager.queueOfflineAction(action);
     setStatus(prev => ({ ...prev, hasQueuedActions: true }));
     
@@ -79,7 +79,7 @@ export function useOfflineStatus() {
     }
   }, [status.isOnline, toast]);
 
-  const clearCache = useCallback((cacheType?: string) => {
+  const clearCache = React.useCallback((cacheType?: string) => {
     serviceWorkerManager.clearCache(cacheType || 'all');
     toast({
       title: "Cache Cleared",
@@ -88,7 +88,7 @@ export function useOfflineStatus() {
     });
   }, [toast]);
 
-  const updateServiceWorker = useCallback(() => {
+  const updateServiceWorker = React.useCallback(() => {
     serviceWorkerManager.skipWaiting();
   }, []);
 

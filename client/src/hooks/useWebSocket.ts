@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 
 interface WebSocketMessage {
@@ -17,13 +17,13 @@ interface UseWebSocketReturn {
 }
 
 export function useWebSocket(): UseWebSocketReturn {
-  const ws = useRef<WebSocket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const reconnectAttempts = useRef<number>(0);
+  const ws = React.useRef<WebSocket | null>(null);
+  const [isConnected, setIsConnected] = React.useState(false);
+  const [lastMessage, setLastMessage] = React.useState<WebSocketMessage | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const reconnectAttempts = React.useRef<number>(0);
   const maxReconnectAttempts = 5;
-  const pingInterval = useRef<NodeJS.Timeout | null>(null);
+  const pingInterval = React.useRef<NodeJS.Timeout | null>(null);
 
   // Get current user for authentication
   const { data: user } = useQuery<{data: {id: string; email: string}}>({
@@ -31,14 +31,14 @@ export function useWebSocket(): UseWebSocketReturn {
   });
 
   // Send message to WebSocket server
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = React.useCallback((message: any) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message));
     }
   }, []);
 
   // Debounced reconnection logic
-  const scheduleReconnect = useCallback(() => {
+  const scheduleReconnect = React.useCallback(() => {
     if (reconnectAttempts.current >= maxReconnectAttempts) {
       console.log('Max WebSocket reconnection attempts reached');
       setError('Unable to maintain WebSocket connection. Please refresh the page.');
@@ -55,7 +55,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }, delay);
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = React.useCallback(() => {
     if (!user?.data?.id) {
       console.log('WebSocket connection skipped: User not authenticated');
       return;
@@ -138,7 +138,7 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, [user?.data?.id, sendMessage, scheduleReconnect]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (user?.data?.id) {
       connect();
     }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import * as React from "react";
 import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,11 +80,11 @@ export function MailSidebar({
   const { isMobile, isTablet, isDesktop, isXl, currentBreakpoint } = useBreakpoint();
   const hasTouchInterface = useHasTouchInterface();
   
-  const [searchQuery, setSearchQuery] = useState('');
-  const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
-  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
-  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = useState(true);
-  const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [allAccountsExpanded, setAllAccountsExpanded] = React.useState(true);
+  const [smartFoldersExpanded, setSmartFoldersExpanded] = React.useState(false);
+  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = React.useState(true);
+  const [individualAccountsExpanded, setIndividualAccountsExpanded] = React.useState<Record<string, boolean>>(
     accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
   );
 

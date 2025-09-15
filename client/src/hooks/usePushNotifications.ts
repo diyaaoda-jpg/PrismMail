@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
@@ -48,14 +48,14 @@ export interface UsePushNotificationsReturn {
 }
 
 export function usePushNotifications(): UsePushNotificationsReturn {
-  const [permission, setPermission] = useState<NotificationPermission>('default');
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [permission, setPermission] = React.useState<NotificationPermission>('default');
+  const [isSubscribed, setIsSubscribed] = React.useState(false);
+  const [subscriptionLoading, setSubscriptionLoading] = React.useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   
   // Service worker registration reference
-  const swRegistration = useRef<ServiceWorkerRegistration | null>(null);
+  const swRegistration = React.useRef<ServiceWorkerRegistration | null>(null);
   
   // Check if push notifications are supported
   const isSupported = Boolean(
@@ -90,7 +90,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   });
 
   // Initialize push notifications on component mount
-  useEffect(() => {
+  React.useEffect(() => {
     if (!isSupported) {
       console.log('[Push] Push notifications not supported');
       return;
@@ -100,7 +100,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   }, [isSupported]);
 
   // Monitor permission changes
-  useEffect(() => {
+  React.useEffect(() => {
     if (!isSupported) return;
 
     const checkPermission = () => {
@@ -130,7 +130,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   }, [isSupported]);
 
   // Initialize push notifications system
-  const initializePushNotifications = useCallback(async () => {
+  const initializePushNotifications = React.useCallback(async () => {
     try {
       // Get service worker registration
       if ('serviceWorker' in navigator) {
@@ -153,7 +153,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   }, []);
 
   // Check current subscription status
-  const checkSubscriptionStatus = useCallback(async () => {
+  const checkSubscriptionStatus = React.useCallback(async () => {
     try {
       if (!swRegistration.current) {
         console.warn('[Push] Service worker not ready');
@@ -171,7 +171,7 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   }, []);
 
   // Request notification permission
-  const requestPermission = useCallback(async (): Promise<boolean> => {
+  const requestPermission = React.useCallback(async (): Promise<boolean> => {
     try {
       if (!isSupported) {
         toast({
@@ -457,23 +457,23 @@ export function usePushNotifications(): UsePushNotificationsReturn {
   });
 
   // Utility functions
-  const subscribe = useCallback(() => subscribeMutation.mutateAsync(), [subscribeMutation]);
-  const unsubscribe = useCallback(() => unsubscribeMutation.mutateAsync(), [unsubscribeMutation]);
-  const updateGlobalPreferences = useCallback(
+  const subscribe = React.useCallback(() => subscribeMutation.mutateAsync(), [subscribeMutation]);
+  const unsubscribe = React.useCallback(() => unsubscribeMutation.mutateAsync(), [unsubscribeMutation]);
+  const updateGlobalPreferences = React.useCallback(
     (prefs: Partial<UpdateNotificationPreferencesRequest>) => 
       updateGlobalPreferencesMutation.mutateAsync(prefs),
     [updateGlobalPreferencesMutation]
   );
-  const updateAccountPreferences = useCallback(
+  const updateAccountPreferences = React.useCallback(
     (prefs: UpdateAccountNotificationPreferencesRequest) => 
       updateAccountPreferencesMutation.mutateAsync(prefs),
     [updateAccountPreferencesMutation]
   );
-  const testNotification = useCallback(
+  const testNotification = React.useCallback(
     () => testNotificationMutation.mutateAsync(),
     [testNotificationMutation]
   );
-  const refreshPreferences = useCallback(
+  const refreshPreferences = React.useCallback(
     () => refetchPreferences(),
     [refetchPreferences]
   );

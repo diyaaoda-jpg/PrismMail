@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { LazyRouteWrapper, createLazyRoute } from "@/components/LazyRouteWrapper";
 import { performanceMonitor } from "@/lib/performanceMonitor";
-import { useEffect } from "react";
+import * as React from "react";
 
 // Lazy-loaded route components for optimal bundle splitting
 const LazyLanding = createLazyRoute(
@@ -29,7 +29,7 @@ function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
   // Preload routes based on authentication state for better UX
-  useEffect(() => {
+  React.useEffect(() => {
     if (isAuthenticated) {
       // Preload Home route when authenticated
       import("@/pages/Home").catch(console.warn);
@@ -67,7 +67,7 @@ function Router() {
 
 function App() {
   // Initialize performance monitoring
-  useEffect(() => {
+  React.useEffect(() => {
     // Start performance monitoring
     console.log('[App] Performance monitoring initialized');
     
