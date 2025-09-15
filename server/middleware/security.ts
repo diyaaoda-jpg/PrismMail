@@ -301,21 +301,22 @@ export function securityHeaders() {
     const cspDirectives = [
       "default-src 'self'",
       isDevelopment 
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" // Relaxed for development
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://replit.com" // Allow Replit dev banner
         : "script-src 'self'", // Strict for production
       isDevelopment
-        ? "style-src 'self' 'unsafe-inline'"
+        ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" // Allow Google Fonts
         : "style-src 'self' 'sha256-HASH-HERE'", // Use specific hashes in production
       "img-src 'self' data: blob: https:",
-      "font-src 'self' https:",
+      isDevelopment
+        ? "font-src 'self' https: https://fonts.gstatic.com" // Allow Google Fonts
+        : "font-src 'self' https:",
       "connect-src 'self' ws: wss:",
       "media-src 'self'",
       "object-src 'none'",
       "base-uri 'self'",
       "form-action 'self'",
       "frame-ancestors 'none'",
-      "upgrade-insecure-requests",
-      "block-all-mixed-content"
+      ...(isDevelopment ? [] : ["upgrade-insecure-requests", "block-all-mixed-content"]) // Remove strict rules in dev
     ];
     
     res.setHeader('Content-Security-Policy', cspDirectives.join('; '));

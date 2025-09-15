@@ -60,6 +60,10 @@ const server = createServer(app);
 
   // ARCHITECT FIX: Setup Vite AFTER routes but BEFORE 404 fallback
   if (config.server.nodeEnv === 'development') {
+    // CRITICAL FIX: Set Vite HMR port to prevent WebSocket connection issues
+    process.env.VITE_HMR_PORT = '5000';
+    process.env.VITE_DEV_SERVER_URL = `http://localhost:5000`;
+    
     // CRITICAL FIX: Prevent Content-Encoding mismatch causing net::ERR_CONTENT_DECODING_FAILED
     app.use((req, res, next) => {
       const originalEnd = res.end.bind(res);
@@ -67,7 +71,7 @@ const server = createServer(app);
       
       res.end = function(chunk?: any, encoding?: any, cb?: any) {
         const contentType = res.getHeader('Content-Type');
-        if (typeof contentType === 'string' && contentType.includes('text/html')) {
+        if (typeof contentType === 'string' && (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('css'))) {
           res.removeHeader('Content-Encoding');
           res.setHeader('Cache-Control', 'no-transform');
         }
@@ -76,7 +80,7 @@ const server = createServer(app);
       
       res.send = function(body?: any) {
         const contentType = res.getHeader('Content-Type');
-        if (typeof contentType === 'string' && contentType.includes('text/html')) {
+        if (typeof contentType === 'string' && (contentType.includes('text/html') || contentType.includes('javascript') || contentType.includes('css'))) {
           res.removeHeader('Content-Encoding');
           res.setHeader('Cache-Control', 'no-transform');
         }
