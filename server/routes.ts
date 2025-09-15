@@ -303,6 +303,14 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Add explicit middleware to ensure API routes take precedence over catch-all routes
+  // This prevents Vite's catch-all from intercepting API requests
+  app.use('/api/*', (req, res, next) => {
+    // Mark that this is an API route to ensure it's handled by backend
+    req.isApiRoute = true;
+    next();
+  });
+
   // Auth middleware
   await setupAuth(app);
 

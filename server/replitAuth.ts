@@ -38,7 +38,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       maxAge: sessionTtl,
     },
   });
@@ -131,18 +131,30 @@ export async function setupAuth(app: Express) {
     }
   };
 
-  for (const domain of process.env
-    .REPLIT_DOMAINS!.split(",")) {
+  // Get all domains including localhost for development
+  const domains = process.env.REPLIT_DOMAINS!.split(",");
+  
+  // Add localhost for development if not already present
+  if (!domains.includes('localhost')) {
+    domains.push('localhost');
+  }
+  
+  for (const domain of domains) {
+    // Use http for localhost, https for others
+    const protocol = domain === 'localhost' ? 'http' : 'https';
+    const port = domain === 'localhost' ? ':5000' : '';
+    
     const strategy = new Strategy(
       {
         name: `replitauth:${domain}`,
         config,
         scope: "openid email profile offline_access",
-        callbackURL: `https://${domain}/api/callback`,
+        callbackURL: `${protocol}://${domain}${port}/api/callback`,
       },
       verify,
     );
     passport.use(strategy);
+    console.log(`[AUTH] Registered strategy for ${domain} with callback ${protocol}://${domain}${port}/api/callback`);
   }
 
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
