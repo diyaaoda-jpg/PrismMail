@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { BookOpen, Settings, RefreshCw, X } from "lucide-react";
+import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,8 +15,10 @@ import { ComposeDialog } from "./ComposeDialog";
 import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { OfflineIndicator } from "./OfflineIndicator";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -135,6 +137,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
+  
+  // Mobile-specific state
+  const isMobile = useIsMobile();
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = useState(false);
   
   // Dialog states
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -385,8 +392,14 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     if (!email.isRead && primaryAccount && emails.length > 0) {
       handleToggleRead(email.id);
     }
+    
+    // Open mobile email viewer
+    if (isMobile) {
+      setIsMobileEmailViewOpen(true);
+    }
+    
     console.log('Selected email:', email.subject);
-  }, [primaryAccount, emails.length]);
+  }, [primaryAccount, emails.length, isMobile]);
 
   const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
@@ -693,154 +706,337 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
+  // Mobile-specific handlers
+  const handleMobileSidebarToggle = () => {
+    setIsMobileSidebarOpen(!isMobileSidebarOpen);
+  };
+
+  const handleMobileBackToList = () => {
+    setIsMobileEmailViewOpen(false);
+    setSelectedEmail(null);
+  };
+
+  const handleMobileCompose = () => {
+    setIsComposeOpen(true);
+    setIsMobileSidebarOpen(false);
+  };
+
+  const handleMobileSearch = () => {
+    setIsSearchOpen(true);
+    setIsMobileSidebarOpen(false);
+  };
+
   return (
-    <div className="h-screen flex bg-background">
-      {/* Sidebar */}
-      <MailSidebar
-        selectedFolder={selectedFolder}
-        selectedAccount={selectedAccount}
-        onFolderSelect={(folderId, accountId) => {
-          setSelectedFolder(folderId);
-          if (accountId) {
-            setSelectedAccount(accountId);
-          } else {
-            // When selecting unified folder, clear selected account to show all accounts
-            setSelectedAccount('');
-          }
-        }}
-        onAccountSelect={(accountId) => {
-          setSelectedAccount(accountId);
-          // Keep the current folder when switching accounts
-        }}
-        onCompose={handleCompose}
-        onSearch={handleSearch}
-        onSettings={handleSettings}
-        unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
-          Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
-            ...acc,
-            [folderType]: counts.unread
-          }), {}) : 
-          mockUnreadCounts
-        }
-        accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
-          unifiedCounts.accounts.reduce((acc, account) => ({
-            ...acc,
-            [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
-              ...folderAcc,
-              [folderType]: counts.unread
-            }), {})
-          }), {}) : 
-          {}
-        }
-        accounts={accounts}
-      />
+    <div className="h-screen bg-background">
+      <div className={cn(
+        "flex",
+        isMobile ? "h-full flex-col" : "h-full"
+      )}>
+        {/* Mobile Sidebar Sheet Overlay */}
+        <Sheet open={isMobile && isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
+          <SheetContent side="left" className="w-80 p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Navigation Menu</SheetTitle>
+            </SheetHeader>
+            <MailSidebar
+              selectedFolder={selectedFolder}
+              selectedAccount={selectedAccount}
+              onFolderSelect={(folderId, accountId) => {
+                setSelectedFolder(folderId);
+                if (accountId) {
+                  setSelectedAccount(accountId);
+                } else {
+                  setSelectedAccount('');
+                }
+                setIsMobileSidebarOpen(false);
+              }}
+              onAccountSelect={(accountId) => {
+                setSelectedAccount(accountId);
+                setIsMobileSidebarOpen(false);
+              }}
+              onCompose={handleMobileCompose}
+              onSearch={handleMobileSearch}
+              onSettings={handleSettings}
+              unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
+                Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
+                  ...acc,
+                  [folderType]: counts.unread
+                }), {}) : 
+                mockUnreadCounts
+              }
+              accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
+                unifiedCounts.accounts.reduce((acc, account) => ({
+                  ...acc,
+                  [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
+                    ...folderAcc,
+                    [folderType]: counts.unread
+                  }), {})
+                }), {}) : 
+                {}
+              }
+              accounts={accounts}
+            />
+          </SheetContent>
+        </Sheet>
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-semibold">PrismMail</h1>
-            
-            <Button
-              variant="outline"
-              onClick={handleOpenReadingMode}
-              disabled={!selectedEmail}
-              data-testid="button-reading-mode"
-              className="hover-elevate active-elevate-2"
-            >
-              <BookOpen className="h-4 w-4 mr-2" />
-              Reading Mode
-            </Button>
+        {/* Desktop Sidebar - Hidden on mobile */}
+        {!isMobile && (
+          <MailSidebar
+            selectedFolder={selectedFolder}
+            selectedAccount={selectedAccount}
+            onFolderSelect={(folderId, accountId) => {
+              setSelectedFolder(folderId);
+              if (accountId) {
+                setSelectedAccount(accountId);
+              } else {
+                setSelectedAccount('');
+              }
+            }}
+            onAccountSelect={(accountId) => {
+              setSelectedAccount(accountId);
+            }}
+            onCompose={handleCompose}
+            onSearch={handleSearch}
+            onSettings={handleSettings}
+            unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
+              Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
+                ...acc,
+                [folderType]: counts.unread
+              }), {}) : 
+              mockUnreadCounts
+            }
+            accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
+              unifiedCounts.accounts.reduce((acc, account) => ({
+                ...acc,
+                [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
+                  ...folderAcc,
+                  [folderType]: counts.unread
+                }), {})
+              }), {}) : 
+              {}
+            }
+            accounts={accounts}
+          />
+        )}
+
+        {/* Main content area */}
+        <div className={cn(
+          "flex-1 flex flex-col",
+          isMobile ? "h-full" : ""
+        )}>
+        {/* Desktop Header - Hidden on mobile */}
+        {!isMobile && (
+          <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
+            <div className="flex items-center gap-4">
+              <h1 className="text-lg font-semibold">PrismMail</h1>
+              
+              <Button
+                variant="outline"
+                onClick={handleOpenReadingMode}
+                disabled={!selectedEmail}
+                data-testid="button-reading-mode"
+                className="hover-elevate active-elevate-2"
+              >
+                <BookOpen className="h-4 w-4 mr-2" />
+                Reading Mode
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {primaryAccount && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => syncMutation.mutate(primaryAccount.id)}
+                  disabled={syncMutation.isPending}
+                  data-testid="button-sync"
+                  className="hover-elevate active-elevate-2"
+                >
+                  <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
+                  <span className="sr-only">Sync emails</span>
+                </Button>
+              )}
+              
+              <OfflineIndicator variant="badge" />
+              
+              <ThemeMenu variant="dropdown" />
+              
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="relative h-8 w-8 rounded-full hover-elevate active-elevate-2" data-testid="button-user-menu">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={user?.profileImageUrl} alt={getUserDisplayName()} />
+                      <AvatarFallback>{getUserInitials()}</AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end">
+                  <div className="flex items-center justify-start gap-2 p-2">
+                    <div className="flex flex-col space-y-1 leading-none">
+                      <p className="font-medium">{getUserDisplayName()}</p>
+                      {user?.email && (
+                        <p className="text-xs text-muted-foreground">{user.email}</p>
+                      )}
+                    </div>
+                  </div>
+                  <Separator />
+                  <DropdownMenuItem onClick={handleSettings} data-testid="button-settings">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
+        )}
 
-          <div className="flex items-center gap-2">
-            {primaryAccount && (
+        {/* Mobile Email Viewer - Full screen overlay */}
+        {isMobile && isMobileEmailViewOpen && selectedEmail && (
+          <div className="fixed inset-0 top-14 bg-background z-30 flex flex-col">
+            <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => syncMutation.mutate(primaryAccount.id)}
-                disabled={syncMutation.isPending}
-                data-testid="button-sync"
+                onClick={handleMobileBackToList}
                 className="hover-elevate active-elevate-2"
+                data-testid="button-mobile-back"
               >
-                <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
-                <span className="sr-only">Sync emails</span>
+                <ArrowLeft className="h-5 w-5" />
               </Button>
-            )}
-            
-            <OfflineIndicator variant="badge" />
-            
-            <ThemeMenu variant="dropdown" />
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full hover-elevate active-elevate-2" data-testid="button-user-menu">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user?.profileImageUrl} alt={getUserDisplayName()} />
-                    <AvatarFallback>{getUserInitials()}</AvatarFallback>
-                  </Avatar>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenReadingMode}
+                  className="hover-elevate active-elevate-2"
+                  data-testid="button-mobile-reading-mode"
+                >
+                  <BookOpen className="h-4 w-4 mr-1" />
+                  Reading
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end">
-                <div className="flex items-center justify-start gap-2 p-2">
-                  <div className="flex flex-col space-y-1 leading-none">
-                    <p className="font-medium">{getUserDisplayName()}</p>
-                    {user?.email && (
-                      <p className="text-xs text-muted-foreground">{user.email}</p>
-                    )}
-                  </div>
-                </div>
-                <Separator />
-                <DropdownMenuItem onClick={handleSettings} data-testid="button-settings">
-                  <Settings className="h-4 w-4 mr-2" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        {/* Email list and viewer */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Email list */}
-          <div className="w-96 border-r flex flex-col">
-            <div className="p-3 border-b bg-card">
-              <div className="flex items-center justify-between">
-                <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                <span className="text-sm text-muted-foreground">
-                  {filteredEmails.length} emails
-                </span>
               </div>
             </div>
             
-            <ScrollArea className="flex-1">
-              <div className="divide-y">
-                {filteredEmails.map((email) => (
-                  <EmailListItem
-                    key={email.id}
-                    email={email}
-                    isSelected={selectedEmail?.id === email.id}
-                    onClick={() => handleEmailSelect(email)}
-                    onToggleRead={handleToggleRead}
-                    onToggleFlagged={handleToggleFlagged}
-                  />
-                ))}
-                {filteredEmails.length === 0 && (
-                  <div className="p-8 text-center text-muted-foreground">
-                    <div className="text-lg font-medium mb-2">No emails found</div>
-                    <div className="text-sm">Try changing your filter or search terms</div>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
+            <div className="flex-1 overflow-hidden">
+              <EmailViewer
+                email={selectedEmail}
+                currentUserEmail={user?.email}
+                onReply={handleReply}
+                onReplyAll={handleReplyAll}
+                onForward={handleForward}
+                onArchive={handleArchive}
+                onDelete={handleDelete}
+                onToggleStar={handleStar}
+                onBack={handleMobileBackToList}
+              />
+            </div>
           </div>
+        )}
 
-          {/* Email viewer and inline composer */}
-          <div className="flex-1 flex flex-col">
+        {/* Mobile Header - Only shown on mobile for main view */}
+        {isMobile && (
+          <div className="h-14 border-b flex items-center justify-between px-4 bg-card shrink-0">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="hover-elevate active-elevate-2"
+                data-testid="button-mobile-menu"
+                aria-label="Open sidebar menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              
+              <h1 className="text-lg font-semibold">
+                {isMobileEmailViewOpen && selectedEmail ? 
+                  "Email" : 
+                  (selectedFolder === 'inbox' ? 'Inbox' : selectedFolder.charAt(0).toUpperCase() + selectedFolder.slice(1))
+                }
+              </h1>
+              
+              {!isMobileEmailViewOpen && filteredEmails.length > 0 && (
+                <span className="text-sm text-muted-foreground">
+                  ({filteredEmails.length})
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isMobileEmailViewOpen && selectedEmail ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleMobileBackToList}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-mobile-back"
+                    aria-label="Back to email list"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenReadingMode}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-mobile-reading-mode"
+                    aria-label="Open reading mode"
+                  >
+                    <BookOpen className="h-4 w-4 mr-1" />
+                    Reading
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {primaryAccount && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => syncMutation.mutate(primaryAccount.id)}
+                      disabled={syncMutation.isPending}
+                      data-testid="button-mobile-sync"
+                      className="hover-elevate active-elevate-2"
+                      aria-label="Sync emails"
+                    >
+                      <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
+                    </Button>
+                  )}
+                  
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSearch}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-mobile-search"
+                    aria-label="Search emails"
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
+                  
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleCompose}
+                    className="hover-elevate active-elevate-2"
+                    data-testid="button-mobile-compose"
+                    aria-label="Compose new email"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Email Viewer - Full screen overlay */}
+        {isMobile && isMobileEmailViewOpen && selectedEmail && (
+          <div className="flex-1 overflow-hidden">
             <EmailViewer
               email={selectedEmail}
               currentUserEmail={user?.email}
@@ -850,49 +1046,123 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               onArchive={handleArchive}
               onDelete={handleDelete}
               onToggleStar={handleStar}
+              onBack={handleMobileBackToList}
             />
-            
-            {/* Inline Composer for Replies */}
-            {inlineComposeDraft && (
-              <div className="border-t bg-card">
-                <div className="p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-lg">Reply</h3>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setComposeReplyTo(inlineComposeDraft);
-                          setIsComposeOpen(true);
-                          setInlineComposeDraft(null);
-                        }}
-                        data-testid="button-pop-out-compose"
-                      >
-                        Pop out
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setInlineComposeDraft(null)}
-                        data-testid="button-close-inline-compose"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+          </div>
+        )}
+
+        {/* Email list and viewer layout - Only show when not in mobile email view */}
+        {!isMobile || !isMobileEmailViewOpen ? (
+          <div className={cn(
+            "flex-1 flex overflow-hidden",
+            isMobile ? "flex-col" : ""
+          )}>
+            {/* Email list */}
+            <div className={cn(
+              "border-r flex flex-col",
+              isMobile ? "flex-1" : "w-96"
+            )}>
+              <div className="p-3 border-b bg-card">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-medium capitalize">{selectedFolder}</h2>
+                  <span className="text-sm text-muted-foreground">
+                    {filteredEmails.length} emails
+                  </span>
+                </div>
+              </div>
+              
+              <ScrollArea className="flex-1">
+                <div className="divide-y">
+                  {filteredEmails.map((email) => (
+                    <EmailListItem
+                      key={email.id}
+                      email={email}
+                      isSelected={selectedEmail?.id === email.id}
+                      onClick={() => {
+                        setSelectedEmail(email);
+                        if (isMobile) {
+                          setIsMobileEmailViewOpen(true);
+                        }
+                        console.log('Selected email:', email.subject);
+                      }}
+                      onToggleFlagged={(emailId) => handleToggleFlagged(emailId)}
+                      onToggleStar={handleStar}
+                      onArchive={handleArchive}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                  {emailsLoading && (
+                    <div className="p-8 text-center">
+                      Loading emails...
+                    </div>
+                  )}
+                  {!emailsLoading && filteredEmails.length === 0 && (
+                    <div className="p-8 text-center text-muted-foreground">
+                      <div className="text-lg font-medium mb-2">No emails found</div>
+                      <div className="text-sm">Try changing your filter or search terms</div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Desktop Email viewer - Hidden on mobile */}
+            {!isMobile && (
+              <div className="flex-1 flex flex-col">
+                <EmailViewer
+                  email={selectedEmail}
+                  currentUserEmail={user?.email}
+                  onReply={handleReply}
+                  onReplyAll={handleReplyAll}
+                  onForward={handleForward}
+                  onArchive={handleArchive}
+                  onDelete={handleDelete}
+                  onToggleStar={handleStar}
+                />
+                
+                {/* Inline Composer for Replies */}
+                {inlineComposeDraft && (
+                  <div className="border-t bg-card">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-lg">Reply</h3>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setComposeReplyTo(inlineComposeDraft);
+                              setIsComposeOpen(true);
+                              setInlineComposeDraft(null);
+                            }}
+                            data-testid="button-pop-out-compose"
+                          >
+                            Pop out
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setInlineComposeDraft(null)}
+                            data-testid="button-close-inline-compose"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      
+                      <ComposeDialog
+                        isOpen={true}
+                        onClose={() => setInlineComposeDraft(null)}
+                        accountId={primaryAccount?.id}
+                        replyTo={inlineComposeDraft}
+                      />
                     </div>
                   </div>
-                  
-                  <ComposeDialog
-                    isOpen={true}
-                    onClose={() => setInlineComposeDraft(null)}
-                    accountId={primaryAccount?.id}
-                    replyTo={inlineComposeDraft}
-                  />
-                </div>
+                )}
               </div>
             )}
           </div>
-        </div>
+        ) : null}
       </div>
 
       {/* Reading Mode Overlay */}

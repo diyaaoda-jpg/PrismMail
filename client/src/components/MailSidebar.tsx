@@ -130,17 +130,17 @@ export function MailSidebar({
             <Button
               variant="ghost"
               className={cn(
-                "w-full justify-start gap-2 mb-2 text-sm font-medium hover-elevate active-elevate-2",
+                "w-full justify-start gap-3 mb-2 h-11 text-base font-medium hover-elevate active-elevate-2", // Larger for touch
                 !account.isActive && "opacity-60"
               )}
               data-testid={`button-account-toggle-${account.id}`}
             >
               {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-5 w-5" />
               ) : (
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-5 w-5" />
               )}
-              <Mail className="h-4 w-4" />
+              <Mail className="h-5 w-5" />
               <span className="flex-1 text-left truncate">{account.name}</span>
               {!account.isActive && (
                 <Badge variant="destructive" className="ml-1 text-xs">
@@ -196,17 +196,17 @@ export function MailSidebar({
         key={`${accountId || 'unified'}-${folder.id}`}
         variant={isSelected ? "secondary" : "ghost"}
         className={cn(
-          "w-full justify-start gap-3 mb-1 hover-elevate active-elevate-2",
+          "w-full justify-start gap-3 mb-1 h-11 text-base hover-elevate active-elevate-2", // Larger height and text for touch
           isSelected && "bg-accent text-accent-foreground",
           indent && "ml-4"
         )}
         onClick={() => handleFolderClick(folder.id, accountId)}
         data-testid={`button-folder-${accountId ? `${accountId}-` : ''}${folder.id}`}
       >
-        <IconComponent className={cn("h-4 w-4", folder.color)} />
+        <IconComponent className={cn("h-5 w-5", folder.color)} />
         <span className="flex-1 text-left">{folder.name}</span>
         {count > 0 && (
-          <span className="ml-auto text-xs text-blue-600 dark:text-blue-400 font-medium">
+          <span className="ml-auto text-sm text-blue-600 dark:text-blue-400 font-medium">
             {count.toLocaleString()}
           </span>
         )}
@@ -215,27 +215,27 @@ export function MailSidebar({
   };
 
   return (
-    <div className="w-64 bg-sidebar border-r flex flex-col h-full">
+    <div className="w-full bg-sidebar border-r flex flex-col h-full">
       {/* Header with compose button */}
       <div className="p-4 border-b">
         <Button 
           onClick={handleCompose}
-          className="w-full mb-4 hover-elevate active-elevate-2"
+          className="w-full mb-4 h-12 text-base font-medium hover-elevate active-elevate-2" // Larger for mobile touch
           data-testid="button-compose"
         >
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="h-5 w-5 mr-3" />
           Compose
         </Button>
         
         {/* Search */}
         <form onSubmit={handleSearch} className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="search"
             placeholder="Search mail..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            className="pl-12 h-12 text-base" // Larger input for mobile
             data-testid="input-search"
           />
         </form>
@@ -249,13 +249,13 @@ export function MailSidebar({
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start gap-2 mb-3 text-sm font-medium hover-elevate active-elevate-2"
+                  className="w-full justify-start gap-3 mb-3 h-11 text-base font-medium hover-elevate active-elevate-2" // Larger for touch
                   data-testid="button-all-accounts-toggle"
                 >
                   {allAccountsExpanded ? (
-                    <ChevronDown className="h-4 w-4" />
+                    <ChevronDown className="h-5 w-5" />
                   ) : (
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight className="h-5 w-5" />
                   )}
                   All Accounts
                 </Button>

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff } from "lucide-react";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff, ArrowLeft } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/components/ThemeProvider";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
@@ -23,6 +24,7 @@ interface EmailViewerProps {
   onDelete?: (email: EmailMessage) => void;
   onToggleFlagged?: (email: EmailMessage) => void;
   onToggleStar?: (email: EmailMessage) => void;
+  onBack?: () => void;
 }
 
 export function EmailViewer({
@@ -34,10 +36,12 @@ export function EmailViewer({
   onArchive,
   onDelete,
   onToggleFlagged,
+  onBack,
 }: EmailViewerProps) {
   // All hooks must be declared at the top in consistent order
   const { toast } = useToast();
   const { effectiveMode } = useTheme();
+  const isMobile = useIsMobile();
   const contentRef = useRef<HTMLDivElement>(null);
   
   // State hooks first
@@ -295,7 +299,7 @@ export function EmailViewer({
   };
 
   const handleToggleStar = () => {
-    onToggleStar?.(email);
+    onToggleFlagged?.(email);
     console.log('Toggle star:', email.id);
   };
 
@@ -308,8 +312,62 @@ export function EmailViewer({
 
   return (
     <div className="flex-1 flex flex-col bg-background email-viewer-enhanced">
-      {/* Header */}
-      <div className="p-4 border-b bg-card">
+      {/* Mobile Header - Only shown on mobile */}
+      {isMobile && onBack && (
+        <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              className="hover-elevate active-elevate-2"
+              data-testid="button-mobile-back"
+              aria-label="Go back to email list"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg font-semibold truncate">
+              {email?.subject || 'Email'}
+            </h1>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {email?.bodyHtml && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowImages(!showImages)}
+                title={showImages ? "Hide images" : "Show images"}
+                data-testid="button-mobile-toggle-images"
+                className="hover-elevate active-elevate-2"
+                aria-label={showImages ? "Hide images" : "Show images"}
+              >
+                {showImages ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            )}
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleToggleStar}
+              data-testid="button-mobile-toggle-star"
+              className="hover-elevate active-elevate-2"
+              aria-label={email?.isStarred ? "Remove star" : "Add star"}
+            >
+              <Star className={cn(
+                "h-4 w-4",
+                email?.isStarred ? "fill-amber-500 text-amber-500 dark:fill-amber-400 dark:text-amber-400" : "text-muted-foreground"
+              )} />
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {/* Desktop Header */}
+      <div className={cn(
+        "p-4 border-b bg-card",
+        isMobile && onBack ? "hidden" : ""
+      )}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <h2 
@@ -396,7 +454,7 @@ export function EmailViewer({
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" data-testid="button-email-more">
+                <Button variant="ghost" size="icon" data-testid="button-email-more" aria-label="More email actions" title="More email actions">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>

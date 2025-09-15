@@ -65,7 +65,8 @@ export function EmailListItem({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 p-3 border-b cursor-pointer transition-colors hover-elevate",
+        "flex items-center gap-3 p-4 min-h-[60px] border-b cursor-pointer transition-colors hover-elevate active-elevate-2",
+        "sm:p-3 sm:min-h-[48px]", // Smaller padding and height on desktop
         isSelected && "bg-accent/50",
         !email.isRead && "bg-background",
         email.priority > 0 && priorityColors[email.priority as keyof typeof priorityColors]
@@ -87,33 +88,43 @@ export function EmailListItem({
         />
       )}
 
-      {/* Read/Unread indicator */}
+      {/* Read/Unread indicator - Larger touch target on mobile */}
       <Button
         variant="ghost"
         size="icon"
-        className="h-6 w-6 shrink-0"
+        className={cn(
+          "shrink-0 hover-elevate active-elevate-2",
+          "h-8 w-8 sm:h-6 sm:w-6" // Larger on mobile, smaller on desktop
+        )}
         onClick={handleToggleRead}
         data-testid={`button-toggle-read-${email.id}`}
+        aria-label={email.isRead ? "Mark as unread" : "Mark as read"}
+        title={email.isRead ? "Mark as unread" : "Mark as read"}
       >
         <Circle 
           className={cn(
-            "h-3 w-3",
+            "h-4 w-4 sm:h-3 sm:w-3", // Larger icon on mobile
             !email.isRead ? "fill-accent text-accent" : "text-muted-foreground"
           )} 
         />
       </Button>
 
-      {/* Star indicator */}
+      {/* Star indicator - Larger touch target on mobile */}
       <Button
         variant="ghost"
         size="icon"
-        className="h-6 w-6 shrink-0"
+        className={cn(
+          "shrink-0 hover-elevate active-elevate-2",
+          "h-8 w-8 sm:h-6 sm:w-6" // Larger on mobile, smaller on desktop
+        )}
         onClick={handleToggleFlagged}
         data-testid={`button-toggle-star-${email.id}`}
+        aria-label={email.isStarred ? "Remove from starred" : "Add to starred"}
+        title={email.isStarred ? "Remove from starred" : "Add to starred"}
       >
         <Star 
           className={cn(
-            "h-3 w-3",
+            "h-4 w-4 sm:h-3 sm:w-3", // Larger icon on mobile
             email.isStarred ? "fill-amber-500 text-amber-500 dark:fill-amber-400 dark:text-amber-400" : "text-muted-foreground"
           )} 
         />
@@ -124,7 +135,7 @@ export function EmailListItem({
         <div className="flex items-center justify-between gap-2 mb-1">
           <span 
             className={cn(
-              "font-medium truncate",
+              "font-medium truncate text-sm sm:text-base", // Larger text on mobile
               !email.isRead && "font-semibold"
             )}
             data-testid={`text-sender-${email.id}`}
@@ -132,7 +143,7 @@ export function EmailListItem({
             {email.from}
           </span>
           <span 
-            className="text-xs text-muted-foreground shrink-0"
+            className="text-xs sm:text-xs text-muted-foreground shrink-0"
             data-testid={`text-date-${email.id}`}
           >
             {email.date instanceof Date ? email.date.toLocaleDateString() : new Date(email.date).toLocaleDateString()}
@@ -142,7 +153,7 @@ export function EmailListItem({
         <div className="flex items-center gap-2 mb-1">
           <span 
             className={cn(
-              "text-sm truncate",
+              "text-sm sm:text-sm truncate", // Consistent text size
               !email.isRead && "font-medium"
             )}
             data-testid={`text-subject-${email.id}`}
@@ -150,21 +161,24 @@ export function EmailListItem({
             {email.subject}
           </span>
           {email.hasAttachments && (
-            <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+            <Paperclip className="h-4 w-4 sm:h-3 sm:w-3 text-muted-foreground shrink-0" />
           )}
         </div>
         
         <p 
-          className="text-xs text-muted-foreground truncate"
+          className="text-sm sm:text-xs text-muted-foreground truncate leading-relaxed"
           data-testid={`text-snippet-${email.id}`}
         >
           {email.snippet}
         </p>
       </div>
 
-      {/* Priority badge */}
+      {/* Priority badge - Larger on mobile */}
       {email.priority > 0 && (
-        <Badge variant="secondary" className="shrink-0">
+        <Badge 
+          variant="secondary" 
+          className="shrink-0 text-xs sm:text-xs px-2 py-1 sm:px-1.5 sm:py-0.5"
+        >
           {email.priority === 3 && "High"}
           {email.priority === 2 && "Med"}
           {email.priority === 1 && "Low"}
