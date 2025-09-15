@@ -6,16 +6,6 @@ import EventEmitter from "events";
  */
 export const emailEventEmitter = new EventEmitter();
 
-// Critical: Add error listener to prevent uncaught 'error' events
-emailEventEmitter.on('error', (error) => {
-  console.error('EmailEventEmitter error occurred:', error);
-  // Don't crash the application for EventEmitter errors
-  // Log the error and continue running
-});
-
-// Set max listeners to prevent memory leak warnings for high-traffic scenarios
-emailEventEmitter.setMaxListeners(50);
-
 // Event type definitions for better type safety
 export interface EmailReceivedEvent {
   accountId: string;

@@ -2,24 +2,15 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertPriorityRuleSchema, insertVipContactSchema, insertUserPrefsSchema, updatePriorityRuleSchema, updateVipContactSchema, updateUserPrefsSchema, reorderRulesSchema, insertMailDraftSchema, insertMailSentSchema, attachmentUploadRequestSchema, attachmentDownloadSchema, insertEmailAttachmentSchema } from "@shared/schema";
-import { apiRateLimiter, strictRateLimiter, composeRateLimiter } from "./middleware/security";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
 import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
 import { getImapIdleService } from "./imapIdle";
-import { priorityEngine } from "./services/priorityEngine";
-import { backgroundJobService } from "./services/backgroundJobs";
-import { ewsSendService } from "./services/ewsSendService";
-import { messageFormatter } from "./services/messageFormatter";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
-import multer from "multer";
-import fs from "fs";
-import path from "path";
-import { enhancedAttachmentService as attachmentService } from "./services/enhancedAttachmentService";
 
 /**
  * Map folder types to icon names for frontend display
@@ -87,7 +78,6 @@ const ErrorCodes = {
   // Resource errors
   RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
   ACCOUNT_NOT_FOUND: 'ACCOUNT_NOT_FOUND',
-  FORBIDDEN_ERROR: 'FORBIDDEN_ERROR',
   
   // Server errors
   INTERNAL_SERVER_ERROR: 'INTERNAL_SERVER_ERROR',
@@ -100,16 +90,7 @@ const ErrorCodes = {
   
   // Email sending errors
   EMAIL_SEND_FAILED: 'EMAIL_SEND_FAILED',
-  EMAIL_VALIDATION_FAILED: 'EMAIL_VALIDATION_FAILED',
-  
-  // Attachment errors
-  ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND',
-  ATTACHMENT_UPLOAD_FAILED: 'ATTACHMENT_UPLOAD_FAILED',
-  ATTACHMENT_DOWNLOAD_FAILED: 'ATTACHMENT_DOWNLOAD_FAILED',
-  ATTACHMENT_SIZE_EXCEEDED: 'ATTACHMENT_SIZE_EXCEEDED',
-  ATTACHMENT_TYPE_NOT_ALLOWED: 'ATTACHMENT_TYPE_NOT_ALLOWED',
-  ATTACHMENT_VIRUS_DETECTED: 'ATTACHMENT_VIRUS_DETECTED',
-  ATTACHMENT_ACCESS_DENIED: 'ATTACHMENT_ACCESS_DENIED'
+  EMAIL_VALIDATION_FAILED: 'EMAIL_VALIDATION_FAILED'
 } as const;
 
 /**
@@ -295,35 +276,6 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Health check endpoint (no authentication required)
-  app.get('/healthz', async (_req, res) => {
-    try {
-      // Check basic server health
-      const healthCheck = {
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        server: 'PrismMail Server',
-        version: '1.0.0',
-        environment: process.env.NODE_ENV || 'development',
-        services: {
-          storage: 'ok', // Could add storage health check here
-          redis: 'unavailable', // Based on the logs showing Redis unavailable
-          database: 'available' // Based on the PostgreSQL status
-        }
-      };
-      
-      res.status(200).json(healthCheck);
-    } catch (error) {
-      console.error('Health check failed:', error);
-      res.status(503).json({
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        server: 'PrismMail Server',
-        error: 'Health check failed'
-      });
-    }
-  });
-
   // Auth middleware
   await setupAuth(app);
 
@@ -1164,58 +1116,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      let sendResult: any;
-      let messageId: string;
+      // Configure transport for the account protocol
+      let transporter: nodemailer.Transporter;
       
       if (account.protocol === 'EWS') {
-        // Use EWS to send email directly
-        console.log(`[${requestId}] Using EWS to send email`);
-        
-        // Format the message content using the message formatter
-        const formattedMessage = messageFormatter.formatMessage(emailRequest.body);
-        
-        // Prepare enhanced email request with formatted content
-        const enhancedEmailRequest: SendEmailRequest = {
-          ...emailRequest,
-          body: formattedMessage.text,
-          bodyHtml: formattedMessage.html || undefined
-        };
-        
-        // Send via EWS service
-        const ewsResult = await ewsSendService.sendEmail(
-          encryptedAccount.settingsJson,
-          enhancedEmailRequest
+        throw new ApiError(
+          ErrorCodes.EMAIL_SEND_FAILED,
+          'Email sending via EWS is not yet supported',
+          501,
+          'EWS email sending functionality is under development',
+          undefined,
+          [
+            'Use an IMAP account for sending emails',
+            'Contact support for EWS sending updates'
+          ]
         );
-        
-        if (!ewsResult.success) {
-          throw new ApiError(
-            ErrorCodes.EMAIL_SEND_FAILED,
-            'Failed to send email via EWS',
-            500,
-            ewsResult.error || 'EWS email sending failed',
-            undefined,
-            ewsResult.details?.suggestion ? [ewsResult.details.suggestion] : [
-              'Check your EWS server connection',
-              'Verify your Exchange credentials are correct',
-              'Ensure you have permission to send emails'
-            ]
-          );
-        }
-        
-        sendResult = {
-          messageId: ewsResult.messageId,
-          accepted: [emailRequest.to],
-          rejected: [],
-          response: 'EWS email sent successfully'
-        };
-        messageId = ewsResult.messageId || `ews-${Date.now()}`;
-        
-        console.log(`[${requestId}] EWS email sent successfully: ${messageId}`);
-        
       } else if (account.protocol === 'IMAP') {
-        // Configure SMTP transport for IMAP accounts
-        console.log(`[${requestId}] Using SMTP to send email`);
-        
         // Use SMTP settings from account configuration
         const smtpSettings = accountSettings.smtp;
         if (!smtpSettings || !smtpSettings.host) {
@@ -1227,7 +1143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        const transporter = nodemailer.createTransport({
+        transporter = nodemailer.createTransport({
           host: smtpSettings.host,
           port: smtpSettings.port || 587,
           secure: smtpSettings.secure || false,
@@ -1259,46 +1175,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ]
           );
         }
-        
-        // Prepare email message for SMTP
-        const mailOptions = {
-          from: `"${account.name}" <${accountSettings.username}>`,
-          to: emailRequest.to,
-          cc: emailRequest.cc,
-          bcc: emailRequest.bcc,
-          subject: emailRequest.subject,
-          text: emailRequest.body,
-          html: emailRequest.bodyHtml,
-          replyTo: undefined,
-          attachments: emailRequest.attachments?.map(att => ({
-            filename: att.filename,
-            content: Buffer.from(att.content, 'base64'),
-            contentType: att.contentType
-          }))
-        };
-
-        // Send the email via SMTP
-        try {
-          sendResult = await transporter.sendMail(mailOptions);
-          messageId = sendResult.messageId;
-          console.log(`[${requestId}] SMTP email sent successfully: ${messageId}`);
-        } catch (error: any) {
-          console.error(`[${requestId}] Failed to send SMTP email:`, error);
-          throw new ApiError(
-            ErrorCodes.EMAIL_SEND_FAILED,
-            'Failed to send email',
-            500,
-            `Email sending failed: ${error.message}`,
-            undefined,
-            [
-              'Check your internet connection',
-              'Verify recipient email addresses are correct',
-              'Ensure account SMTP settings are valid',
-              'Try sending the email again'
-            ]
-          );
-        }
-        
       } else {
         throw new ApiError(
           ErrorCodes.UNSUPPORTED_PROTOCOL,
@@ -1308,12 +1184,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
+      // Prepare email message
+      const mailOptions = {
+        from: `"${account.name}" <${accountSettings.username}>`,
+        to: emailRequest.to,
+        cc: emailRequest.cc,
+        bcc: emailRequest.bcc,
+        subject: emailRequest.subject,
+        text: emailRequest.body,
+        html: emailRequest.bodyHtml,
+        replyTo: undefined,
+        attachments: emailRequest.attachments?.map(att => ({
+          filename: att.filename,
+          content: Buffer.from(att.content, 'base64'),
+          contentType: att.contentType
+        }))
+      };
+
+      // Send the email
+      let sendResult: any;
+      try {
+        sendResult = await transporter.sendMail(mailOptions);
+        console.log(`[${requestId}] Email sent successfully:`, sendResult.messageId);
+      } catch (error: any) {
+        console.error(`[${requestId}] Failed to send email:`, error);
+        throw new ApiError(
+          ErrorCodes.EMAIL_SEND_FAILED,
+          'Failed to send email',
+          500,
+          `Email sending failed: ${error.message}`,
+          undefined,
+          [
+            'Check your internet connection',
+            'Verify recipient email addresses are correct',
+            'Ensure account SMTP settings are valid',
+            'Try sending the email again'
+          ]
+        );
+      }
+
       // Store sent email in database for record keeping
       const sentEmailData = {
         userId,
         accountId: emailRequest.accountId,
-        messageId: messageId || `sent-${Date.now()}`,
-        from: `"${account.name}" <${accountSettings.username}>`,
+        messageId: sendResult.messageId || `sent-${Date.now()}`,
+        from: mailOptions.from,
         to: emailRequest.to,
         cc: emailRequest.cc || null,
         bcc: emailRequest.bcc || null,
@@ -1323,12 +1238,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         folder: 'Sent',
         flags: ['\\Seen'],
         date: new Date(),
-        size: (emailRequest.body || '').length + (emailRequest.bodyHtml || '').length,
+        size: JSON.stringify(mailOptions).length,
         replyTo: null,
-        attachments: emailRequest.attachments || [],
-        priority: 0, // Normal priority for sent emails
-        autoPriority: 0, // Normal auto-calculated priority
-        priorityScore: 0 // Base score for sent emails
+        attachments: emailRequest.attachments || []
       };
 
       try {
@@ -1341,7 +1253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const response: SendEmailResponse = {
         success: true,
-        messageId: messageId,
+        messageId: sendResult.messageId,
         sentAt: new Date()
       };
 
@@ -1831,713 +1743,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/sync`, requestId);
     }
   });
-
-  // ====================================
-  // PRIORITY SYSTEM API ENDPOINTS
-  // ====================================
-
-  // Priority Rules Management
-  app.get('/api/priority/rules/:accountId', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-priority-rules-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const accountId = req.params.accountId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Verify account belongs to user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find(acc => acc.id === accountId);
-      if (!account) {
-        throw new ApiError(ErrorCodes.ACCOUNT_NOT_FOUND, 'Account not found', 404);
-      }
-
-      const rules = await storage.getPriorityRules(accountId);
-      res.json(createSuccessResponse(rules));
-    } catch (error) {
-      handleApiError(error, res, `GET /api/priority/rules/${req.params.accountId}`, requestId);
-    }
-  });
-
-  app.post('/api/priority/rules', isAuthenticated, async (req: any, res) => {
-    const requestId = `create-priority-rule-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const ruleData = insertPriorityRuleSchema.parse(req.body);
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Verify account belongs to user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find(acc => acc.id === ruleData.accountId);
-      if (!account) {
-        throw new ApiError(ErrorCodes.ACCOUNT_NOT_FOUND, 'Account not found', 404);
-      }
-
-      const rule = await storage.createPriorityRule(ruleData);
-      res.json(createSuccessResponse(rule, 'Priority rule created successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/priority/rules', requestId);
-    }
-  });
-
-  app.put('/api/priority/rules/:ruleId', isAuthenticated, async (req: any, res) => {
-    const requestId = `update-priority-rule-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const ruleId = req.params.ruleId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Validate input data with Zod schema
-      const updates = updatePriorityRuleSchema.parse(req.body);
-
-      // Verify ownership first
-      const existingRule = await storage.getPriorityRuleWithOwnership(ruleId, userId);
-      if (!existingRule) {
-        throw new ApiError(
-          ErrorCodes.AUTHORIZATION_FAILED, 
-          'Priority rule not found or access denied',
-          403,
-          `Rule ${ruleId} does not exist or you don't have permission to modify it`,
-          undefined,
-          ['Ensure the rule exists and belongs to one of your email accounts']
-        );
-      }
-
-      // Now perform the update with validated data
-      const rule = await storage.updatePriorityRule(ruleId, updates);
-      if (!rule) {
-        throw new ApiError(ErrorCodes.INTERNAL_SERVER_ERROR, 'Failed to update priority rule', 500);
-      }
-
-      // Queue background job to rescore emails when rules change
-      try {
-        const jobId = await backgroundJobService.queueEmailRescoring(userId, existingRule.accountId, ruleId);
-        console.log(`Queued email rescoring job ${jobId} after rule update`);
-      } catch (jobError) {
-        console.error('Failed to queue background rescoring job:', jobError);
-        // Don't fail the rule update if background job fails
-      }
-
-      res.json(createSuccessResponse(rule, 'Priority rule updated successfully'));
-    } catch (error) {
-      handleApiError(error, res, `PUT /api/priority/rules/${req.params.ruleId}`, requestId);
-    }
-  });
-
-  app.post('/api/priority/rules/reorder', isAuthenticated, async (req: any, res) => {
-    const requestId = `reorder-priority-rules-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Validate input data with Zod schema
-      const { ruleUpdates } = reorderRulesSchema.parse(req.body);
-
-      // Verify ownership of all rules before reordering
-      const result = await storage.reorderPriorityRulesWithOwnership(ruleUpdates, userId);
-      if (!result.success) {
-        throw new ApiError(
-          ErrorCodes.AUTHORIZATION_FAILED,
-          'Access denied for some priority rules',
-          403,
-          `The following rule IDs are not owned by you: ${result.invalidRuleIds?.join(', ')}`,
-          undefined,
-          ['Ensure all rules belong to your email accounts before reordering']
-        );
-      }
-
-      // Queue background job to rescore emails when rule order changes
-      try {
-        const jobId = await backgroundJobService.queueEmailRescoring(userId);
-        console.log(`Queued email rescoring job ${jobId} after rule reordering`);
-      } catch (jobError) {
-        console.error('Failed to queue background rescoring job:', jobError);
-        // Don't fail the reorder if background job fails
-      }
-
-      res.json(createSuccessResponse(null, 'Priority rules reordered successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/priority/rules/reorder', requestId);
-    }
-  });
-
-  app.delete('/api/priority/rules/:ruleId', isAuthenticated, async (req: any, res) => {
-    const requestId = `delete-priority-rule-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const ruleId = req.params.ruleId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Use ownership-verified deletion
-      const deleted = await storage.deletePriorityRuleWithOwnership(ruleId, userId);
-      if (!deleted) {
-        throw new ApiError(
-          ErrorCodes.AUTHORIZATION_FAILED,
-          'Priority rule not found or access denied',
-          403,
-          `Rule ${ruleId} does not exist or you don't have permission to delete it`,
-          undefined,
-          ['Ensure the rule exists and belongs to one of your email accounts']
-        );
-      }
-
-      // Queue background job to rescore emails when rule is deleted
-      try {
-        const jobId = await backgroundJobService.queueEmailRescoring(userId);
-        console.log(`Queued email rescoring job ${jobId} after rule deletion`);
-      } catch (jobError) {
-        console.error('Failed to queue background rescoring job:', jobError);
-        // Don't fail the deletion if background job fails
-      }
-
-      res.json(createSuccessResponse(null, 'Priority rule deleted successfully'));
-    } catch (error) {
-      handleApiError(error, res, `DELETE /api/priority/rules/${req.params.ruleId}`, requestId);
-    }
-  });
-
-  // VIP Contact Management
-  app.get('/api/vip/contacts', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-vip-contacts-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const contacts = await storage.getVipContacts(userId);
-      res.json(createSuccessResponse(contacts));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/vip/contacts', requestId);
-    }
-  });
-
-  app.post('/api/vip/contacts', isAuthenticated, async (req: any, res) => {
-    const requestId = `create-vip-contact-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const contactData = insertVipContactSchema.parse({
-        ...req.body,
-        userId
-      });
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const contact = await storage.createVipContact(contactData);
-      res.json(createSuccessResponse(contact, 'VIP contact created successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/vip/contacts', requestId);
-    }
-  });
-
-  app.put('/api/vip/contacts/:contactId', isAuthenticated, async (req: any, res) => {
-    const requestId = `update-vip-contact-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const contactId = req.params.contactId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Validate input data with Zod schema
-      const updates = updateVipContactSchema.parse(req.body);
-
-      // Verify ownership first
-      const existingContact = await storage.getVipContactWithOwnership(contactId, userId);
-      if (!existingContact) {
-        throw new ApiError(
-          ErrorCodes.AUTHORIZATION_FAILED,
-          'VIP contact not found or access denied',
-          403,
-          `Contact ${contactId} does not exist or you don't have permission to modify it`,
-          undefined,
-          ['Ensure the contact exists and belongs to your account']
-        );
-      }
-
-      // Now perform the update with validated data
-      const contact = await storage.updateVipContact(contactId, updates);
-      if (!contact) {
-        throw new ApiError(ErrorCodes.INTERNAL_SERVER_ERROR, 'Failed to update VIP contact', 500);
-      }
-
-      res.json(createSuccessResponse(contact, 'VIP contact updated successfully'));
-    } catch (error) {
-      handleApiError(error, res, `PUT /api/vip/contacts/${req.params.contactId}`, requestId);
-    }
-  });
-
-  app.delete('/api/vip/contacts/:contactId', isAuthenticated, async (req: any, res) => {
-    const requestId = `delete-vip-contact-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const contactId = req.params.contactId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Use ownership-verified deletion
-      const deleted = await storage.deleteVipContactWithOwnership(contactId, userId);
-      if (!deleted) {
-        throw new ApiError(
-          ErrorCodes.AUTHORIZATION_FAILED,
-          'VIP contact not found or access denied',
-          403,
-          `Contact ${contactId} does not exist or you don't have permission to delete it`,
-          undefined,
-          ['Ensure the contact exists and belongs to your account']
-        );
-      }
-
-      res.json(createSuccessResponse(null, 'VIP contact deleted successfully'));
-    } catch (error) {
-      handleApiError(error, res, `DELETE /api/vip/contacts/${req.params.contactId}`, requestId);
-    }
-  });
-
-  app.get('/api/vip/suggestions', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-vip-suggestions-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const limit = parseInt(req.query.limit as string) || 10;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const suggestions = await storage.suggestVipContacts(userId, limit);
-      res.json(createSuccessResponse(suggestions));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/vip/suggestions', requestId);
-    }
-  });
-
-  // Focus Mode Functionality
-  app.get('/api/mail/focus', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-focus-mail-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const accountId = req.query.accountId as string;
-      const limit = parseInt(req.query.limit as string) || 50;
-      const offset = parseInt(req.query.offset as string) || 0;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const messages = await storage.getFocusModeMessages(userId, accountId, limit, offset);
-      res.json(createSuccessResponse(messages));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/mail/focus', requestId);
-    }
-  });
-
-  // Priority Calculation
-  app.post('/api/priority/calculate/:emailId', isAuthenticated, async (req: any, res) => {
-    const requestId = `calculate-priority-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const emailId = req.params.emailId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Get the email
-      const emails = await storage.getMailMessages('', undefined, 1000); // TODO: Optimize this query
-      const email = emails.find(e => e.id === emailId);
-      
-      if (!email) {
-        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Email not found', 404);
-      }
-
-      const priorityData = await priorityEngine.calculatePriority(email, email.accountId, userId);
-      
-      // Update email with calculated priority
-      await storage.updateMailMessage(emailId, {
-        priority: priorityData.priority,
-        autoPriority: priorityData.autoPriority,
-        priorityScore: priorityData.priorityScore,
-        priorityFactors: priorityData.priorityFactors,
-        prioritySource: priorityData.prioritySource as "manual" | "rule" | "vip" | "thread" | "auto",
-        ruleId: priorityData.ruleId,
-        isVip: priorityData.isVip
-      });
-
-      res.json(createSuccessResponse(priorityData, 'Priority calculated successfully'));
-    } catch (error) {
-      handleApiError(error, res, `POST /api/priority/calculate/${req.params.emailId}`, requestId);
-    }
-  });
-
-  // Priority Analytics
-  app.get('/api/priority/analytics/distribution', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-priority-distribution-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const days = parseInt(req.query.days as string) || 30;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const distribution = await storage.getEmailPriorityDistribution(userId, days);
-      res.json(createSuccessResponse(distribution));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/priority/analytics/distribution', requestId);
-    }
-  });
-
-  app.get('/api/priority/analytics/vip-stats', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-vip-stats-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const days = parseInt(req.query.days as string) || 30;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const stats = await storage.getVipInteractionStats(userId, days);
-      res.json(createSuccessResponse(stats));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/priority/analytics/vip-stats', requestId);
-    }
-  });
-
-  app.get('/api/priority/analytics/rule-effectiveness/:accountId', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-rule-effectiveness-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const accountId = req.params.accountId;
-      const days = parseInt(req.query.days as string) || 30;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Verify account belongs to user
-      const accounts = await storage.getUserAccountConnections(userId);
-      const account = accounts.find(acc => acc.id === accountId);
-      if (!account) {
-        throw new ApiError(ErrorCodes.ACCOUNT_NOT_FOUND, 'Account not found', 404);
-      }
-
-      const effectiveness = await storage.getRuleEffectiveness(accountId, days);
-      res.json(createSuccessResponse(effectiveness));
-    } catch (error) {
-      handleApiError(error, res, `GET /api/priority/analytics/rule-effectiveness/${req.params.accountId}`, requestId);
-    }
-  });
-
-  // Enhanced preferences with focus mode settings
-  app.get('/api/preferences/focus', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-focus-preferences-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const prefs = await storage.getUserPrefs(userId);
-      
-      const focusPrefs = {
-        focusModeEnabled: prefs?.focusModeEnabled || false,
-        focusMinPriority: prefs?.focusMinPriority || 2,
-        focusShowVipOnly: prefs?.focusShowVipOnly || false,
-        focusShowUnreadOnly: prefs?.focusShowUnreadOnly || false,
-        autoPriorityEnabled: prefs?.autoPriorityEnabled || true,
-        priorityNotifications: prefs?.priorityNotifications || true,
-        vipNotificationsEnabled: prefs?.vipNotificationsEnabled || true
-      };
-
-      res.json(createSuccessResponse(focusPrefs));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/preferences/focus', requestId);
-    }
-  });
-
-  app.post('/api/preferences/focus', isAuthenticated, async (req: any, res) => {
-    const requestId = `update-focus-preferences-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Get current preferences
-      const currentPrefs = await storage.getUserPrefs(userId);
-      
-      // Update with new focus settings
-      const updatedPrefs = {
-        ...currentPrefs,
-        ...req.body,
-        userId
-      };
-
-      const prefs = await storage.upsertUserPrefs(updatedPrefs);
-      res.json(createSuccessResponse(prefs, 'Focus preferences updated successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/preferences/focus', requestId);
-    }
-  });
-
-  // Background Job Status Endpoints
-  app.get('/api/background-jobs/:jobId', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-job-status-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const jobId = req.params.jobId;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const job = backgroundJobService.getJobStatus(jobId);
-      if (!job || job.userId !== userId) {
-        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Background job not found', 404);
-      }
-
-      res.json(createSuccessResponse(job, 'Job status retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, `GET /api/background-jobs/${req.params.jobId}`, requestId);
-    }
-  });
-
-  app.get('/api/background-jobs', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-user-jobs-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const jobs = backgroundJobService.getUserJobs(userId);
-      res.json(createSuccessResponse(jobs, 'User jobs retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/background-jobs', requestId);
-    }
-  });
-
-  // Manual trigger for email rescoring (admin/testing purposes)
-  app.post('/api/priority/rescore-all', isAuthenticated, async (req: any, res) => {
-    const requestId = `manual-rescore-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { accountId } = req.body;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Queue background job for manual rescoring
-      const jobId = await backgroundJobService.queueEmailRescoring(userId, accountId);
-      
-      res.json(createSuccessResponse(
-        { jobId }, 
-        'Email rescoring queued successfully. Use the job ID to track progress.'
-      ));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/priority/rescore-all', requestId);
-    }
-  });
-
-  // Draft Management Endpoints for Email Composition
-  app.get('/api/drafts', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-drafts-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { accountId, limit = 50, offset = 0 } = req.query;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const drafts = await storage.getUserDrafts(userId, accountId, parseInt(limit), parseInt(offset));
-      res.json(createSuccessResponse(drafts, 'Drafts retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/drafts', requestId);
-    }
-  });
-
-  app.get('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
-    const requestId = `get-draft-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const draft = await storage.getDraftById(id, userId);
-      if (!draft) {
-        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
-      }
-
-      res.json(createSuccessResponse(draft, 'Draft retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, `GET /api/drafts/${req.params.id}`, requestId);
-    }
-  });
-
-  app.post('/api/drafts', isAuthenticated, async (req: any, res) => {
-    const requestId = `create-draft-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Validate request body
-      const validatedData = insertMailDraftSchema.parse({ ...req.body, userId });
-      
-      const draft = await storage.createDraft(validatedData);
-      res.json(createSuccessResponse(draft, 'Draft created successfully'));
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const fieldErrors = error.errors.map(e => ({
-          field: e.path.join('.'),
-          message: e.message
-        }));
-        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Validation failed', 400, JSON.stringify(fieldErrors));
-      }
-      handleApiError(error, res, 'POST /api/drafts', requestId);
-    }
-  });
-
-  app.put('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
-    const requestId = `update-draft-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      // Don't include id and userId in updates
-      const { id: _, userId: __, ...updateData } = req.body;
-      
-      const draft = await storage.updateDraft(id, updateData, userId);
-      if (!draft) {
-        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
-      }
-
-      res.json(createSuccessResponse(draft, 'Draft updated successfully'));
-    } catch (error) {
-      handleApiError(error, res, `PUT /api/drafts/${req.params.id}`, requestId);
-    }
-  });
-
-  app.delete('/api/drafts/:id', isAuthenticated, async (req: any, res) => {
-    const requestId = `delete-draft-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { id } = req.params;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const deleted = await storage.deleteDraft(id, userId);
-      if (!deleted) {
-        throw new ApiError(ErrorCodes.RESOURCE_NOT_FOUND, 'Draft not found', 404);
-      }
-
-      res.json(createSuccessResponse({ deleted: true }, 'Draft deleted successfully'));
-    } catch (error) {
-      handleApiError(error, res, `DELETE /api/drafts/${req.params.id}`, requestId);
-    }
-  });
-
-  app.post('/api/drafts/auto-save', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
-    const requestId = `auto-save-draft-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { accountId, ...draftData } = req.body;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      if (!accountId) {
-        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Account ID is required', 400);
-      }
-
-      const draft = await storage.autoSaveDraft(userId, accountId, draftData);
-      res.json(createSuccessResponse(draft, 'Draft auto-saved successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'POST /api/drafts/auto-save', requestId);
-    }
-  });
-
-  // Contact Suggestions for Autocomplete (with rate limiting for security)
-  app.get('/api/contacts/suggestions', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
-    const requestId = `get-contact-suggestions-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { query, limit = 10 } = req.query;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      if (!query || typeof query !== 'string' || query.trim().length < 2) {
-        throw new ApiError(ErrorCodes.VALIDATION_ERROR, 'Query must be at least 2 characters', 400);
-      }
-
-      const suggestions = await storage.getContactSuggestions(userId, query.trim(), parseInt(limit));
-      res.json(createSuccessResponse(suggestions, 'Contact suggestions retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/contacts/suggestions', requestId);
-    }
-  });
-
-  // Sent Emails Tracking
-  app.get('/api/sent-emails', isAuthenticated, apiRateLimiter.middleware(), async (req: any, res) => {
-    const requestId = `get-sent-emails-${Date.now()}`;
-    try {
-      const userId = req.user.claims.sub;
-      const { accountId, limit = 50, offset = 0 } = req.query;
-
-      if (!userId) {
-        throw new ApiError(ErrorCodes.AUTHENTICATION_FAILED, 'User ID not found', 401);
-      }
-
-      const sentEmails = await storage.getSentEmails(userId, accountId, parseInt(limit), parseInt(offset));
-      res.json(createSuccessResponse(sentEmails, 'Sent emails retrieved successfully'));
-    } catch (error) {
-      handleApiError(error, res, 'GET /api/sent-emails', requestId);
-    }
-  });
-
-  // NOTE: Secure attachment routes are handled via setupAttachmentRoutes() 
-  // in server/attachmentRoutes.ts to ensure comprehensive security features
-  // *** ALL INSECURE ATTACHMENT ROUTES REMOVED - ONLY SECURE ROUTES VIA attachmentRoutes.ts ***
 
   // Global error handler for unhandled errors
   app.use((error: any, req: any, res: any, next: any) => {

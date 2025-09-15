@@ -6,9 +6,6 @@ import {
   priorityRules,
   vipContacts,
   userPrefs,
-  priorityAnalytics,
-  mailDrafts,
-  mailSent,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -23,15 +20,6 @@ import {
   type InsertVipContact,
   type UserPrefs,
   type InsertUserPrefs,
-  type PriorityAnalytics,
-  type InsertPriorityAnalytics,
-  type MailDraft,
-  type InsertMailDraft,
-  type MailSent,
-  type InsertMailSent,
-  type EmailAttachment,
-  type InsertEmailAttachment,
-  emailAttachments,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
@@ -54,64 +42,21 @@ export interface IStorage {
   deleteAccountConnection(id: string): Promise<void>;
   // Mail operations
   getMailMessages(accountId: string, folder?: string, limit?: number, offset?: number): Promise<MailMessage[]>;
-  getFocusModeMessages(userId: string, accountId?: string, limit?: number, offset?: number): Promise<MailMessage[]>;
   createMailMessage(message: InsertMailMessage): Promise<MailMessage>;
   updateMailMessage(id: string, updates: Partial<MailMessage>): Promise<MailMessage | undefined>;
-  updateMailPriority(id: string, priority: number, prioritySource: string, ruleId?: string): Promise<MailMessage | undefined>;
   deleteMailMessage(id: string): Promise<void>;
-  // Enhanced partitioned mail operations for scalability
-  getMailMessagesPartitioned(accountId: string, options?: {
-    folder?: string;
-    limit?: number;
-    cursor?: string;
-    priorityRange?: [number, number];
-    needsPriorityUpdate?: boolean;
-    modifiedSince?: Date;
-  }): Promise<{ messages: MailMessage[]; nextCursor?: string; total?: number }>;
-  getMailMessagesByIds(messageIds: string[]): Promise<MailMessage[]>;
-  bulkUpdateMailPriorities(updates: Array<{
-    id: string;
-    priority: number;
-    prioritySource: string;
-    ruleId?: string;
-    priorityScore?: number;
-    priorityFactors?: any;
-    isVip?: boolean;
-    autoPriority?: number;
-    isInFocus?: boolean;
-  }>): Promise<number>;
-  getEmailsAffectedByRule(ruleId: string, accountId: string, limit?: number): Promise<MailMessage[]>;
-  countEmailsNeedingPriorityUpdate(accountId: string, since?: Date): Promise<number>;
-  getUserIdFromAccountId(accountId: string): Promise<string | null>;
-  // Enhanced Priority rules
+  // Priority rules
   getPriorityRules(accountId: string): Promise<PriorityRule[]>;
-  getPriorityRuleWithOwnership(ruleId: string, userId: string): Promise<PriorityRule | undefined>;
   createPriorityRule(rule: InsertPriorityRule): Promise<PriorityRule>;
   updatePriorityRule(id: string, updates: Partial<PriorityRule>): Promise<PriorityRule | undefined>;
-  updatePriorityRuleStats(id: string, matchCount: number): Promise<void>;
   deletePriorityRule(id: string): Promise<void>;
-  deletePriorityRuleWithOwnership(ruleId: string, userId: string): Promise<boolean>;
-  reorderPriorityRules(ruleUpdates: Array<{id: string, executionOrder: number}>): Promise<void>;
-  reorderPriorityRulesWithOwnership(ruleUpdates: Array<{id: string, executionOrder: number}>, userId: string): Promise<{ success: boolean; invalidRuleIds?: string[] }>;
-  // Enhanced VIP contacts
+  // VIP contacts
   getVipContacts(userId: string): Promise<VipContact[]>;
-  getVipContactByEmail(userId: string, email: string): Promise<VipContact | undefined>;
-  getVipContactWithOwnership(contactId: string, userId: string): Promise<VipContact | undefined>;
   createVipContact(contact: InsertVipContact): Promise<VipContact>;
-  updateVipContact(id: string, updates: Partial<VipContact>): Promise<VipContact | undefined>;
-  updateVipInteraction(userId: string, email: string): Promise<void>;
   deleteVipContact(id: string): Promise<void>;
-  deleteVipContactWithOwnership(contactId: string, userId: string): Promise<boolean>;
-  suggestVipContacts(userId: string, limit?: number): Promise<Array<{email: string, name?: string, interactionCount: number}>>;
   // User preferences
   getUserPrefs(userId: string): Promise<UserPrefs | undefined>;
   upsertUserPrefs(prefs: InsertUserPrefs): Promise<UserPrefs>;
-  // Priority analytics
-  getPriorityAnalytics(userId: string, metricType?: string, periodStart?: Date, periodEnd?: Date): Promise<PriorityAnalytics[]>;
-  createPriorityAnalytics(analytics: InsertPriorityAnalytics): Promise<PriorityAnalytics>;
-  getEmailPriorityDistribution(userId: string, days: number): Promise<Array<{priority: number, count: number}>>;
-  getVipInteractionStats(userId: string, days: number): Promise<Array<{vipId: string, email: string, name?: string, interactionCount: number}>>;
-  getRuleEffectiveness(accountId: string, days: number): Promise<Array<{ruleId: string, name: string, matchCount: number, effectiveness: number}>>;
   // Account folders
   getAccountFolders(accountId: string): Promise<AccountFolder[]>;
   createAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
@@ -119,31 +64,6 @@ export interface IStorage {
   upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
   deleteAccountFolder(id: string): Promise<void>;
   updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void>;
-  // Draft operations for email composition
-  getUserDrafts(userId: string, accountId?: string, limit?: number, offset?: number): Promise<MailDraft[]>;
-  getDraftById(id: string, userId: string): Promise<MailDraft | undefined>;
-  createDraft(draft: InsertMailDraft): Promise<MailDraft>;
-  updateDraft(id: string, updates: Partial<MailDraft>, userId: string): Promise<MailDraft | undefined>;
-  deleteDraft(id: string, userId: string): Promise<boolean>;
-  autoSaveDraft(userId: string, accountId: string, draftData: Partial<InsertMailDraft>): Promise<MailDraft>;
-  // Sent email tracking
-  getSentEmails(userId: string, accountId?: string, limit?: number, offset?: number): Promise<MailSent[]>;
-  createSentEmail(sentEmail: InsertMailSent): Promise<MailSent>;
-  updateSentEmailStatus(id: string, status: string, deliveryError?: string): Promise<MailSent | undefined>;
-  // Contact suggestions for autocomplete
-  getContactSuggestions(userId: string, query: string, limit?: number): Promise<Array<{email: string, name?: string, source: string}>>;
-  // Enhanced Email attachment operations
-  getEmailAttachments(userId: string, draftId?: string, messageId?: string, limit?: number, offset?: number): Promise<EmailAttachment[]>;
-  getEmailAttachmentWithOwnership(attachmentId: string, userId: string): Promise<EmailAttachment | undefined>;
-  getEmailAttachmentById(attachmentId: string): Promise<EmailAttachment | undefined>;
-  createEmailAttachment(attachment: InsertEmailAttachment): Promise<EmailAttachment>;
-  updateEmailAttachment(id: string, updates: Partial<EmailAttachment>): Promise<EmailAttachment | undefined>;
-  deleteEmailAttachment(id: string): Promise<void>;
-  getAttachmentsByDraft(draftId: string, userId: string): Promise<EmailAttachment[]>;
-  getAttachmentsByMessage(messageId: string, userId: string): Promise<EmailAttachment[]>;
-  getOrphanedEmailAttachments(limit?: number): Promise<EmailAttachment[]>;
-  bulkDeleteEmailAttachments(attachmentIds: string[], userId: string): Promise<{ deleted: number; errors: string[] }>;
-  getAttachmentStats(userId: string): Promise<{ totalCount: number; totalSize: number; avgSize: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -306,44 +226,6 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getFocusModeMessages(userId: string, accountId?: string, limit = 50, offset = 0): Promise<MailMessage[]> {
-    // Get user preferences to determine focus criteria
-    const [prefs] = await db.select().from(userPrefs).where(eq(userPrefs.userId, userId));
-    
-    let whereConditions = [
-      sql`${mailIndex.accountId} IN (SELECT id FROM ${accountConnections} WHERE user_id = ${userId})`
-    ];
-
-    // Filter by account if specified
-    if (accountId) {
-      whereConditions.push(eq(mailIndex.accountId, accountId));
-    }
-
-    // Apply focus mode filters based on user preferences
-    if (prefs?.focusMinPriority) {
-      whereConditions.push(sql`(${mailIndex.priority} >= ${prefs.focusMinPriority} OR ${mailIndex.autoPriority} >= ${prefs.focusMinPriority})`);
-    }
-
-    if (prefs?.focusShowVipOnly) {
-      whereConditions.push(eq(mailIndex.isVip, true));
-    }
-
-    if (prefs?.focusShowUnreadOnly) {
-      whereConditions.push(eq(mailIndex.isRead, false));
-    }
-
-    // Always include high priority and VIP emails in focus mode
-    whereConditions.push(
-      sql`(${mailIndex.priority} >= 2 OR ${mailIndex.autoPriority} >= 2 OR ${mailIndex.isVip} = true OR ${mailIndex.isFlagged} = true)`
-    );
-
-    return await db.select().from(mailIndex)
-      .where(and(...whereConditions))
-      .orderBy(sql`${mailIndex.priority} DESC, ${mailIndex.autoPriority} DESC, ${mailIndex.date} DESC NULLS LAST`)
-      .limit(limit)
-      .offset(offset);
-  }
-
   async updateMailMessage(id: string, updates: Partial<MailMessage>): Promise<MailMessage | undefined> {
     const [result] = await db
       .update(mailIndex)
@@ -353,34 +235,13 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateMailPriority(id: string, priority: number, prioritySource: string, ruleId?: string): Promise<MailMessage | undefined> {
-    const updateData: Partial<MailMessage> = {
-      priority,
-      prioritySource: prioritySource as any,
-      updatedAt: new Date()
-    };
-
-    if (ruleId) {
-      updateData.ruleId = ruleId;
-    }
-
-    const [result] = await db
-      .update(mailIndex)
-      .set(updateData)
-      .where(eq(mailIndex.id, id))
-      .returning();
-    return result;
-  }
-
   async deleteMailMessage(id: string): Promise<void> {
     await db.delete(mailIndex).where(eq(mailIndex.id, id));
   }
 
-  // Enhanced Priority rules
+  // Priority rules
   async getPriorityRules(accountId: string): Promise<PriorityRule[]> {
-    return await db.select().from(priorityRules)
-      .where(eq(priorityRules.accountId, accountId))
-      .orderBy(priorityRules.executionOrder, priorityRules.createdAt);
+    return await db.select().from(priorityRules).where(eq(priorityRules.accountId, accountId));
   }
 
   async createPriorityRule(rule: InsertPriorityRule): Promise<PriorityRule> {
@@ -388,121 +249,22 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getPriorityRuleWithOwnership(ruleId: string, userId: string): Promise<PriorityRule | undefined> {
-    // Join with account connections to verify ownership
-    const [result] = await db
-      .select({
-        id: priorityRules.id,
-        accountId: priorityRules.accountId,
-        name: priorityRules.name,
-        description: priorityRules.description,
-        conditionsJson: priorityRules.conditionsJson,
-        priority: priorityRules.priority,
-        colorTag: priorityRules.colorTag,
-        isActive: priorityRules.isActive,
-        executionOrder: priorityRules.executionOrder,
-        matchCount: priorityRules.matchCount,
-        lastMatched: priorityRules.lastMatched,
-        createdAt: priorityRules.createdAt,
-        updatedAt: priorityRules.updatedAt
-      })
-      .from(priorityRules)
-      .innerJoin(accountConnections, eq(priorityRules.accountId, accountConnections.id))
-      .where(and(
-        eq(priorityRules.id, ruleId),
-        eq(accountConnections.userId, userId)
-      ));
-    return result;
-  }
-
   async updatePriorityRule(id: string, updates: Partial<PriorityRule>): Promise<PriorityRule | undefined> {
     const [result] = await db
       .update(priorityRules)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updates)
       .where(eq(priorityRules.id, id))
       .returning();
     return result;
-  }
-
-  async updatePriorityRuleStats(id: string, matchCount: number): Promise<void> {
-    await db
-      .update(priorityRules)
-      .set({ 
-        matchCount: sql`${priorityRules.matchCount} + ${matchCount}`,
-        lastMatched: new Date(),
-        updatedAt: new Date()
-      })
-      .where(eq(priorityRules.id, id));
-  }
-
-  async reorderPriorityRulesWithOwnership(ruleUpdates: Array<{id: string, executionOrder: number}>, userId: string): Promise<{ success: boolean; invalidRuleIds?: string[] }> {
-    // First verify all rules belong to user's accounts
-    const invalidRuleIds: string[] = [];
-    
-    for (const { id } of ruleUpdates) {
-      const rule = await this.getPriorityRuleWithOwnership(id, userId);
-      if (!rule) {
-        invalidRuleIds.push(id);
-      }
-    }
-    
-    if (invalidRuleIds.length > 0) {
-      return { success: false, invalidRuleIds };
-    }
-    
-    // Use a transaction to update all rule orders atomically
-    await db.transaction(async (tx) => {
-      for (const { id, executionOrder } of ruleUpdates) {
-        await tx.update(priorityRules)
-          .set({ executionOrder, updatedAt: new Date() })
-          .where(eq(priorityRules.id, id));
-      }
-    });
-    
-    return { success: true };
-  }
-
-  async reorderPriorityRules(ruleUpdates: Array<{id: string, executionOrder: number}>): Promise<void> {
-    // Use a transaction to update all rule orders atomically
-    await db.transaction(async (tx) => {
-      for (const { id, executionOrder } of ruleUpdates) {
-        await tx.update(priorityRules)
-          .set({ executionOrder, updatedAt: new Date() })
-          .where(eq(priorityRules.id, id));
-      }
-    });
-  }
-
-  async deletePriorityRuleWithOwnership(ruleId: string, userId: string): Promise<boolean> {
-    // First verify ownership, then delete
-    const rule = await this.getPriorityRuleWithOwnership(ruleId, userId);
-    if (!rule) {
-      return false; // Rule not found or not owned by user
-    }
-    
-    await db.delete(priorityRules).where(eq(priorityRules.id, ruleId));
-    return true;
   }
 
   async deletePriorityRule(id: string): Promise<void> {
     await db.delete(priorityRules).where(eq(priorityRules.id, id));
   }
 
-  // Enhanced VIP contacts
+  // VIP contacts
   async getVipContacts(userId: string): Promise<VipContact[]> {
-    return await db.select().from(vipContacts)
-      .where(and(eq(vipContacts.userId, userId), eq(vipContacts.isActive, true)))
-      .orderBy(vipContacts.vipGroup, vipContacts.name);
-  }
-
-  async getVipContactByEmail(userId: string, email: string): Promise<VipContact | undefined> {
-    const [contact] = await db.select().from(vipContacts)
-      .where(and(
-        eq(vipContacts.userId, userId), 
-        eq(vipContacts.email, email),
-        eq(vipContacts.isActive, true)
-      ));
-    return contact;
+    return await db.select().from(vipContacts).where(eq(vipContacts.userId, userId));
   }
 
   async createVipContact(contact: InsertVipContact): Promise<VipContact> {
@@ -510,89 +272,8 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getVipContactWithOwnership(contactId: string, userId: string): Promise<VipContact | undefined> {
-    // Verify the contact belongs to the authenticated user
-    const [contact] = await db.select().from(vipContacts)
-      .where(and(
-        eq(vipContacts.id, contactId),
-        eq(vipContacts.userId, userId),
-        eq(vipContacts.isActive, true)
-      ));
-    return contact;
-  }
-
-  async updateVipContact(id: string, updates: Partial<VipContact>): Promise<VipContact | undefined> {
-    const [result] = await db
-      .update(vipContacts)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(vipContacts.id, id))
-      .returning();
-    return result;
-  }
-
-  async updateVipInteraction(userId: string, email: string): Promise<void> {
-    await db
-      .update(vipContacts)
-      .set({ 
-        interactionCount: sql`${vipContacts.interactionCount} + 1`,
-        lastInteraction: new Date(),
-        updatedAt: new Date()
-      })
-      .where(and(
-        eq(vipContacts.userId, userId), 
-        eq(vipContacts.email, email)
-      ));
-  }
-
-  async deleteVipContactWithOwnership(contactId: string, userId: string): Promise<boolean> {
-    // First verify ownership, then delete
-    const contact = await this.getVipContactWithOwnership(contactId, userId);
-    if (!contact) {
-      return false; // Contact not found or not owned by user
-    }
-    
-    // Soft delete by setting isActive to false
-    const [result] = await db
-      .update(vipContacts)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(vipContacts.id, contactId))
-      .returning();
-    
-    return !!result;
-  }
-
   async deleteVipContact(id: string): Promise<void> {
     await db.delete(vipContacts).where(eq(vipContacts.id, id));
-  }
-
-  async suggestVipContacts(userId: string, limit = 10): Promise<Array<{email: string, name?: string, interactionCount: number}>> {
-    // Get frequent email contacts that aren't already VIP
-    const results = await db
-      .select({
-        email: sql`LOWER(TRIM(${mailIndex.from}))`.as('email'),
-        name: sql`SPLIT_PART(${mailIndex.from}, '<', 1)`.as('name'),
-        interactionCount: sql`COUNT(*)`.as('interactionCount')
-      })
-      .from(mailIndex)
-      .leftJoin(vipContacts, and(
-        eq(vipContacts.userId, userId),
-        sql`LOWER(${vipContacts.email}) = LOWER(TRIM(${mailIndex.from}))`
-      ))
-      .where(and(
-        sql`${mailIndex.accountId} IN (SELECT id FROM ${accountConnections} WHERE user_id = ${userId})`,
-        sql`${vipContacts.id} IS NULL`, // Not already a VIP
-        sql`${mailIndex.from} LIKE '%@%'` // Valid email format
-      ))
-      .groupBy(sql`LOWER(TRIM(${mailIndex.from}))`, sql`SPLIT_PART(${mailIndex.from}, '<', 1)`)
-      .having(sql`COUNT(*) >= 3`) // At least 3 interactions
-      .orderBy(sql`COUNT(*) DESC`)
-      .limit(limit);
-    
-    return results.map(r => ({
-      email: r.email as string,
-      name: r.name && r.name.trim() !== r.email ? r.name as string : undefined,
-      interactionCount: Number(r.interactionCount)
-    }));
   }
 
   // User preferences
@@ -614,113 +295,6 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result;
-  }
-
-  // Priority analytics
-  async getPriorityAnalytics(userId: string, metricType?: string, periodStart?: Date, periodEnd?: Date): Promise<PriorityAnalytics[]> {
-    let whereConditions = [eq(priorityAnalytics.userId, userId)];
-
-    if (metricType) {
-      whereConditions.push(eq(priorityAnalytics.metricType, metricType as any));
-    }
-
-    if (periodStart) {
-      whereConditions.push(sql`${priorityAnalytics.periodStart} >= ${periodStart}`);
-    }
-
-    if (periodEnd) {
-      whereConditions.push(sql`${priorityAnalytics.periodEnd} <= ${periodEnd}`);
-    }
-
-    return await db.select().from(priorityAnalytics)
-      .where(and(...whereConditions))
-      .orderBy(priorityAnalytics.periodStart);
-  }
-
-  async createPriorityAnalytics(analytics: InsertPriorityAnalytics): Promise<PriorityAnalytics> {
-    const [result] = await db.insert(priorityAnalytics).values(analytics).returning();
-    return result;
-  }
-
-  async getEmailPriorityDistribution(userId: string, days: number): Promise<Array<{priority: number, count: number}>> {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const results = await db
-      .select({
-        priority: mailIndex.priority,
-        count: sql`COUNT(*)`.as('count')
-      })
-      .from(mailIndex)
-      .innerJoin(accountConnections, eq(mailIndex.accountId, accountConnections.id))
-      .where(and(
-        eq(accountConnections.userId, userId),
-        sql`${mailIndex.date} >= ${startDate}`
-      ))
-      .groupBy(mailIndex.priority)
-      .orderBy(mailIndex.priority);
-
-    return results.map(r => ({
-      priority: r.priority || 0,
-      count: Number(r.count)
-    }));
-  }
-
-  async getVipInteractionStats(userId: string, days: number): Promise<Array<{vipId: string, email: string, name?: string, interactionCount: number}>> {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const results = await db
-      .select({
-        vipId: vipContacts.id,
-        email: vipContacts.email,
-        name: vipContacts.name,
-        interactionCount: sql`COUNT(${mailIndex.id})`.as('interactionCount')
-      })
-      .from(vipContacts)
-      .leftJoin(mailIndex, and(
-        sql`LOWER(${mailIndex.from}) LIKE LOWER('%' || ${vipContacts.email} || '%')`,
-        sql`${mailIndex.date} >= ${startDate}`
-      ))
-      .innerJoin(accountConnections, eq(vipContacts.userId, userId))
-      .where(eq(vipContacts.userId, userId))
-      .groupBy(vipContacts.id, vipContacts.email, vipContacts.name)
-      .orderBy(sql`COUNT(${mailIndex.id}) DESC`);
-
-    return results.map(r => ({
-      vipId: r.vipId,
-      email: r.email,
-      name: r.name || undefined,
-      interactionCount: Number(r.interactionCount)
-    }));
-  }
-
-  async getRuleEffectiveness(accountId: string, days: number): Promise<Array<{ruleId: string, name: string, matchCount: number, effectiveness: number}>> {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const results = await db
-      .select({
-        ruleId: priorityRules.id,
-        name: priorityRules.name,
-        matchCount: sql`COUNT(${mailIndex.id})`.as('matchCount'),
-        totalMatchCount: priorityRules.matchCount
-      })
-      .from(priorityRules)
-      .leftJoin(mailIndex, and(
-        eq(mailIndex.ruleId, priorityRules.id),
-        sql`${mailIndex.date} >= ${startDate}`
-      ))
-      .where(eq(priorityRules.accountId, accountId))
-      .groupBy(priorityRules.id, priorityRules.name, priorityRules.matchCount)
-      .orderBy(sql`COUNT(${mailIndex.id}) DESC`);
-
-    return results.map(r => ({
-      ruleId: r.ruleId,
-      name: r.name,
-      matchCount: Number(r.matchCount),
-      effectiveness: r.totalMatchCount ? (Number(r.matchCount) / r.totalMatchCount) * 100 : 0
-    }));
   }
 
   // Account folders
@@ -775,561 +349,6 @@ export class DatabaseStorage implements IStorage {
         eq(accountFolders.accountId, accountId),
         eq(accountFolders.folderId, folderId)
       ));
-  }
-
-  // Enhanced partitioned mail operations for scalability
-  async getMailMessagesPartitioned(accountId: string, options: {
-    folder?: string;
-    limit?: number;
-    cursor?: string;
-    priorityRange?: [number, number];
-    needsPriorityUpdate?: boolean;
-    modifiedSince?: Date;
-  } = {}): Promise<{ messages: MailMessage[]; nextCursor?: string; total?: number }> {
-    const limit = Math.min(options.limit || 100, 500); // Cap limit to prevent memory issues
-    
-    let query = db.select().from(mailIndex).where(eq(mailIndex.accountId, accountId));
-    
-    // Add folder filter
-    if (options.folder) {
-      query = query.where(eq(mailIndex.folder, options.folder));
-    }
-    
-    // Add priority range filter
-    if (options.priorityRange) {
-      const [minPriority, maxPriority] = options.priorityRange;
-      query = query.where(
-        and(
-          sql`${mailIndex.autoPriority} >= ${minPriority}`,
-          sql`${mailIndex.autoPriority} <= ${maxPriority}`
-        )
-      );
-    }
-    
-    // Add filter for emails needing priority updates
-    if (options.needsPriorityUpdate) {
-      query = query.where(
-        sql`${mailIndex.autoPriority} IS NULL OR ${mailIndex.prioritySource} = 'auto'`
-      );
-    }
-    
-    // Add modified since filter
-    if (options.modifiedSince) {
-      query = query.where(sql`${mailIndex.date} >= ${options.modifiedSince}`);
-    }
-    
-    // Cursor-based pagination for consistent results
-    if (options.cursor) {
-      // Decode cursor (base64 encoded timestamp:id)
-      const decoded = Buffer.from(options.cursor, 'base64').toString();
-      const [timestamp, id] = decoded.split(':');
-      query = query.where(
-        sql`(${mailIndex.date}, ${mailIndex.id}) > (${new Date(timestamp)}, ${id})`
-      );
-    }
-    
-    // Order by date and id for consistent pagination
-    query = query
-      .orderBy(mailIndex.date, mailIndex.id)
-      .limit(limit + 1); // Fetch one extra to determine if there's a next page
-    
-    const results = await query;
-    const hasMore = results.length > limit;
-    const messages = hasMore ? results.slice(0, limit) : results;
-    
-    // Generate next cursor if there are more results
-    let nextCursor: string | undefined;
-    if (hasMore && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      const cursorData = `${lastMessage.date?.toISOString()}:${lastMessage.id}`;
-      nextCursor = Buffer.from(cursorData).toString('base64');
-    }
-    
-    return {
-      messages,
-      nextCursor,
-      total: undefined // Don't calculate total for performance - use separate count query if needed
-    };
-  }
-  
-  async getMailMessagesByIds(messageIds: string[]): Promise<MailMessage[]> {
-    if (messageIds.length === 0) return [];
-    
-    // Batch in chunks to avoid query size limits
-    const chunkSize = 100;
-    const chunks: MailMessage[][] = [];
-    
-    for (let i = 0; i < messageIds.length; i += chunkSize) {
-      const chunk = messageIds.slice(i, i + chunkSize);
-      const results = await db.select().from(mailIndex).where(
-        sql`${mailIndex.id} = ANY(${chunk})`
-      );
-      chunks.push(results);
-    }
-    
-    return chunks.flat();
-  }
-  
-  async bulkUpdateMailPriorities(updates: Array<{
-    id: string;
-    priority: number;
-    prioritySource: string;
-    ruleId?: string;
-    priorityScore?: number;
-    priorityFactors?: any;
-    isVip?: boolean;
-    autoPriority?: number;
-    isInFocus?: boolean;
-  }>): Promise<number> {
-    if (updates.length === 0) return 0;
-    
-    // Batch updates in chunks for performance
-    const chunkSize = 50;
-    let totalUpdated = 0;
-    
-    for (let i = 0; i < updates.length; i += chunkSize) {
-      const chunk = updates.slice(i, i + chunkSize);
-      
-      // Build a multi-row update query
-      const updateCases: string[] = [];
-      const params: any[] = [];
-      const ids: string[] = [];
-      
-      chunk.forEach((update, index) => {
-        ids.push(update.id);
-        
-        // Build CASE statements for each field
-        const baseIndex = i + index;
-        updateCases.push(`
-          priority = CASE WHEN id = $${params.length + 1} THEN $${params.length + 2} ELSE priority END,
-          auto_priority = CASE WHEN id = $${params.length + 1} THEN $${params.length + 3} ELSE auto_priority END,
-          priority_source = CASE WHEN id = $${params.length + 1} THEN $${params.length + 4} ELSE priority_source END,
-          priority_score = CASE WHEN id = $${params.length + 1} THEN $${params.length + 5} ELSE priority_score END,
-          is_vip = CASE WHEN id = $${params.length + 1} THEN $${params.length + 6} ELSE is_vip END,
-          is_in_focus = CASE WHEN id = $${params.length + 1} THEN $${params.length + 7} ELSE is_in_focus END,
-          updated_at = CASE WHEN id = $${params.length + 1} THEN NOW() ELSE updated_at END
-        `);
-        
-        params.push(
-          update.id,
-          update.priority,
-          update.autoPriority || update.priority,
-          update.prioritySource,
-          update.priorityScore || 0,
-          update.isVip || false,
-          update.isInFocus || false
-        );
-      });
-      
-      // Execute bulk update using raw SQL for performance
-      const result = await db.execute(sql`
-        UPDATE mail_index SET ${sql.raw(updateCases.join(','))}
-        WHERE id = ANY(${ids})
-      `);
-      
-      totalUpdated += result.rowCount || 0;
-    }
-    
-    return totalUpdated;
-  }
-  
-  async getEmailsAffectedByRule(ruleId: string, accountId: string, limit: number = 1000): Promise<MailMessage[]> {
-    // Get emails that match the rule conditions or were previously matched by this rule
-    const results = await db.select().from(mailIndex)
-      .where(
-        and(
-          eq(mailIndex.accountId, accountId),
-          sql`${mailIndex.ruleId} = ${ruleId} OR ${mailIndex.prioritySource} = 'rule'`
-        )
-      )
-      .orderBy(mailIndex.date)
-      .limit(limit);
-    
-    return results;
-  }
-  
-  async countEmailsNeedingPriorityUpdate(accountId: string, since?: Date): Promise<number> {
-    let query = db.select({ count: sql<number>`COUNT(*)` }).from(mailIndex)
-      .where(
-        and(
-          eq(mailIndex.accountId, accountId),
-          sql`${mailIndex.autoPriority} IS NULL OR ${mailIndex.prioritySource} = 'auto'`
-        )
-      );
-    
-    if (since) {
-      query = query.where(sql`${mailIndex.date} >= ${since}`);
-    }
-    
-    const [result] = await query;
-    return result?.count || 0;
-  }
-
-  /**
-   * Get userId from accountId for distributed job processing
-   */
-  async getUserIdFromAccountId(accountId: string): Promise<string | null> {
-    const [account] = await db.select({ userId: accountConnections.userId })
-      .from(accountConnections)
-      .where(eq(accountConnections.id, accountId));
-    
-    return account?.userId || null;
-  }
-
-  // Draft operations for email composition
-  async getUserDrafts(userId: string, accountId?: string, limit: number = 50, offset: number = 0): Promise<MailDraft[]> {
-    let query = db.select().from(mailDrafts)
-      .where(eq(mailDrafts.userId, userId))
-      .orderBy(sql`${mailDrafts.lastEditedAt} DESC`)
-      .limit(limit)
-      .offset(offset);
-
-    if (accountId) {
-      query = query.where(and(
-        eq(mailDrafts.userId, userId),
-        eq(mailDrafts.accountId, accountId)
-      ));
-    }
-
-    return await query;
-  }
-
-  async getDraftById(id: string, userId: string): Promise<MailDraft | undefined> {
-    const [draft] = await db.select().from(mailDrafts)
-      .where(and(
-        eq(mailDrafts.id, id),
-        eq(mailDrafts.userId, userId)
-      ));
-    return draft;
-  }
-
-  async createDraft(draft: InsertMailDraft): Promise<MailDraft> {
-    const [newDraft] = await db.insert(mailDrafts)
-      .values({
-        ...draft,
-        lastEditedAt: new Date(),
-        updatedAt: new Date()
-      })
-      .returning();
-    return newDraft;
-  }
-
-  async updateDraft(id: string, updates: Partial<MailDraft>, userId: string): Promise<MailDraft | undefined> {
-    const [updatedDraft] = await db.update(mailDrafts)
-      .set({
-        ...updates,
-        lastEditedAt: new Date(),
-        updatedAt: new Date()
-      })
-      .where(and(
-        eq(mailDrafts.id, id),
-        eq(mailDrafts.userId, userId)
-      ))
-      .returning();
-    return updatedDraft;
-  }
-
-  async deleteDraft(id: string, userId: string): Promise<boolean> {
-    const result = await db.delete(mailDrafts)
-      .where(and(
-        eq(mailDrafts.id, id),
-        eq(mailDrafts.userId, userId)
-      ));
-    return (result.rowCount || 0) > 0;
-  }
-
-  async autoSaveDraft(userId: string, accountId: string, draftData: Partial<InsertMailDraft>): Promise<MailDraft> {
-    // Check if there's an existing auto-saved draft for this user/account
-    const [existingDraft] = await db.select().from(mailDrafts)
-      .where(and(
-        eq(mailDrafts.userId, userId),
-        eq(mailDrafts.accountId, accountId),
-        eq(mailDrafts.isAutoSaved, true),
-        eq(mailDrafts.compositionMode, draftData.compositionMode || "new"),
-        draftData.replyToMessageId ? eq(mailDrafts.replyToMessageId, draftData.replyToMessageId) : sql`${mailDrafts.replyToMessageId} IS NULL`
-      ))
-      .orderBy(sql`${mailDrafts.lastEditedAt} DESC`)
-      .limit(1);
-
-    if (existingDraft) {
-      // Update existing auto-saved draft
-      return await this.updateDraft(existingDraft.id, {
-        ...draftData,
-        isAutoSaved: true
-      }, userId) as MailDraft;
-    } else {
-      // Create new auto-saved draft
-      return await this.createDraft({
-        userId,
-        accountId,
-        ...draftData,
-        isAutoSaved: true
-      } as InsertMailDraft);
-    }
-  }
-
-  // Sent email tracking
-  async getSentEmails(userId: string, accountId?: string, limit: number = 50, offset: number = 0): Promise<MailSent[]> {
-    let query = db.select().from(mailSent)
-      .where(eq(mailSent.userId, userId))
-      .orderBy(sql`${mailSent.sentAt} DESC`)
-      .limit(limit)
-      .offset(offset);
-
-    if (accountId) {
-      query = query.where(and(
-        eq(mailSent.userId, userId),
-        eq(mailSent.accountId, accountId)
-      ));
-    }
-
-    return await query;
-  }
-
-  async createSentEmail(sentEmail: InsertMailSent): Promise<MailSent> {
-    const [newSentEmail] = await db.insert(mailSent)
-      .values({
-        ...sentEmail,
-        sentAt: new Date(),
-        updatedAt: new Date()
-      })
-      .returning();
-    return newSentEmail;
-  }
-
-  async updateSentEmailStatus(id: string, status: string, deliveryError?: string): Promise<MailSent | undefined> {
-    const updates: Partial<MailSent> = {
-      deliveryStatus: status as any,
-      updatedAt: new Date()
-    };
-
-    if (deliveryError) {
-      updates.deliveryError = deliveryError;
-    }
-
-    if (status === 'delivered') {
-      updates.deliveredAt = new Date();
-    }
-
-    const [updatedSentEmail] = await db.update(mailSent)
-      .set(updates)
-      .where(eq(mailSent.id, id))
-      .returning();
-    return updatedSentEmail;
-  }
-
-  // Contact suggestions for autocomplete
-  async getContactSuggestions(userId: string, query: string, limit: number = 10): Promise<Array<{email: string, name?: string, source: string}>> {
-    const suggestions: Array<{email: string, name?: string, source: string}> = [];
-    
-    // Get suggestions from VIP contacts
-    const vipSuggestions = await db.select({
-      email: vipContacts.email,
-      name: vipContacts.name
-    }).from(vipContacts)
-      .where(and(
-        eq(vipContacts.userId, userId),
-        eq(vipContacts.isActive, true),
-        sql`(${vipContacts.email} ILIKE ${`%${query}%`} OR ${vipContacts.name} ILIKE ${`%${query}%`})`
-      ))
-      .limit(Math.min(limit, 5));
-
-    suggestions.push(...vipSuggestions.map(contact => ({
-      email: contact.email,
-      name: contact.name || undefined,
-      source: 'vip'
-    })));
-
-    // Get suggestions from recent email senders (from mailIndex)
-    if (suggestions.length < limit) {
-      const remainingLimit = limit - suggestions.length;
-      const userAccountIds = await db.select({ id: accountConnections.id })
-        .from(accountConnections)
-        .where(eq(accountConnections.userId, userId));
-
-      if (userAccountIds.length > 0) {
-        const accountIds = userAccountIds.map(acc => acc.id);
-        
-        const recentSenders = await db.selectDistinct({
-          from: mailIndex.from
-        }).from(mailIndex)
-          .where(and(
-            sql`${mailIndex.accountId} = ANY(${accountIds})`,
-            sql`${mailIndex.from} ILIKE ${`%${query}%`}`,
-            sql`${mailIndex.from} IS NOT NULL AND ${mailIndex.from} != ''`
-          ))
-          .orderBy(sql`MAX(${mailIndex.date}) DESC`)
-          .groupBy(mailIndex.from)
-          .limit(remainingLimit);
-
-        const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
-        
-        recentSenders.forEach(sender => {
-          if (sender.from) {
-            const emailMatch = sender.from.match(emailRegex);
-            if (emailMatch) {
-              const email = emailMatch[1];
-              // Extract name if format is "Name <email@domain.com>"
-              const nameMatch = sender.from.match(/^(.+?)\s*<[^>]+>$/);
-              const name = nameMatch ? nameMatch[1].replace(/"/g, '').trim() : undefined;
-              
-              // Don't add if already in suggestions
-              if (!suggestions.some(s => s.email === email)) {
-                suggestions.push({
-                  email,
-                  name,
-                  source: 'recent'
-                });
-              }
-            }
-          }
-        });
-      }
-    }
-
-    return suggestions.slice(0, limit);
-  }
-
-  // Enhanced Email attachment operations
-  async getEmailAttachments(userId: string, draftId?: string, messageId?: string, limit?: number, offset?: number): Promise<EmailAttachment[]> {
-    let query = db.select().from(emailAttachments).where(and(
-      eq(emailAttachments.userId, userId),
-      eq(emailAttachments.isActive, true)
-    ));
-
-    if (draftId) {
-      query = query.where(eq(emailAttachments.draftId, draftId));
-    }
-    
-    if (messageId) {
-      query = query.where(eq(emailAttachments.messageId, messageId));
-    }
-
-    if (limit) {
-      query = query.limit(limit);
-    }
-
-    if (offset) {
-      query = query.offset(offset);
-    }
-
-    query = query.orderBy(emailAttachments.createdAt);
-
-    return await query;
-  }
-
-  async getEmailAttachmentWithOwnership(attachmentId: string, userId: string): Promise<EmailAttachment | undefined> {
-    const [attachment] = await db.select().from(emailAttachments).where(
-      and(
-        eq(emailAttachments.id, attachmentId),
-        eq(emailAttachments.userId, userId),
-        eq(emailAttachments.isActive, true)
-      )
-    );
-    return attachment;
-  }
-
-  async getEmailAttachmentById(attachmentId: string): Promise<EmailAttachment | undefined> {
-    const [attachment] = await db.select().from(emailAttachments).where(
-      and(
-        eq(emailAttachments.id, attachmentId),
-        eq(emailAttachments.isActive, true)
-      )
-    );
-    return attachment;
-  }
-
-  async createEmailAttachment(attachment: InsertEmailAttachment): Promise<EmailAttachment> {
-    const [created] = await db.insert(emailAttachments).values(attachment).returning();
-    return created;
-  }
-
-  async updateEmailAttachment(id: string, updates: Partial<EmailAttachment>): Promise<EmailAttachment | undefined> {
-    const [updated] = await db
-      .update(emailAttachments)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(emailAttachments.id, id))
-      .returning();
-    return updated;
-  }
-
-  async deleteEmailAttachment(id: string): Promise<void> {
-    // Soft delete by setting isActive to false
-    await db
-      .update(emailAttachments)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(emailAttachments.id, id));
-  }
-
-  async getAttachmentsByDraft(draftId: string, userId: string): Promise<EmailAttachment[]> {
-    return await db.select().from(emailAttachments).where(
-      and(
-        eq(emailAttachments.draftId, draftId),
-        eq(emailAttachments.userId, userId),
-        eq(emailAttachments.isActive, true)
-      )
-    ).orderBy(emailAttachments.createdAt);
-  }
-
-  async getAttachmentsByMessage(messageId: string, userId: string): Promise<EmailAttachment[]> {
-    return await db.select().from(emailAttachments).where(
-      and(
-        eq(emailAttachments.messageId, messageId),
-        eq(emailAttachments.userId, userId),
-        eq(emailAttachments.isActive, true)
-      )
-    ).orderBy(emailAttachments.createdAt);
-  }
-
-  async getOrphanedEmailAttachments(limit = 100): Promise<EmailAttachment[]> {
-    const now = new Date();
-    return await db.select().from(emailAttachments).where(
-      and(
-        eq(emailAttachments.isOrphaned, true),
-        eq(emailAttachments.isActive, true),
-        sql`${emailAttachments.expiresAt} < ${now}`
-      )
-    ).limit(limit);
-  }
-
-  async bulkDeleteEmailAttachments(attachmentIds: string[], userId: string): Promise<{ deleted: number; errors: string[] }> {
-    const errors: string[] = [];
-    let deleted = 0;
-
-    for (const id of attachmentIds) {
-      try {
-        // Verify ownership before deletion
-        const attachment = await this.getEmailAttachmentWithOwnership(id, userId);
-        if (attachment) {
-          await this.deleteEmailAttachment(id);
-          deleted++;
-        } else {
-          errors.push(`Attachment ${id} not found or access denied`);
-        }
-      } catch (error) {
-        errors.push(`Failed to delete attachment ${id}: ${error.message}`);
-      }
-    }
-
-    return { deleted, errors };
-  }
-
-  async getAttachmentStats(userId: string): Promise<{ totalCount: number; totalSize: number; avgSize: number }> {
-    const result = await db
-      .select({
-        totalCount: sql<number>`count(*)`,
-        totalSize: sql<number>`coalesce(sum(${emailAttachments.size}), 0)`,
-        avgSize: sql<number>`coalesce(avg(${emailAttachments.size}), 0)`
-      })
-      .from(emailAttachments)
-      .where(
-        and(
-          eq(emailAttachments.userId, userId),
-          eq(emailAttachments.isActive, true)
-        )
-      );
-
-    return result[0] || { totalCount: 0, totalSize: 0, avgSize: 0 };
   }
 }
 
