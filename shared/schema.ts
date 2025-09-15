@@ -49,6 +49,9 @@ export const mailIndex = pgTable("mail_index", {
   subject: text("subject"),
   from: text("from"),
   to: text("to"),
+  cc: text("cc"), // Carbon copy recipients
+  bcc: text("bcc"), // Blind carbon copy recipients
+  replyTo: text("reply_to"), // Reply-To header for directing replies
   date: timestamp("date"),
   size: integer("size"),
   hasAttachments: boolean("has_attachments").default(false),

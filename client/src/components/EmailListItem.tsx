@@ -7,6 +7,10 @@ import { cn } from "@/lib/utils";
 export interface EmailMessage {
   id: string;
   from: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  replyTo?: string;
   subject: string;
   date: Date;
   isRead: boolean;

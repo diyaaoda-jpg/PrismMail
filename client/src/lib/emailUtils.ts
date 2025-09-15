@@ -12,6 +12,103 @@ export interface ReplyOptions {
   isForward?: boolean;
 }
 
+export interface ParsedEmailAddress {
+  name?: string;
+  email: string;
+}
+
+/**
+ * Parse email address strings into structured format
+ * Handles formats like:
+ * - "email@example.com"
+ * - "Name <email@example.com>"
+ * - "email@example.com, another@example.com"
+ */
+export function parseEmailAddresses(addressString?: string): ParsedEmailAddress[] {
+  if (!addressString?.trim()) return [];
+  
+  const addresses: ParsedEmailAddress[] = [];
+  
+  // Split by comma, but be careful about commas in quoted names
+  const parts = addressString.split(',').map(part => part.trim());
+  
+  for (const part of parts) {
+    if (!part) continue;
+    
+    // Match "Name <email@example.com>" format
+    const nameEmailMatch = part.match(/^(.+?)\s*<([^>]+)>$/);
+    if (nameEmailMatch) {
+      const name = nameEmailMatch[1].replace(/^"|"$/g, '').trim(); // Remove quotes
+      const email = nameEmailMatch[2].trim();
+      if (isValidEmail(email)) {
+        addresses.push({ name: name || undefined, email });
+      }
+      continue;
+    }
+    
+    // Match plain email format
+    const emailOnlyMatch = part.match(/^[^\s<>]+@[^\s<>]+\.[^\s<>]+$/);
+    if (emailOnlyMatch && isValidEmail(part)) {
+      addresses.push({ email: part });
+    }
+  }
+  
+  return addresses;
+}
+
+/**
+ * Format parsed email addresses back to string format
+ */
+export function formatEmailAddresses(addresses: ParsedEmailAddress[]): string {
+  return addresses
+    .map(addr => addr.name ? `${addr.name} <${addr.email}>` : addr.email)
+    .join(', ');
+}
+
+/**
+ * Basic email validation
+ */
+function isValidEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email.trim());
+}
+
+/**
+ * Remove duplicate email addresses from a list
+ */
+export function removeDuplicateEmails(addresses: ParsedEmailAddress[]): ParsedEmailAddress[] {
+  const seen = new Set<string>();
+  return addresses.filter(addr => {
+    const email = addr.email.toLowerCase();
+    if (seen.has(email)) return false;
+    seen.add(email);
+    return true;
+  });
+}
+
+/**
+ * Remove current user's email from recipient lists
+ */
+export function excludeCurrentUser(addresses: ParsedEmailAddress[], currentUserEmail?: string): ParsedEmailAddress[] {
+  if (!currentUserEmail) return addresses;
+  const userEmail = currentUserEmail.toLowerCase();
+  return addresses.filter(addr => addr.email.toLowerCase() !== userEmail);
+}
+
+/**
+ * Combine and deduplicate email addresses from multiple sources
+ */
+export function combineEmailAddresses(
+  ...addressLists: (ParsedEmailAddress[] | undefined)[]
+): ParsedEmailAddress[] {
+  const combined = addressLists.reduce<ParsedEmailAddress[]>((acc, list) => {
+    if (list) acc.push(...list);
+    return acc;
+  }, []);
+  
+  return removeDuplicateEmails(combined);
+}
+
 /**
  * Enhanced date formatting for reply attribution
  */
@@ -133,7 +230,9 @@ function createReplyAttribution(email: EmailMessage, isForward: boolean = false)
 }
 
 /**
- * Enhanced reply function with proper HTML/text handling
+ * Enhanced reply function with proper recipient handling
+ * Standard reply logic: Send to Reply-To if present, otherwise to From address
+ * No CC or BCC recipients, exclude current user
  */
 export function makeReply(email: EmailMessage, currentUserEmail?: string): ReplyOptions {
   const subject = email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`;
@@ -143,9 +242,19 @@ export function makeReply(email: EmailMessage, currentUserEmail?: string): Reply
   // Create HTML body with proper quote formatting
   const quotedContent = formatHtmlQuotedContent(content, isHtml);
   const htmlBody = `${attribution.html}${quotedContent}`;
+  
+  // Determine reply recipient: Reply-To takes precedence over From
+  const replyToAddress = email.replyTo?.trim() || email.from;
+  const replyRecipients = parseEmailAddresses(replyToAddress);
+  
+  // Exclude current user from reply recipients
+  const filteredRecipients = excludeCurrentUser(replyRecipients, currentUserEmail);
+  
+  // If no recipients remain after filtering, fallback to original From address
+  const finalRecipients = filteredRecipients.length > 0 ? filteredRecipients : parseEmailAddresses(email.from);
 
   return {
-    to: email.from,
+    to: formatEmailAddresses(finalRecipients),
     subject,
     body: htmlBody,
     isReplyAll: false,
@@ -155,7 +264,9 @@ export function makeReply(email: EmailMessage, currentUserEmail?: string): Reply
 }
 
 /**
- * Enhanced reply all function with proper HTML/text handling
+ * Enhanced reply all function with proper recipient handling
+ * Reply All logic: Send to Reply-To (or From) plus all To/CC recipients from original email
+ * Exclude current user, preserve CC structure
  */
 export function makeReplyAll(email: EmailMessage, currentUserEmail?: string): ReplyOptions {
   const subject = email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`;
@@ -165,9 +276,25 @@ export function makeReplyAll(email: EmailMessage, currentUserEmail?: string): Re
   // Create HTML body with proper quote formatting
   const quotedContent = formatHtmlQuotedContent(content, isHtml);
   const htmlBody = `${attribution.html}${quotedContent}`;
+  
+  // Parse all recipients from the original email
+  const fromRecipients = parseEmailAddresses(email.replyTo?.trim() || email.from);
+  const toRecipients = parseEmailAddresses(email.to);
+  const ccRecipients = parseEmailAddresses(email.cc);
+  
+  // Combine To recipients: Reply-To/From + original To recipients
+  const allToRecipients = combineEmailAddresses(fromRecipients, toRecipients);
+  
+  // Exclude current user from all recipient lists
+  const filteredToRecipients = excludeCurrentUser(allToRecipients, currentUserEmail);
+  const filteredCcRecipients = excludeCurrentUser(ccRecipients, currentUserEmail);
+  
+  // If no To recipients remain after filtering, fallback to original From
+  const finalToRecipients = filteredToRecipients.length > 0 ? filteredToRecipients : parseEmailAddresses(email.from);
 
   return {
-    to: email.from,
+    to: formatEmailAddresses(finalToRecipients),
+    cc: filteredCcRecipients.length > 0 ? formatEmailAddresses(filteredCcRecipients) : undefined,
     subject,
     body: htmlBody,
     isReplyAll: true,
@@ -177,18 +304,37 @@ export function makeReplyAll(email: EmailMessage, currentUserEmail?: string): Re
 }
 
 /**
- * Enhanced forward function with proper HTML/text handling
+ * Enhanced forward function with proper forwarding logic
+ * Forward logic: Start with empty recipients, user manually fills them
+ * Include comprehensive message headers in forward attribution
  */
 export function makeForward(email: EmailMessage): ReplyOptions {
   const subject = email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`;
   const { content, isHtml } = getEmailContent(email);
-  const attribution = createReplyAttribution(email, true);
   
-  // For forwarding, we include the content as-is without additional quoting
-  const htmlBody = `${attribution.html}${content}`;
+  // Enhanced forward attribution with more details
+  const date = email.date instanceof Date ? email.date : new Date(email.date);
+  const formattedDate = formatDate(date);
+  
+  const htmlAttribution = `
+<br><br>
+<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 10px;">
+<p><strong>---------- Forwarded message ----------</strong></p>
+<p><strong>From:</strong> ${email.from}</p>
+${email.to ? `<p><strong>To:</strong> ${email.to}</p>` : ''}
+${email.cc ? `<p><strong>Cc:</strong> ${email.cc}</p>` : ''}
+<p><strong>Date:</strong> ${formattedDate}</p>
+<p><strong>Subject:</strong> ${email.subject}</p>
+</div>
+<br>`;
+  
+  // For forwarding, include the content as-is without additional quoting
+  const htmlBody = `${htmlAttribution}${content}`;
 
   return {
-    to: '',
+    to: '', // Empty - user fills this manually
+    cc: undefined,
+    bcc: undefined,
     subject,
     body: htmlBody,
     isForward: true
@@ -212,12 +358,21 @@ export function getContextualLabels(email: EmailMessage): {
 
 /**
  * Determine if Reply All should be shown
- * Show Reply All if there are multiple recipients or CC recipients
+ * Show Reply All if there are multiple recipients or CC recipients beyond current user
  */
 export function shouldShowReplyAll(email: EmailMessage, currentUserEmail?: string): boolean {
-  // For now, always show Reply All - in a real implementation,
-  // this would check if the email has multiple recipients
-  return true;
+  // Parse all recipients
+  const toRecipients = parseEmailAddresses(email.to);
+  const ccRecipients = parseEmailAddresses(email.cc);
+  const fromRecipients = parseEmailAddresses(email.from);
+  
+  // Combine all recipients and exclude current user
+  const allRecipients = combineEmailAddresses(toRecipients, ccRecipients, fromRecipients);
+  const filteredRecipients = excludeCurrentUser(allRecipients, currentUserEmail);
+  
+  // Show Reply All if there are multiple recipients after excluding current user
+  // or if there are any CC recipients
+  return filteredRecipients.length > 1 || ccRecipients.length > 0;
 }
 
 /**
