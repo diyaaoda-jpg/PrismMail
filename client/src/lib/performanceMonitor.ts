@@ -1,10 +1,11 @@
 // Performance monitoring and metrics collection for mobile optimization
-import { getCLS, getFID, getFCP, getLCP, getTTFB } from 'web-vitals';
+import { useState, useEffect } from 'react';
+import { onCLS, onINP, onFCP, onLCP, onTTFB } from 'web-vitals';
 
 interface PerformanceMetrics {
   fcp?: number;
   lcp?: number;
-  fid?: number;
+  inp?: number; // INP replaced FID in web-vitals v5
   cls?: number;
   ttfb?: number;
   bundleSize?: number;
@@ -29,31 +30,31 @@ class PerformanceMonitor {
 
     try {
       // Core Web Vitals - Critical for mobile performance
-      getCLS((metric) => {
+      onCLS((metric) => {
         this.metrics.cls = metric.value;
         this.reportMetric('CLS', metric.value, 0.1); // Target < 0.1
         this.notifyObservers();
       });
 
-      getFID((metric) => {
-        this.metrics.fid = metric.value;
-        this.reportMetric('FID', metric.value, 100); // Target < 100ms
+      onINP((metric) => {
+        this.metrics.inp = metric.value;
+        this.reportMetric('INP', metric.value, 200); // Target < 200ms (INP threshold)
         this.notifyObservers();
       });
 
-      getFCP((metric) => {
+      onFCP((metric) => {
         this.metrics.fcp = metric.value;
         this.reportMetric('FCP', metric.value, 1500); // Target < 1.5s
         this.notifyObservers();
       });
 
-      getLCP((metric) => {
+      onLCP((metric) => {
         this.metrics.lcp = metric.value;
         this.reportMetric('LCP', metric.value, 2500); // Target < 2.5s
         this.notifyObservers();
       });
 
-      getTTFB((metric) => {
+      onTTFB((metric) => {
         this.metrics.ttfb = metric.value;
         this.reportMetric('TTFB', metric.value, 800); // Target < 800ms
         this.notifyObservers();
@@ -341,7 +342,7 @@ class PerformanceMonitor {
     // Deduct points based on Web Vitals
     if (this.metrics.fcp && this.metrics.fcp > 1500) score -= 15;
     if (this.metrics.lcp && this.metrics.lcp > 2500) score -= 20;
-    if (this.metrics.fid && this.metrics.fid > 100) score -= 15;
+    if (this.metrics.inp && this.metrics.inp > 200) score -= 15;
     if (this.metrics.cls && this.metrics.cls > 0.1) score -= 15;
     if (this.metrics.bundleSize && this.metrics.bundleSize > 500) score -= 10;
     if (this.metrics.memoryUsage && this.metrics.memoryUsage > 100) score -= 10;
@@ -445,7 +446,7 @@ class PerformanceMonitor {
       '🎯 Core Web Vitals:',
       formatMetric('First Contentful Paint', metrics.fcp, 'ms', 1500),
       formatMetric('Largest Contentful Paint', metrics.lcp, 'ms', 2500),
-      formatMetric('First Input Delay', metrics.fid, 'ms', 100),
+      formatMetric('Interaction to Next Paint', metrics.inp, 'ms', 200),
       formatMetric('Cumulative Layout Shift', metrics.cls, '', 0.1),
       formatMetric('Time to First Byte', metrics.ttfb, 'ms', 800),
       '',
