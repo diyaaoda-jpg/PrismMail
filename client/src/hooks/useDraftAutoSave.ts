@@ -313,7 +313,20 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
     lastSavedDataRef.current = '';
   }, [clearLocalStorage]);
 
-  // Set up periodic auto-save
+  // Refs to hold current values for auto-save timer to avoid stale closures
+  const statusRef = useRef(status);
+  const isPendingRef = useRef(saveDraftMutation.isPending);
+
+  // Update refs when values change
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    isPendingRef.current = saveDraftMutation.isPending;
+  }, [saveDraftMutation.isPending]);
+
+  // Set up periodic auto-save with refs to avoid stale closures
   useEffect(() => {
     if (!accountId) return;
 
@@ -323,8 +336,12 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
       }
 
       autoSaveTimerRef.current = setTimeout(() => {
+        // Use refs to get current values and avoid stale closures
+        const currentStatus = statusRef.current;
+        const isPending = isPendingRef.current;
+        
         // Only auto-save if there are unsaved changes and we're not currently saving
-        if (status.hasUnsavedChanges && !saveDraftMutation.isPending) {
+        if (currentStatus.hasUnsavedChanges && !isPending) {
           setStatus(prev => ({ ...prev, isAutoSaving: true }));
           saveDraftMutation.mutate({ draftData: pendingDraftDataRef.current });
         }
@@ -341,7 +358,7 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [accountId, autoSaveInterval, status.hasUnsavedChanges, saveDraftMutation]);
+  }, [accountId, autoSaveInterval, saveDraftMutation]); // Include saveDraftMutation for .mutate reference
 
   // Cleanup on unmount
   useEffect(() => {

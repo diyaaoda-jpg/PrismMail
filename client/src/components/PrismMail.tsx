@@ -379,15 +379,15 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       // Also invalidate the unified counts to update badges
       queryClient.invalidateQueries({ queryKey: ['/api/mail/unified-counts'] });
     }
-  }, [wsMessage, refetchEmails, toast]);
+  }, [wsMessage?.type, wsMessage?.data, refetchEmails, toast]); // Include refetchEmails and toast dependencies
 
   // Auto-sync when a new account becomes active (only once when account changes)
   useEffect(() => {
-    if (primaryAccount && emails.length === 0) {
+    if (primaryAccount && emails.length === 0 && !syncMutation.isPending) {
       console.log('Auto-syncing emails for account:', primaryAccount.name, `(${primaryAccount.protocol})`);
       syncMutation.mutate(primaryAccount.id);
     }
-  }, [primaryAccount?.id]); // Only depend on account ID, not the mutation or emails.length
+  }, [primaryAccount?.id, emails.length, syncMutation]); // Include syncMutation dependency
 
   // Auto-sync scheduling based on user preferences - prefer IMAP accounts
   useEffect(() => {
@@ -425,7 +425,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       console.log('Cleaning up auto-sync interval');
       clearInterval(intervalId);
     };
-  }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts]);
+  }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts.length]); // Use length for array stability
 
   // Show real emails only - no mock data fallback
   const displayEmails = Array.isArray(emails) ? emails : [];
@@ -472,6 +472,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     
     // Mark as read when selected (only for real emails)
     if (!email.isRead && primaryAccount && emails.length > 0) {
+      // Call handleToggleRead directly to avoid stale closure
       handleToggleRead(email.id);
     }
     
@@ -481,7 +482,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
     
     console.log('Selected email:', email.subject);
-  }, [primaryAccount, emails.length, isMobile]);
+  }, [primaryAccount?.id, emails.length, isMobile]); // Use stable primaryAccount.id
 
   const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;

@@ -119,60 +119,70 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
     }
   }, [enableHapticFeedback]);
 
-  // Swipe gesture handlers
-  const handleTouchStart = useCallback((e: TouchEvent) => {
-    if (!enableSwipeGestures || !isMobile) return;
-    
-    const touch = e.touches[0];
-    setSwipeGesture(prev => ({
-      ...prev,
-      startY: touch.clientY,
-      startX: touch.clientX,
-      currentY: touch.clientY,
-      currentX: touch.clientX,
-      isDragging: true
-    }));
-  }, [enableSwipeGestures, isMobile]);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    if (!enableSwipeGestures || !swipeGesture.isDragging) return;
-    
-    const touch = e.touches[0];
-    setSwipeGesture(prev => ({
-      ...prev,
-      currentY: touch.clientY,
-      currentX: touch.clientX
-    }));
-
-    // Prevent default scrolling if swiping down from top
-    const deltaY = touch.clientY - swipeGesture.startY;
-    if (deltaY > 0 && window.scrollY <= 0) {
-      e.preventDefault();
-    }
-  }, [enableSwipeGestures, swipeGesture]);
-
-  const handleTouchEnd = useCallback(() => {
-    if (!enableSwipeGestures || !swipeGesture.isDragging) return;
-    
-    const deltaY = swipeGesture.currentY - swipeGesture.startY;
-    const deltaX = Math.abs(swipeGesture.currentX - swipeGesture.startX);
-    
-    // Swipe down to close (if primarily vertical swipe)
-    // Call onClose directly to let ComposeDialog handle unsaved changes confirmation
-    if (deltaY > swipeGesture.threshold && deltaX < swipeGesture.threshold * 2) {
-      triggerHaptic('medium');
-      onClose?.(); // This is safe - calls ComposeDialog.handleClose which has confirmation logic
-    }
-    
-    setSwipeGesture(prev => ({ ...prev, isDragging: false }));
-  }, [enableSwipeGestures, swipeGesture, triggerHaptic, onClose]);
-
-  // Set up swipe gesture listeners
+  // Set up swipe gesture listeners with stable handlers
   useEffect(() => {
     if (!enableSwipeGestures || !isMobile) return;
     
     const element = composeRef.current;
     if (!element) return;
+
+    // Define handlers inside effect to avoid recreating on every render
+    const handleTouchStart = (e: TouchEvent) => {
+      if (!enableSwipeGestures || !isMobile) return;
+      
+      const touch = e.touches[0];
+      setSwipeGesture(prev => ({
+        ...prev,
+        startY: touch.clientY,
+        startX: touch.clientX,
+        currentY: touch.clientY,
+        currentX: touch.clientX,
+        isDragging: true
+      }));
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!enableSwipeGestures) return;
+      
+      const touch = e.touches[0];
+      setSwipeGesture(prev => {
+        if (!prev.isDragging) return prev;
+        
+        // Prevent default scrolling if swiping down from top
+        const deltaY = touch.clientY - prev.startY;
+        if (deltaY > 0 && window.scrollY <= 0) {
+          e.preventDefault();
+        }
+
+        return {
+          ...prev,
+          currentY: touch.clientY,
+          currentX: touch.clientX
+        };
+      });
+    };
+
+    const handleTouchEnd = () => {
+      if (!enableSwipeGestures) return;
+      
+      setSwipeGesture(prev => {
+        if (!prev.isDragging) return prev;
+        
+        const deltaY = prev.currentY - prev.startY;
+        const deltaX = Math.abs(prev.currentX - prev.startX);
+        
+        // Swipe down to close (if primarily vertical swipe)
+        if (deltaY > prev.threshold && deltaX < prev.threshold * 2) {
+          // Trigger haptic feedback
+          if (enableHapticFeedback && 'vibrate' in navigator) {
+            navigator.vibrate([20]);
+          }
+          onClose?.(); // Safe - ComposeDialog handles confirmation
+        }
+        
+        return { ...prev, isDragging: false };
+      });
+    };
 
     element.addEventListener('touchstart', handleTouchStart, { passive: false });
     element.addEventListener('touchmove', handleTouchMove, { passive: false });
@@ -183,7 +193,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
       element.removeEventListener('touchmove', handleTouchMove);
       element.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [enableSwipeGestures, isMobile, handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [enableSwipeGestures, isMobile, enableHapticFeedback, onClose]); // Stable dependencies only
 
   // Mobile-optimized send handler
   const handleMobileSend = useCallback(() => {

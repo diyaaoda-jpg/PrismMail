@@ -332,7 +332,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     };
 
     saveDraft(draftContent);
-  }, [currentAccount?.id, draftId, attachments, saveDraft, isDraftLoaded]);
+  }, [currentAccount?.id, draftId, attachments, isDraftLoaded, saveDraft]); // Include saveDraft function and full attachments array
 
   // Load draft when dialog opens with signature detection
   useEffect(() => {
@@ -371,7 +371,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         description: "Your draft has been restored.",
       });
     }
-  }, [draftData, isDraftLoaded, editor, toast]);
+  }, [draftData?.draft, isDraftLoaded, editor, toast]); // Include toast function dependency
 
   // Update editor content when replyTo changes
   useEffect(() => {
@@ -391,7 +391,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         body: replyTo.body || ""
       });
     }
-  }, [replyTo]);
+  }, [replyTo, isDraftLoaded]); // Add missing dependency
 
   // File upload mutation
   const uploadAttachmentMutation = useMutation({
@@ -509,7 +509,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
       // Start upload
       uploadAttachmentMutation.mutate(file);
     }
-  }, [attachments, toast, uploadAttachmentMutation]);
+  }, [attachments, uploadAttachmentMutation, toast]); // Include uploadAttachmentMutation and toast function dependencies
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {

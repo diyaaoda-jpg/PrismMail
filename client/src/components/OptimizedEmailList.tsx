@@ -135,20 +135,22 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
     onToggleStar?.(id);
   }, [onToggleStar]);
 
-  // Performance monitoring effect - Fixed to prevent render loops and measure actual render time
+  // Performance monitoring effect - Stable to prevent excessive re-runs
   useEffect(() => {
     let timeoutId: number;
     
     // Use setTimeout to measure after React's reconciliation is complete
     const startTime = performance.now();
+    const emailCount = filteredEmails.length; // Capture count to avoid closure issues
+    
     timeoutId = setTimeout(() => {
       const endTime = performance.now();
       const renderTime = endTime - startTime;
       
       if (renderTime > 16) { // Longer than 1 frame at 60fps
-        console.warn(`[EmailList] Slow render detected: ${renderTime.toFixed(2)}ms for ${emails.length} emails`);
+        console.warn(`[EmailList] Slow render detected: ${renderTime.toFixed(2)}ms for ${emailCount} emails`);
       } else {
-        console.log(`[EmailList] Render completed: ${renderTime.toFixed(2)}ms for ${emails.length} emails`);
+        console.log(`[EmailList] Render completed: ${renderTime.toFixed(2)}ms for ${emailCount} emails`);
       }
     }, 0);
     
@@ -157,7 +159,7 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
         clearTimeout(timeoutId);
       }
     };
-  }, [filteredEmails.length]); // Track filtered emails, not raw emails
+  }, [emails.length, searchQuery]); // More stable dependencies
 
   // Show loading skeleton
   if (isLoading) {
