@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import * as React from 'react';
 import { useIsMobile } from './use-mobile';
 import { useVirtualKeyboard } from './useVirtualKeyboard';
 import { useAutoResize } from './useAutoResize';
@@ -38,15 +38,15 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   } = options;
 
   const isMobile = useIsMobile();
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const [maxBodyHeight, setMaxBodyHeight] = useState(() => window.innerHeight * 0.4);
-  const composeRef = useRef<HTMLDivElement>(null);
-  const subjectRef = useRef<HTMLTextAreaElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [keyboardOffset, setKeyboardOffset] = React.useState(0);
+  const [maxBodyHeight, setMaxBodyHeight] = React.useState(() => window.innerHeight * 0.4);
+  const composeRef = React.useRef<HTMLDivElement>(null);
+  const subjectRef = React.useRef<HTMLTextAreaElement>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Swipe gesture state
-  const [swipeGesture, setSwipeGesture] = useState<SwipeGesture>({
+  const [swipeGesture, setSwipeGesture] = React.useState<SwipeGesture>({
     startY: 0,
     startX: 0,
     currentY: 0,
@@ -80,7 +80,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   // TipTap editors manage content height through CSS and internal content management
 
   // Handle mobile fullscreen mode and body scroll lock
-  useEffect(() => {
+  React.useEffect(() => {
     if (isMobile && isOpen) {
       setIsFullscreen(true);
       // Prevent body scroll on mobile when compose is open
@@ -103,7 +103,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, [isMobile, isOpen]);
 
   // Haptic feedback helper
-  const triggerHaptic = useCallback((type: 'light' | 'medium' | 'heavy' | 'success' | 'error' = 'light') => {
+  const triggerHaptic = React.useCallback((type: 'light' | 'medium' | 'heavy' | 'success' | 'error' = 'light') => {
     if (!enableHapticFeedback || typeof navigator === 'undefined') return;
     
     // Use Vibration API as fallback
@@ -120,7 +120,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, [enableHapticFeedback]);
 
   // Set up swipe gesture listeners with stable handlers
-  useEffect(() => {
+  React.useEffect(() => {
     if (!enableSwipeGestures || !isMobile) return;
     
     const element = composeRef.current;
@@ -196,13 +196,13 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, [enableSwipeGestures, isMobile, enableHapticFeedback, onClose]); // Stable dependencies only
 
   // Mobile-optimized send handler
-  const handleMobileSend = useCallback(() => {
+  const handleMobileSend = React.useCallback(() => {
     triggerHaptic('success');
     onSend?.();
   }, [triggerHaptic, onSend]);
 
   // Handle orientation changes to update maxHeight
-  useEffect(() => {
+  React.useEffect(() => {
     const handleResize = () => {
       setMaxBodyHeight(window.innerHeight * 0.4);
     };
@@ -217,20 +217,20 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, []);
 
   // Mobile-optimized close handler - does NOT call onClose to prevent recursion
-  const handleMobileClose = useCallback(() => {
+  const handleMobileClose = React.useCallback(() => {
     triggerHaptic('light');
     // Do NOT call onClose here to prevent infinite recursion
     // The calling component should handle close logic directly
   }, [triggerHaptic]);
 
   // Mobile-optimized save draft
-  const handleMobileSaveDraft = useCallback(() => {
+  const handleMobileSaveDraft = React.useCallback(() => {
     triggerHaptic('medium');
     onSaveDraft?.();
   }, [triggerHaptic, onSaveDraft]);
 
   // Focus management for mobile
-  const focusNextField = useCallback((currentField: 'to' | 'subject' | 'body') => {
+  const focusNextField = React.useCallback((currentField: 'to' | 'subject' | 'body') => {
     const fieldOrder = ['to', 'subject', 'body'];
     const currentIndex = fieldOrder.indexOf(currentField);
     const nextField = fieldOrder[currentIndex + 1];
@@ -243,7 +243,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, []);
 
   // Get mobile-optimized styles
-  const getMobileStyles = useCallback(() => {
+  const getMobileStyles = React.useCallback(() => {
     if (!isMobile) return {};
     
     return {
@@ -285,7 +285,7 @@ export function useMobileCompose(options: MobileComposeOptions = {}) {
   }, [isMobile, keyboardOffset]);
 
   // Mobile-specific input props
-  const getMobileInputProps = useCallback((type: 'email' | 'text' = 'text') => {
+  const getMobileInputProps = React.useCallback((type: 'email' | 'text' = 'text') => {
     if (!isMobile) return {};
     
     const baseProps = {
