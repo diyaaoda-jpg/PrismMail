@@ -131,7 +131,7 @@ export const LazyImage = memo(function LazyImage({
     overflow: 'hidden' as const
   } : {};
 
-  // Don't render anything if not in view and not priority
+  // Don't render anything if not in view and not priority - LAYOUT SHIFT FIX: Add minimum dimensions
   if (!isInView && !priority) {
     return (
       <div
@@ -139,9 +139,13 @@ export const LazyImage = memo(function LazyImage({
         className={cn(
           "bg-muted animate-pulse",
           aspectRatio && "relative overflow-hidden",
+          !aspectRatio && "min-h-[32px] min-w-[32px]", // Minimum dimensions to prevent layout shift
           className
         )}
-        style={containerStyle}
+        style={{
+          ...containerStyle,
+          ...(aspectRatio ? {} : { height: 'auto', minHeight: '32px' }) // Fallback dimensions
+        }}
         aria-label={alt}
       >
         {blurDataURL && (
@@ -150,6 +154,7 @@ export const LazyImage = memo(function LazyImage({
             alt=""
             className="absolute inset-0 w-full h-full object-cover blur-sm scale-110"
             aria-hidden="true"
+            style={{ minHeight: '32px', minWidth: '32px' }} // Ensure minimum size
           />
         )}
       </div>

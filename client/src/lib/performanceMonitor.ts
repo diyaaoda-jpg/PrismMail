@@ -18,6 +18,7 @@ class PerformanceMonitor {
   private metrics: PerformanceMetrics = {};
   private observers: Array<(metrics: PerformanceMetrics) => void> = [];
   private isEnabled = true;
+  private reportingTimeout: number | null = null; // Add debouncing for performance reports
 
   constructor() {
     this.initializeWebVitals();
@@ -123,7 +124,7 @@ class PerformanceMonitor {
     checkMemory(); // Initial check
   }
 
-  // Measure email list rendering performance
+  // Measure email list rendering performance - Fixed to prevent render loops and reduce overhead
   measureEmailListRender<T>(callback: () => T): T {
     const startTime = performance.now();
     const result = callback();
@@ -132,9 +133,16 @@ class PerformanceMonitor {
     const renderTime = endTime - startTime;
     this.metrics.emailListRenderTime = renderTime;
     
-    // Target: < 100ms for 1000 emails
-    this.reportMetric('EmailListRender', renderTime, 100);
-    this.notifyObservers();
+    // Debounce reporting to prevent excessive logging and observer notifications
+    if (this.reportingTimeout) {
+      clearTimeout(this.reportingTimeout);
+    }
+    
+    this.reportingTimeout = setTimeout(() => {
+      // Target: < 100ms for 1000 emails
+      this.reportMetric('EmailListRender', renderTime, 100);
+      this.notifyObservers();
+    }, 100);
     
     return result;
   }
