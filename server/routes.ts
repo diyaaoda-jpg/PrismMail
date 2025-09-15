@@ -294,7 +294,7 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
   };
 }
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express): Promise<void> {
   // Health check endpoint (no authentication required)
   app.get('/healthz', async (_req, res) => {
     try {
@@ -2553,6 +2553,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(statusCode).json(response);
   });
 
-  const httpServer = createServer(app);
-  return httpServer;
+  // Server instance will be created in server/index.ts
+  // No need to create another server here
 }
