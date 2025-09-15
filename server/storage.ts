@@ -25,7 +25,7 @@ import {
   type InsertAttachment,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, or, like, ilike, gte, lte, desc, asc, sql } from "drizzle-orm";
 import { encryptAccountSettings, decryptAccountSettings } from "./crypto";
 
 // modify the interface with any CRUD methods
@@ -73,6 +73,34 @@ export interface IStorage {
   getAttachment(id: string): Promise<Attachment | undefined>;
   deleteAttachment(id: string): Promise<void>;
   deleteEmailAttachments(emailId: string): Promise<void>;
+  // Search operations
+  searchEmails(params: SearchEmailsParams): Promise<SearchEmailsResult>;
+}
+
+export interface SearchEmailsParams {
+  userId: string;
+  query: string;
+  accountId?: string; // If provided, search only this account; otherwise search all user's accounts
+  folder?: string; // If provided, search only this folder
+  searchFields?: ('subject' | 'from' | 'to' | 'cc' | 'bcc' | 'body' | 'all')[];
+  dateFrom?: Date;
+  dateTo?: Date;
+  hasAttachments?: boolean;
+  isRead?: boolean;
+  isFlagged?: boolean;
+  priority?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SearchEmailsResult {
+  results: (MailMessage & { 
+    relevanceScore?: number; 
+    highlightedSnippet?: string;
+    matchedFields?: string[];
+  })[];
+  totalCount: number;
+  hasMore: boolean;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -416,6 +444,239 @@ export class DatabaseStorage implements IStorage {
         eq(accountFolders.accountId, accountId),
         eq(accountFolders.folderId, folderId)
       ));
+  }
+
+  // Attachment operations
+  async getEmailAttachments(emailId: string): Promise<Attachment[]> {
+    return await db.select().from(attachments).where(eq(attachments.emailId, emailId));
+  }
+
+  async createAttachment(attachment: InsertAttachment): Promise<Attachment> {
+    const [result] = await db.insert(attachments).values(attachment).returning();
+    return result;
+  }
+
+  async getAttachment(id: string): Promise<Attachment | undefined> {
+    const [attachment] = await db.select().from(attachments).where(eq(attachments.id, id));
+    return attachment;
+  }
+
+  async deleteAttachment(id: string): Promise<void> {
+    await db.delete(attachments).where(eq(attachments.id, id));
+  }
+
+  async deleteEmailAttachments(emailId: string): Promise<void> {
+    await db.delete(attachments).where(eq(attachments.emailId, emailId));
+  }
+
+  // Search operations
+  async searchEmails(params: SearchEmailsParams): Promise<SearchEmailsResult> {
+    const {
+      userId,
+      query,
+      accountId,
+      folder,
+      searchFields = ['all'],
+      dateFrom,
+      dateTo,
+      hasAttachments,
+      isRead,
+      isFlagged,
+      priority,
+      limit = 50,
+      offset = 0
+    } = params;
+
+    try {
+      // First, get user's account IDs to filter by
+      const userAccounts = await this.getUserAccountConnections(userId);
+      const userAccountIds = userAccounts.map(acc => acc.id);
+      
+      if (userAccountIds.length === 0) {
+        return { results: [], totalCount: 0, hasMore: false };
+      }
+
+      // Build the base query conditions
+      const conditions = [];
+
+      // Filter by user's accounts
+      if (accountId) {
+        // Search in specific account only
+        if (!userAccountIds.includes(accountId)) {
+          return { results: [], totalCount: 0, hasMore: false };
+        }
+        conditions.push(eq(mailIndex.accountId, accountId));
+      } else {
+        // Search across all user's accounts
+        conditions.push(sql`${mailIndex.accountId} = ANY(${userAccountIds})`);
+      }
+
+      // Folder filter
+      if (folder) {
+        conditions.push(eq(mailIndex.folder, folder));
+      }
+
+      // Date range filters
+      if (dateFrom) {
+        conditions.push(gte(mailIndex.date, dateFrom));
+      }
+      if (dateTo) {
+        conditions.push(lte(mailIndex.date, dateTo));
+      }
+
+      // Boolean filters
+      if (typeof hasAttachments === 'boolean') {
+        conditions.push(eq(mailIndex.hasAttachments, hasAttachments));
+      }
+      if (typeof isRead === 'boolean') {
+        conditions.push(eq(mailIndex.isRead, isRead));
+      }
+      if (typeof isFlagged === 'boolean') {
+        conditions.push(eq(mailIndex.isFlagged, isFlagged));
+      }
+      if (typeof priority === 'number') {
+        conditions.push(eq(mailIndex.priority, priority));
+      }
+
+      // Search query conditions
+      if (query && query.trim()) {
+        const searchTerm = `%${query.trim().toLowerCase()}%`;
+        const searchConditions = [];
+
+        // Determine which fields to search
+        const fieldsToSearch = searchFields.includes('all') 
+          ? ['subject', 'from', 'to', 'cc', 'bcc', 'body']
+          : searchFields;
+
+        // Add search conditions for each field
+        if (fieldsToSearch.includes('subject')) {
+          searchConditions.push(ilike(mailIndex.subject, searchTerm));
+        }
+        if (fieldsToSearch.includes('from')) {
+          searchConditions.push(ilike(mailIndex.from, searchTerm));
+        }
+        if (fieldsToSearch.includes('to')) {
+          searchConditions.push(ilike(mailIndex.to, searchTerm));
+        }
+        if (fieldsToSearch.includes('cc')) {
+          searchConditions.push(ilike(mailIndex.cc, searchTerm));
+        }
+        if (fieldsToSearch.includes('bcc')) {
+          searchConditions.push(ilike(mailIndex.bcc, searchTerm));
+        }
+        if (fieldsToSearch.includes('body')) {
+          searchConditions.push(
+            or(
+              ilike(mailIndex.bodyText, searchTerm),
+              ilike(mailIndex.bodyHtml, searchTerm),
+              ilike(mailIndex.snippet, searchTerm)
+            )
+          );
+        }
+
+        if (searchConditions.length > 0) {
+          conditions.push(or(...searchConditions));
+        }
+      }
+
+      // Build the complete where clause
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      // Execute search query with pagination
+      const results = await db
+        .select()
+        .from(mailIndex)
+        .where(whereClause)
+        .orderBy(desc(mailIndex.date))
+        .limit(limit + 1) // Get one extra to check if there are more results
+        .offset(offset);
+
+      // Get total count for pagination
+      const countQuery = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(mailIndex)
+        .where(whereClause);
+
+      const totalCount = countQuery[0]?.count || 0;
+      const hasMore = results.length > limit;
+      
+      // Remove the extra result if we have more
+      if (hasMore) {
+        results.pop();
+      }
+
+      // Enhance results with search-specific metadata
+      const enhancedResults = results.map(email => {
+        const result = email as MailMessage & { 
+          relevanceScore?: number; 
+          highlightedSnippet?: string;
+          matchedFields?: string[];
+        };
+
+        // Simple relevance scoring based on where the match was found
+        let relevanceScore = 0;
+        const matchedFields: string[] = [];
+
+        if (query && query.trim()) {
+          const searchTerm = query.trim().toLowerCase();
+          
+          // Higher score for title matches
+          if (email.subject?.toLowerCase().includes(searchTerm)) {
+            relevanceScore += 10;
+            matchedFields.push('subject');
+          }
+          
+          // Medium score for sender matches
+          if (email.from?.toLowerCase().includes(searchTerm)) {
+            relevanceScore += 5;
+            matchedFields.push('from');
+          }
+          
+          // Lower score for body matches
+          if (email.bodyText?.toLowerCase().includes(searchTerm) || 
+              email.bodyHtml?.toLowerCase().includes(searchTerm) ||
+              email.snippet?.toLowerCase().includes(searchTerm)) {
+            relevanceScore += 2;
+            matchedFields.push('body');
+          }
+
+          // Check other fields
+          if (email.to?.toLowerCase().includes(searchTerm)) {
+            relevanceScore += 3;
+            matchedFields.push('to');
+          }
+          if (email.cc?.toLowerCase().includes(searchTerm)) {
+            relevanceScore += 3;
+            matchedFields.push('cc');
+          }
+        }
+
+        result.relevanceScore = relevanceScore;
+        result.matchedFields = matchedFields;
+
+        // Create highlighted snippet
+        if (query && query.trim() && email.snippet) {
+          const snippet = email.snippet;
+          const searchTerm = query.trim();
+          const regex = new RegExp(`(${searchTerm})`, 'gi');
+          result.highlightedSnippet = snippet.replace(regex, '<mark>$1</mark>');
+        } else {
+          result.highlightedSnippet = email.snippet;
+        }
+
+        return result;
+      });
+
+      return {
+        results: enhancedResults,
+        totalCount,
+        hasMore
+      };
+
+    } catch (error) {
+      console.error('Error in searchEmails:', error);
+      throw new Error(`Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }
 

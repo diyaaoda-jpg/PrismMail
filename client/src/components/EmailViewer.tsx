@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal } from "lucide-react";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
@@ -31,6 +33,68 @@ export function EmailViewer({
   onDelete,
   onToggleFlagged,
 }: EmailViewerProps) {
+  const { toast } = useToast();
+
+  // Fetch attachments for the current email
+  const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
+    queryKey: ['/api/emails', email?.id, 'attachments'],
+    enabled: !!email?.id,
+  });
+
+  const attachments = attachmentsData && typeof attachmentsData === 'object' && attachmentsData !== null && 'data' in attachmentsData 
+    ? (attachmentsData as any).data 
+    : [];
+
+  // Utility functions for attachments
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getFileIcon = (mimeType: string) => {
+    if (mimeType.startsWith('image/')) return Image;
+    return FileText;
+  };
+
+  const handleDownloadAttachment = async (attachmentId: string, fileName: string) => {
+    try {
+      const response = await fetch(`/api/attachments/${attachmentId}/download`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to download attachment');
+      }
+
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Download Started",
+        description: `${fileName} is being downloaded.`,
+      });
+    } catch (error) {
+      console.error('Download failed:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download attachment. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (!email) {
     return (
       <div className="flex-1 flex items-center justify-center bg-muted/30">
@@ -179,6 +243,55 @@ export function EmailViewer({
             </div>
           </div>
         </ScrollArea>
+
+        {/* Attachments Section */}
+        {attachments && attachments.length > 0 && (
+          <div className="border-t bg-card">
+            <div className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Paperclip className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-muted-foreground">
+                  {attachments.length} attachment{attachments.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {attachments.map((attachment: any, index: number) => {
+                  const FileIcon = getFileIcon(attachment.mimeType);
+                  return (
+                    <div
+                      key={attachment.id}
+                      className="flex items-center gap-3 p-3 border rounded-md hover-elevate active-elevate-2 cursor-pointer"
+                      onClick={() => handleDownloadAttachment(attachment.id, attachment.fileName)}
+                      data-testid={`attachment-${index}`}
+                    >
+                      <FileIcon className="h-8 w-8 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate" title={attachment.fileName}>
+                          {attachment.fileName}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {formatFileSize(attachment.fileSize)}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="opacity-60 hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadAttachment(attachment.id, attachment.fileName);
+                        }}
+                        data-testid={`button-download-attachment-${index}`}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
         
         <Separator />
         

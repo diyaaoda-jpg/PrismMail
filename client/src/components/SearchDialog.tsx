@@ -10,9 +10,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { X, Search, Filter, Clock } from "lucide-react";
+import { X, Search, Filter, Clock, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useMutation } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 interface SearchDialogProps {
   isOpen: boolean;
@@ -22,11 +25,23 @@ interface SearchDialogProps {
 
 interface SearchResult {
   id: string;
-  subject: string;
-  sender: string;
-  preview: string;
-  date: string;
+  subject: string | null;
+  from: string | null;
+  snippet: string | null;
+  date: Date | null;
   isRead: boolean;
+  isFlagged: boolean;
+  hasAttachments: boolean;
+  priority: number;
+  relevanceScore?: number;
+  highlightedSnippet?: string;
+  matchedFields?: string[];
+}
+
+interface SearchResponse {
+  results: SearchResult[];
+  totalCount: number;
+  hasMore: boolean;
 }
 
 export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogProps) {
