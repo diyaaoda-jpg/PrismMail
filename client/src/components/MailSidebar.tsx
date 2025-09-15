@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useBreakpoint, useHasTouchInterface } from "@/hooks/use-breakpoint";
 
 interface MailFolder {
   id: string;
@@ -75,6 +76,10 @@ export function MailSidebar({
   accountFolderCounts = {},
   accounts = [],
 }: MailSidebarProps) {
+  // Responsive breakpoint detection
+  const { isMobile, isTablet, isDesktop, isXl, currentBreakpoint } = useBreakpoint();
+  const hasTouchInterface = useHasTouchInterface();
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
   const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
@@ -82,6 +87,20 @@ export function MailSidebar({
   const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
     accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
   );
+
+  // Responsive button sizing and spacing
+  const getResponsiveButtonClass = () => {
+    if (hasTouchInterface) {
+      return "h-11 text-base"; // Minimum 44px touch target for mobile/tablet
+    }
+    return "h-9 text-sm"; // Standard desktop size
+  };
+
+  const getResponsiveSpacing = () => {
+    if (isTablet) return "p-4"; // More padding for tablet
+    if (isMobile) return "p-3"; // Compact mobile spacing
+    return "p-3"; // Standard desktop spacing
+  };
 
   const handleFolderClick = (folderId: string, accountId?: string) => {
     onFolderSelect?.(folderId, accountId);
