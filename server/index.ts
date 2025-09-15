@@ -53,7 +53,12 @@ const server = createServer(app);
     logger.error('Failed to initialize production-grade architecture', { error: error as Error });
     process.exit(1);
   }
-  await registerRoutes(app);
+  try {
+    await registerRoutes(app);
+  } catch (error) {
+    logger.error('Failed to register routes (possibly auth misconfiguration), continuing with basic server', { error: error as Error });
+    // Continue with basic server setup to serve frontend
+  }
   
   // Setup enhanced attachment routes with comprehensive security
   setupAttachmentRoutes(app);
