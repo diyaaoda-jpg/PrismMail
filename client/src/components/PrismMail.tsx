@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import * as React from "react";
 import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit, ChevronDown } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -136,11 +136,11 @@ interface AccountConnection {
 }
 
 export function PrismMail({ user, onLogout }: PrismMailProps) {
-  const [selectedFolder, setSelectedFolder] = useState('inbox');
-  const [selectedAccount, setSelectedAccount] = useState<string>('');
-  const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
-  const [isReadingMode, setIsReadingMode] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFolder, setSelectedFolder] = React.useState('inbox');
+  const [selectedAccount, setSelectedAccount] = React.useState<string>('');
+  const [selectedEmail, setSelectedEmail] = React.useState<EmailMessage | null>(null);
+  const [isReadingMode, setIsReadingMode] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
   const { toast } = useToast();
   
   // Responsive state management - SINGLE SOURCE OF TRUTH to eliminate redundant listeners
@@ -149,25 +149,25 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
          isTabletOrMobile, isDesktopOrXl, hasTouchInterface } = breakpoint;
   
   // Sidebar state - unified for mobile and tablet
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   
   // Mobile-specific state for full-screen email view
-  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = useState(false);
+  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = React.useState(false);
   
   // Tablet-specific state
-  const [tabletSidebarMode, setTabletSidebarMode] = useState<'overlay' | 'push'>('push');
+  const [tabletSidebarMode, setTabletSidebarMode] = React.useState<'overlay' | 'push'>('push');
   
   // Dialog states
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [composeReplyTo, setComposeReplyTo] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
+  const [isComposeOpen, setIsComposeOpen] = React.useState(false);
+  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+  const [composeReplyTo, setComposeReplyTo] = React.useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
   
   // Inline compose state for replies
-  const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
+  const [inlineComposeDraft, setInlineComposeDraft] = React.useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
   
   // Responsive panel state and persistence - different defaults per breakpoint
-  const [panelSizes, setPanelSizes] = useState<number[]>(() => {
+  const [panelSizes, setPanelSizes] = React.useState<number[]>(() => {
     const saved = localStorage.getItem('prismmail-panel-sizes');
     if (saved) return JSON.parse(saved);
     
@@ -182,7 +182,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
   
   // Debounced localStorage save to prevent jank during dragging
-  const debouncedSavePanelSizes = useCallback(
+  const debouncedSavePanelSizes = React.useCallback(
     debounce((sizes: number[]) => {
       localStorage.setItem('prismmail-panel-sizes', JSON.stringify(sizes));
     }, 200),
@@ -190,7 +190,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   );
 
   // Handle panel size changes and persist to localStorage
-  const handlePanelLayout = useCallback((sizes: number[]) => {
+  const handlePanelLayout = React.useCallback((sizes: number[]) => {
     setPanelSizes(sizes);
     debouncedSavePanelSizes(sizes);
   }, [debouncedSavePanelSizes]);
@@ -278,7 +278,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
 
   // Pull-to-refresh functionality
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = React.useCallback(async () => {
     console.log('Pull-to-refresh triggered');
     if (primaryAccount) {
       // Trigger sync for the current account
@@ -330,11 +330,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const edgeSwipes = useSwipeGestures(hasTouchInterface ? edgeSwipeConfig : { leftActions: [], rightActions: [] });
   
   // Refs for gesture handling
-  const mainContainerRef = useRef<HTMLDivElement>(null);
+  const mainContainerRef = React.useRef<HTMLDivElement>(null);
   
 
   // Auto-select account on load with IMAP preference
-  useEffect(() => {
+  React.useEffect(() => {
     if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
       // Prefer IMAP accounts over EWS for auto-sync
       const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
@@ -370,7 +370,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
 
   // Listen for WebSocket messages and refresh emails automatically
-  useEffect(() => {
+  React.useEffect(() => {
     if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
       // Show a prominent notification to user with real-time indicator
       const messageData = wsMessage.data || {};
@@ -400,7 +400,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [wsMessage?.type, wsMessage?.data, refetchEmails, toast]); // Include refetchEmails and toast dependencies
 
   // Auto-sync when a new account becomes active (only once when account changes)
-  useEffect(() => {
+  React.useEffect(() => {
     if (primaryAccount && emails.length === 0 && !syncMutation.isPending) {
       console.log('Auto-syncing emails for account:', primaryAccount.name, `(${primaryAccount.protocol})`);
       syncMutation.mutate(primaryAccount.id);
@@ -408,7 +408,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [primaryAccount?.id, emails.length, syncMutation]); // Include syncMutation dependency
 
   // Auto-sync scheduling based on user preferences - prefer IMAP accounts
-  useEffect(() => {
+  React.useEffect(() => {
     if (!userPrefs?.autoSync) {
       return; // No auto-sync if disabled
     }
@@ -485,7 +485,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   });
 
-  const handleEmailSelect = useCallback((email: EmailMessage) => {
+  const handleEmailSelect = React.useCallback((email: EmailMessage) => {
     setSelectedEmail(email);
     
     // Mark as read when selected (only for real emails)
@@ -502,7 +502,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Selected email:', email.subject);
   }, [primaryAccount?.id, emails.length, isMobile]); // Use stable primaryAccount.id
 
-  const handleToggleRead = useCallback(async (emailId: string) => {
+  const handleToggleRead = React.useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
     
     // Update optimistically in UI
@@ -537,7 +537,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Toggled read status for email:', emailId);
   }, [primaryAccount, selectedFolder, emails, refetchEmails]);
 
-  const handleToggleFlagged = useCallback(async (emailId: string) => {
+  const handleToggleFlagged = React.useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
     
     // Update optimistically in UI  
@@ -611,23 +611,23 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   };
 
   // Dialog handlers
-  const handleCompose = useCallback(() => {
+  const handleCompose = React.useCallback(() => {
     setComposeReplyTo(undefined);
     setIsComposeOpen(true);
     console.log('Compose clicked');
   }, []);
 
-  const handleSearch = useCallback(() => {
+  const handleSearch = React.useCallback(() => {
     setIsSearchOpen(true);
     console.log('Search clicked');
   }, []);
 
-  const handleSettings = useCallback(() => {
+  const handleSettings = React.useCallback(() => {
     setIsSettingsOpen(true);
     console.log('Settings clicked');
   }, []);
 
-  const handleReply = useCallback((email: EmailMessage) => {
+  const handleReply = React.useCallback((email: EmailMessage) => {
     const replyData = makeReply(email, user?.email);
     setInlineComposeDraft({
       to: replyData.to,
@@ -639,7 +639,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Reply to:', email.subject);
   }, [user?.email]);
 
-  const handleReplyAll = useCallback((email: EmailMessage) => {
+  const handleReplyAll = React.useCallback((email: EmailMessage) => {
     const replyAllData = makeReplyAll(email, user?.email);
     setInlineComposeDraft({
       to: replyAllData.to,
@@ -651,7 +651,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Reply all to:', email.subject);
   }, [user?.email]);
 
-  const handleForward = useCallback((email: EmailMessage) => {
+  const handleForward = React.useCallback((email: EmailMessage) => {
     const forwardData = makeForward(email);
     setInlineComposeDraft({
       to: forwardData.to,
@@ -663,7 +663,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Forward:', email.subject);
   }, []);
 
-  const handleSelectEmailFromSearch = useCallback((emailId: string) => {
+  const handleSelectEmailFromSearch = React.useCallback((emailId: string) => {
     const email = emails.find(e => e.id === emailId);
     if (email) {
       setSelectedEmail(email);
@@ -780,17 +780,17 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
 
   // Organization action handlers
-  const handleStar = useCallback((email: EmailMessage) => {
+  const handleStar = React.useCallback((email: EmailMessage) => {
     starMutation.mutate({ emailId: email.id, isStarred: email.isStarred });
     console.log('Starred:', email.subject, !email.isStarred);
   }, [starMutation]);
 
-  const handleArchive = useCallback((email: EmailMessage) => {
+  const handleArchive = React.useCallback((email: EmailMessage) => {
     archiveMutation.mutate({ emailId: email.id, isArchived: email.isArchived });
     console.log('Archived:', email.subject, !email.isArchived);
   }, [archiveMutation]);
 
-  const handleDelete = useCallback((email: EmailMessage) => {
+  const handleDelete = React.useCallback((email: EmailMessage) => {
     deleteMutation.mutate({ emailId: email.id, isDeleted: email.isDeleted });
     console.log('Deleted:', email.subject, !email.isDeleted);
   }, [deleteMutation]);
@@ -1080,7 +1080,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setIsMobileSidebarOpen(true)}
+                onClick={() => setIsSidebarOpen(true)}
                 className="hover-elevate active-elevate-2"
                 data-testid="button-mobile-menu"
                 aria-label="Open sidebar menu"
