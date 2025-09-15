@@ -8,6 +8,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -31,6 +38,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
+import { useMobileCompose } from '@/hooks/useMobileCompose';
+import { useAutoResize } from '@/hooks/useAutoResize';
 
 interface ComposeDialogProps {
   isOpen: boolean;
@@ -81,6 +90,27 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Mobile compose optimization
+  const mobileCompose = useMobileCompose({
+    isOpen, // Pass isOpen to fix body scroll lock
+    onSend: () => handleSend(),
+    onClose: () => handleClose(), // This is safe - handleClose will handle confirmation
+    onSaveDraft: () => saveDraftManually(),
+    enableSwipeGestures: true,
+    enableHapticFeedback: true,
+    keyboardAdjustment: true,
+  });
+
+  // Auto-resize hook for subject textarea only (body uses TipTap editor which handles its own sizing)
+  const { triggerResize: triggerSubjectResize } = useAutoResize(mobileCompose.subjectRef, {
+    minHeight: mobileCompose.isMobile ? 44 : 36,
+    maxHeight: mobileCompose.isMobile ? 120 : 100,
+    enabled: true,
+  });
+
+  // Note: Body content uses TipTap EditorContent which doesn't need useAutoResize
+  // TipTap handles content sizing through CSS and its own content management
 
   // Fetch account information for the From field
   const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
@@ -637,43 +667,113 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   };
 
   const handleClose = () => {
+    // Check for unsaved changes and show confirmation if needed
+    const hasUnsavedContent = formData.to || formData.subject || formData.body || attachments.length > 0;
+    
+    if (hasUnsavedContent && draftStatus !== 'saving' && draftStatus !== 'saved') {
+      // Set up pending close action for unsaved changes dialog
+      setPendingCloseAction(() => () => {
+        // Apply haptic feedback on mobile
+        if (mobileCompose.isMobile) {
+          mobileCompose.triggerHaptic('light');
+        }
+        
+        // Clear editor and form
+        if (editor) {
+          editor.commands.clearContent();
+        }
+        
+        // Clear draft and reset form
+        clearDraft();
+        setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
+        setAttachments([]);
+        setIsDraftLoaded(false);
+        setSignatureInserted(false);
+        setSelectedSignatureId(null);
+        
+        // Call the original onClose
+        onClose();
+      });
+      setShowUnsavedChangesDialog(true);
+      return;
+    }
+    
+    // No unsaved changes, close immediately
+    // Apply haptic feedback on mobile
+    if (mobileCompose.isMobile) {
+      mobileCompose.triggerHaptic('light');
+    }
+    
+    // Clear editor and form
+    if (editor) {
+      editor.commands.clearContent();
+    }
+    
+    // Clear draft and reset form
+    clearDraft();
+    setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
+    setAttachments([]);
+    setIsDraftLoaded(false);
+    setSignatureInserted(false);
+    setSelectedSignatureId(null);
+    
+    // Call the original onClose
     onClose();
-    // Reset form and attachments after close
-    setTimeout(() => {
-      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
-      setAttachments([]);
-    }, 300);
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent 
-        className={`max-w-4xl max-h-[90vh] flex flex-col ${isDragOver ? 'border-primary border-2 border-dashed' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <DialogTitle className="text-lg font-semibold">Compose Email</DialogTitle>
-          <DialogDescription className="hidden">
-            Create and send a new email message.
-          </DialogDescription>
-          <div className="text-lg font-semibold sr-only">
-            {replyTo ? "Reply" : "Compose"}
-          </div>
+  // Render compose content
+  const renderComposeContent = () => (
+    <div 
+      ref={mobileCompose.composeRef}
+      className={`flex flex-col h-full ${mobileCompose.isMobile ? 'pb-safe' : ''} ${isDragOver ? 'border-primary border-2 border-dashed' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().compose : undefined}
+    >
+      {/* Header */}
+      <div className={`flex items-center justify-between p-4 border-b ${mobileCompose.isMobile ? 'bg-background/95 backdrop-blur-sm' : ''}`}>
+        <h2 className="text-lg font-semibold">
+          {replyTo ? "Reply" : "Compose Email"}
+        </h2>
+        <div className="flex items-center space-x-2">
+          {/* Draft status indicator */}
+          {draftStatus === 'saving' && (
+            <div className="flex items-center space-x-1 text-muted-foreground text-sm">
+              <Clock className="h-3 w-3 animate-spin" />
+              <span>Saving...</span>
+            </div>
+          )}
+          {draftStatus === 'saved' && (
+            <div className="flex items-center space-x-1 text-muted-foreground text-sm">
+              <CheckCircle2 className="h-3 w-3" />
+              <span>Saved</span>
+            </div>
+          )}
+          {draftStatus === 'error' && (
+            <div className="flex items-center space-x-1 text-destructive text-sm">
+              <AlertCircle className="h-3 w-3" />
+              <span>Error</span>
+            </div>
+          )}
+
           <Button
             variant="ghost"
-            size="icon"
+            size={mobileCompose.isMobile ? "default" : "icon"}
             onClick={handleClose}
             data-testid="button-close-compose"
+            className={mobileCompose.isMobile ? "px-4" : ""}
           >
             <X className="h-4 w-4" />
+            {mobileCompose.isMobile && <span className="ml-1">Close</span>}
           </Button>
-        </DialogHeader>
-        
-        <div className="flex-1 space-y-4 overflow-y-auto">
-          {/* Recipient Fields */}
-          <div className="space-y-3">
+        </div>
+      </div>
+
+      {/* Form Content */}
+      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4`}>
+        {/* Recipient Fields */}
+        <div className="space-y-3">
             {/* From Field - Read-only */}
             <div className="flex items-center space-x-2">
               <Label htmlFor="from" className="w-12 text-sm text-muted-foreground">
@@ -690,44 +790,62 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="to" className="w-12 text-sm text-muted-foreground">
+              <Label htmlFor="to" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
                 To:
               </Label>
               <Input
                 id="to"
                 value={formData.to}
-                onChange={(e) => setFormData({ ...formData, to: e.target.value })}
+                onChange={(e) => {
+                  const newData = { ...formData, to: e.target.value };
+                  setFormData(newData);
+                  triggerAutoSave(newData);
+                }}
                 placeholder="recipient@example.com"
                 className="flex-1"
                 data-testid="input-to"
+                {...mobileCompose.getMobileInputProps('email')}
+                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('to')!)}
               />
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="cc" className="w-12 text-sm text-muted-foreground">
+              <Label htmlFor="cc" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
                 CC:
               </Label>
               <Input
                 id="cc"
                 value={formData.cc}
-                onChange={(e) => setFormData({ ...formData, cc: e.target.value })}
+                onChange={(e) => {
+                  const newData = { ...formData, cc: e.target.value };
+                  setFormData(newData);
+                  triggerAutoSave(newData);
+                }}
                 placeholder="cc@example.com"
                 className="flex-1"
                 data-testid="input-cc"
+                {...mobileCompose.getMobileInputProps('email')}
+                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('cc')!)}
               />
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="bcc" className="w-12 text-sm text-muted-foreground">
+              <Label htmlFor="bcc" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
                 BCC:
               </Label>
               <Input
                 id="bcc"
                 value={formData.bcc}
-                onChange={(e) => setFormData({ ...formData, bcc: e.target.value })}
+                onChange={(e) => {
+                  const newData = { ...formData, bcc: e.target.value };
+                  setFormData(newData);
+                  triggerAutoSave(newData);
+                }}
                 placeholder="bcc@example.com"
                 className="flex-1"
                 data-testid="input-bcc"
+                {...mobileCompose.getMobileInputProps('email')}
+                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('bcc')!)}
               />
             </div>
           </div>
@@ -736,16 +854,31 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
 
           {/* Subject */}
           <div className="flex items-center space-x-2">
-            <Label htmlFor="subject" className="w-12 text-sm text-muted-foreground">
+            <Label htmlFor="subject" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
               Subject:
             </Label>
-            <Input
+            <Textarea
+              ref={mobileCompose.subjectRef}
               id="subject"
               value={formData.subject}
-              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+              onChange={(e) => {
+                const newData = { ...formData, subject: e.target.value };
+                setFormData(newData);
+                triggerAutoSave(newData);
+                triggerSubjectResize();
+              }}
               placeholder="Email subject"
-              className="flex-1"
+              className="flex-1 resize-none"
               data-testid="input-subject"
+              style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().subject : undefined}
+              rows={1}
+              onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('subject')!)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  mobileCompose.focusNextField('subject');
+                }
+              }}
             />
           </div>
 
@@ -919,17 +1052,22 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
             />
           </div>
 
-          {/* Email Body - Rich Text Editor */}
-          <div className="flex-1">
-            <div className="min-h-[300px] border rounded-md">
+          {/* Email Body - Auto-resizing Textarea with TipTap */}
+          <div className="flex-1 space-y-2">
+            <Label className="text-sm text-muted-foreground">Message:</Label>
+            <div className={`border rounded-md overflow-hidden ${mobileCompose.isMobile ? 'min-h-[200px]' : 'min-h-[300px]'}`}>
               {editor ? (
                 <EditorContent 
                   editor={editor} 
-                  className="prose-email"
+                  className={`prose-email ${mobileCompose.isMobile ? 'mobile-editor' : ''}`}
                   data-testid="editor-body"
+                  style={mobileCompose.isMobile ? {
+                    ...mobileCompose.getMobileStyles().body,
+                    minHeight: '200px'
+                  } : undefined}
                 />
               ) : (
-                <div className="flex items-center justify-center min-h-[300px] text-muted-foreground">
+                <div className={`flex items-center justify-center ${mobileCompose.isMobile ? 'min-h-[200px]' : 'min-h-[300px]'} text-muted-foreground`}>
                   Loading editor...
                 </div>
               )}
@@ -937,39 +1075,124 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex items-center justify-between pt-4 border-t">
-          <div className="text-sm text-muted-foreground">
-            {formData.body.length} characters
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <Button 
-              variant="outline" 
-              onClick={handleClose}
-              data-testid="button-cancel-compose"
-            >
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleSend} 
-              disabled={sendEmailMutation.isPending}
-              data-testid="button-send-compose"
-            >
-              {sendEmailMutation.isPending ? (
-                <div className="flex items-center space-x-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
-                  <span>Sending...</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2">
-                  <Send className="h-4 w-4" />
-                  <span>Send</span>
+        {/* Mobile-Optimized Footer */}
+        <div className={`border-t bg-background ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
+          <div className={`flex ${mobileCompose.isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
+            {/* Character count and draft status */}
+            <div className={`flex items-center space-x-4 ${mobileCompose.isMobile ? 'justify-between' : ''}`}>
+              <div className="text-sm text-muted-foreground">
+                {formData.body?.length || 0} characters
+              </div>
+              
+              {/* Draft status */}
+              {draftStatus === 'saving' && (
+                <div className="flex items-center space-x-1 text-muted-foreground text-sm">
+                  <Clock className="h-3 w-3 animate-spin" />
+                  <span>Saving...</span>
                 </div>
               )}
-            </Button>
+              {draftStatus === 'saved' && (
+                <div className="flex items-center space-x-1 text-green-600 text-sm">
+                  <CheckCircle2 className="h-3 w-3" />
+                  <span>Saved</span>
+                </div>
+              )}
+              {draftStatus === 'error' && (
+                <div className="flex items-center space-x-1 text-destructive text-sm">
+                  <AlertCircle className="h-3 w-3" />
+                  <span>Error saving</span>
+                </div>
+              )}
+            </div>
+            
+            {/* Action buttons */}
+            <div className={`flex ${mobileCompose.isMobile ? 'w-full space-x-3' : 'items-center space-x-2'}`}>
+              {mobileCompose.isMobile && (
+                <Button 
+                  variant="outline"
+                  onClick={() => saveDraftManually()}
+                  className="flex-1"
+                  disabled={!formData.to && !formData.subject && !formData.body}
+                  data-testid="button-save-draft"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Draft
+                </Button>
+              )}
+              
+              <Button 
+                variant={mobileCompose.isMobile ? "secondary" : "outline"}
+                onClick={handleClose}
+                className={mobileCompose.isMobile ? "flex-1" : ""}
+                data-testid="button-cancel-compose"
+              >
+                Cancel
+              </Button>
+              
+              <Button 
+                onClick={mobileCompose.handleMobileSend}
+                disabled={sendEmailMutation.isPending}
+                className={`${mobileCompose.isMobile ? 'flex-1 font-semibold' : ''}`}
+                style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().sendButton : undefined}
+                data-testid="button-send-compose"
+              >
+                {sendEmailMutation.isPending ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
+                    <span>Sending...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <Send className="h-4 w-4" />
+                    <span>Send</span>
+                  </div>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
+      </div>
+  );
+
+  // Responsive Dialog/Sheet system
+  if (mobileCompose.isMobile) {
+    return (
+      <Sheet open={isOpen} onOpenChange={handleClose}>
+        <SheetContent 
+          side="bottom"
+          className="h-full w-full p-0 rounded-none border-none"
+          onInteractOutside={(e) => e.preventDefault()}
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>{replyTo ? "Reply" : "Compose Email"}</SheetTitle>
+            <SheetDescription>
+              Create and send a new email message.
+            </SheetDescription>
+          </SheetHeader>
+          {renderComposeContent()}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent 
+        className="max-w-4xl max-h-[90vh] p-0"
+        onInteractOutside={(e) => {
+          // Prevent closing when clicking outside on desktop if there's unsaved content
+          if (formData.to || formData.subject || formData.body) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{replyTo ? "Reply" : "Compose Email"}</DialogTitle>
+          <DialogDescription>
+            Create and send a new email message.
+          </DialogDescription>
+        </DialogHeader>
+        {renderComposeContent()}
       </DialogContent>
     </Dialog>
   );

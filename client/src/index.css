@@ -4,6 +4,116 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Mobile compose optimizations */
+@layer utilities {
+  /* Safe area handling for mobile devices */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Virtual keyboard optimizations */
+  .keyboard-visible {
+    --keyboard-offset: var(--keyboard-height, 0px);
+  }
+
+  /* Mobile editor optimizations */
+  .mobile-editor {
+    font-size: 16px !important;
+    line-height: 1.5;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  .mobile-editor .ProseMirror {
+    padding: 16px !important;
+    min-height: 200px;
+    font-size: 16px !important;
+    outline: none !important;
+    border: none !important;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-editor .ProseMirror:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Auto-resize textarea optimizations */
+  .auto-resize {
+    resize: none !important;
+    overflow-y: hidden;
+    transition: height 0.1s ease-out;
+    font-family: inherit;
+  }
+
+  /* Mobile touch targets */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Mobile input field optimizations */
+  .mobile-input {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Mobile attachment handling */
+  .mobile-attachment {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Mobile swipe indicators */
+  .swipe-indicator {
+    position: relative;
+  }
+  
+  .swipe-indicator::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    background-color: hsl(var(--muted-foreground));
+    border-radius: 2px;
+    opacity: 0.6;
+  }
+
+  /* Mobile keyboard handling */
+  @supports (height: 100dvh) {
+    .mobile-full-height {
+      height: 100dvh;
+    }
+  }
+
+  /* Smooth mobile animations */
+  .mobile-animate {
+    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+  }
+
+  /* Mobile scroll optimizations */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  /* Prevent text selection on mobile UI elements */
+  .mobile-ui {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
 /* LIGHT MODE */
 :root {
   --button-outline: rgba(0,0,0, .10);
