@@ -46,12 +46,22 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
   // Fetch account information for the From field
   const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
     queryKey: ['/api/accounts'],
-    enabled: !!accountId && isOpen, // Only fetch when dialog is open and accountId is provided
+    enabled: isOpen, // Fetch accounts whenever dialog is open
   });
 
   // Find the current account from the accounts list
   const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData ? (accountsData as any).data as AccountConnection[] : undefined;
-  const currentAccount = accountsList?.find((account: AccountConnection) => account.id === accountId);
+  
+  // Auto-select account: use provided accountId, or fall back to first active account
+  let currentAccount = accountsList?.find((account: AccountConnection) => account.id === accountId);
+  
+  // If no account found with provided ID, auto-select the primary account
+  if (!currentAccount && accountsList && accountsList.length > 0) {
+    // Prefer IMAP accounts over EWS for sending emails
+    currentAccount = accountsList.find(account => account.isActive && account.protocol === 'IMAP') ||
+                     accountsList.find(account => account.isActive) ||
+                     accountsList[0];
+  }
 
   // Extract email from account settings
   const getAccountEmail = (account: AccountConnection | undefined): string => {
@@ -178,10 +188,13 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       return;
     }
 
-    if (!accountId) {
+    // Use the auto-selected account if no specific accountId was provided
+    const sendingAccountId = accountId || currentAccount?.id;
+    
+    if (!sendingAccountId || !currentAccount) {
       toast({
         title: "No Account Selected",
-        description: "Please select an IMAP account to send emails",
+        description: "Please select an account to send emails",
         variant: "destructive"
       });
       return;
@@ -200,7 +213,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
 
     // Prepare email data for API
     const emailData: SendEmailRequest = {
-      accountId: accountId,
+      accountId: sendingAccountId,
       to: formData.to,
       cc: formData.cc || undefined,
       bcc: formData.bcc || undefined,

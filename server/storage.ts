@@ -74,18 +74,80 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return user;
+    try {
+      // First try to find existing user by email or ID
+      let existingUser: User | undefined;
+      
+      if (userData.email) {
+        const [userByEmail] = await db.select().from(users).where(eq(users.email, userData.email));
+        existingUser = userByEmail;
+      }
+      
+      if (!existingUser && userData.id) {
+        const [userById] = await db.select().from(users).where(eq(users.id, userData.id));
+        existingUser = userById;
+      }
+
+      if (existingUser) {
+        // User exists, update the record
+        const [updatedUser] = await db
+          .update(users)
+          .set({
+            ...userData,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, existingUser.id))
+          .returning();
+        return updatedUser;
+      } else {
+        // User doesn't exist, create new one
+        const [newUser] = await db
+          .insert(users)
+          .values({
+            ...userData,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+        return newUser;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error('Error in upsertUser:', {
+        error: errorMessage,
+        userData: { ...userData, email: userData.email ? '[REDACTED]' : undefined },
+        stack: errorStack
+      });
+      
+      // If we still get a constraint violation, try one more time with onConflictDoUpdate
+      // This handles edge cases with concurrent requests
+      try {
+        const [user] = await db
+          .insert(users)
+          .values({
+            ...userData,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: userData.id ? users.id : users.email,
+            set: {
+              email: userData.email,
+              firstName: userData.firstName,
+              lastName: userData.lastName,
+              profileImageUrl: userData.profileImageUrl,
+              updatedAt: new Date(),
+            },
+          })
+          .returning();
+        return user;
+      } catch (finalError) {
+        const finalErrorMessage = finalError instanceof Error ? finalError.message : String(finalError);
+        console.error('Final upsertUser error:', finalError);
+        throw new Error(`Failed to create or update user: ${finalErrorMessage}`);
+      }
+    }
   }
 
   // Account connections
@@ -199,10 +261,6 @@ export class DatabaseStorage implements IStorage {
     await db.delete(accountConnections).where(eq(accountConnections.id, id));
   }
 
-  // Account folder operations
-  async getAccountFolders(accountId: string): Promise<AccountFolder[]> {
-    return await db.select().from(accountFolders).where(eq(accountFolders.accountId, accountId));
-  }
 
   // Mail operations
   async getMailMessages(accountId: string, folder?: string, limit = 50, offset = 0): Promise<MailMessage[]> {
