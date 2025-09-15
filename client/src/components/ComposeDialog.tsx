@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,7 +69,7 @@ interface AttachmentFile {
 export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = React.useState({
     to: replyTo?.to || "",
     cc: replyTo?.cc || "",
     bcc: replyTo?.bcc || "",
@@ -78,18 +78,18 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   });
 
   // Draft management states
-  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
-  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
-  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
+  const [isDraftLoaded, setIsDraftLoaded] = React.useState(false);
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = React.useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = React.useState<(() => void) | null>(null);
 
   // Signature management states
-  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
-  const [signatureInserted, setSignatureInserted] = useState(false);
+  const [selectedSignatureId, setSelectedSignatureId] = React.useState<string | null>(null);
+  const [signatureInserted, setSignatureInserted] = React.useState(false);
 
   // Attachment state
-  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = React.useState<AttachmentFile[]>([]);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Mobile compose optimization
   const mobileCompose = useMobileCompose({
@@ -233,7 +233,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   });
 
   // Enhanced signature insertion with race condition prevention
-  const insertSignature = useCallback((signature: Signature, preventAutoSave = false) => {
+  const insertSignature = React.useCallback((signature: Signature, preventAutoSave = false) => {
     if (!editor) return;
 
     const signatureHtml = signature.contentHtml || `<p>${signature.contentText || ''}</p>`;
@@ -278,7 +278,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [editor]);
 
   // Auto-insert default signature with improved race condition handling
-  useEffect(() => {
+  React.useEffect(() => {
     if (editor && defaultSignature && !signatureInserted && !replyTo && !draftId && isOpen && isDraftLoaded !== null) {
       // Use a timeout to ensure editor is fully initialized and draft loading is complete
       const signatureTimeout = setTimeout(() => {
@@ -302,7 +302,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [editor, defaultSignature, signatureInserted, replyTo, draftId, isOpen, isDraftLoaded, insertSignature]);
 
   // Reset signature state when dialog opens/closes
-  useEffect(() => {
+  React.useEffect(() => {
     if (isOpen) {
       setSignatureInserted(false);
       setSelectedSignatureId(null);
@@ -310,7 +310,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [isOpen]);
 
   // Auto-save trigger function with signature state tracking
-  const triggerAutoSave = useCallback((data: typeof formData) => {
+  const triggerAutoSave = React.useCallback((data: typeof formData) => {
     if (!currentAccount?.id || (!draftId && !data.to && !data.subject && !data.body)) {
       return; // Don't save empty drafts
     }
@@ -335,7 +335,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [currentAccount?.id, draftId, attachments, isDraftLoaded, saveDraft]); // Include saveDraft function and full attachments array
 
   // Load draft when dialog opens with signature detection
-  useEffect(() => {
+  React.useEffect(() => {
     if (draftData?.draft && !isDraftLoaded) {
       const draft = draftData.draft;
       const draftBody = draft.bodyHtml || draft.body || '';
@@ -374,14 +374,14 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [draftData?.draft, isDraftLoaded, editor, toast]); // Include toast function dependency
 
   // Update editor content when replyTo changes
-  useEffect(() => {
+  React.useEffect(() => {
     if (editor && replyTo?.body && !isDraftLoaded) {
       editor.commands.setContent(replyTo.body);
     }
   }, [editor, replyTo, isDraftLoaded]);
 
   // Update form data when replyTo changes
-  useEffect(() => {
+  React.useEffect(() => {
     if (replyTo && !isDraftLoaded) {
       setFormData({
         to: replyTo.to || "",
@@ -471,7 +471,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     return null;
   };
 
-  const handleFileSelect = useCallback((files: FileList | File[]) => {
+  const handleFileSelect = React.useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files);
     
     for (const file of fileArray) {
@@ -528,19 +528,19 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   };
 
   // Drag and drop handlers
-  const handleDragOver = useCallback((e: React.DragEvent) => {
+  const handleDragOver = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(true);
   }, []);
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
+  const handleDragLeave = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);

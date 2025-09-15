@@ -301,11 +301,6 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // Prevent API routes from falling through to SPA - terminal handler for unmatched /api/* routes
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ message: 'Not Found' });
-  });
-
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
