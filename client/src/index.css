@@ -74,6 +74,72 @@
   .swipe-indicator {
     position: relative;
   }
+
+  /* Performance-optimized animations for mobile */
+  .will-change-scroll {
+    will-change: scroll-position;
+  }
+
+  .will-change-transform {
+    will-change: transform;
+  }
+
+  .will-change-auto {
+    will-change: auto;
+  }
+
+  /* GPU-accelerated scrolling for better performance */
+  .scroll-smooth-gpu {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    transform: translateZ(0);
+  }
+
+  /* Optimized virtual scrolling container */
+  .virtual-scroll-container {
+    contain: layout style paint;
+    overflow: auto;
+    height: 100%;
+  }
+
+  /* Performance-optimized image loading */
+  .lazy-image {
+    content-visibility: auto;
+    contain-intrinsic-size: 200px 150px;
+  }
+
+  /* Email list performance optimizations */
+  .email-list-item {
+    contain: layout style;
+    will-change: transform;
+  }
+
+  .email-list-item:hover {
+    transform: translateZ(0);
+  }
+
+  /* Reduce layout thrashing */
+  .no-layout-shift {
+    contain: layout;
+  }
+
+  /* Memory-efficient shadows */
+  .shadow-efficient {
+    filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.1)) drop-shadow(0 1px 1px rgb(0 0 0 / 0.06));
+  }
+
+  /* Critical CSS for above-fold content */
+  .critical-content {
+    font-display: swap;
+    contain: layout style;
+  }
+
+  /* Mobile optimized font loading */
+  .mobile-font {
+    font-display: swap;
+    font-feature-settings: "kern" 1, "liga" 1;
+    text-rendering: optimizeLegibility;
+  }
   
   .swipe-indicator::before {
     content: '';

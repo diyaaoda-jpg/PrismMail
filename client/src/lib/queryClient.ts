@@ -45,13 +45,38 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
+      // Mobile-optimized query configuration
       refetchInterval: false,
-      refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      refetchOnWindowFocus: false, // Disable for mobile battery optimization
+      refetchOnReconnect: true, // Re-fetch when network reconnects
+      staleTime: 1000 * 60 * 10, // 10 minutes - longer cache for mobile
+      gcTime: 1000 * 60 * 30, // 30 minutes - keep in memory longer
+      retry: (failureCount, error: any) => {
+        // Don't retry on 4xx errors (client errors)
+        if (error?.status >= 400 && error?.status < 500) {
+          return false;
+        }
+        // Retry up to 2 times for network errors (mobile networks are unreliable)
+        return failureCount < 2;
+      },
+      retryDelay: (attemptIndex) => 
+        Math.min(1000 * 2 ** attemptIndex, 5000), // Exponential backoff, max 5s
     },
     mutations: {
-      retry: false,
+      retry: (failureCount, error: any) => {
+        // Same retry logic for mutations
+        if (error?.status >= 400 && error?.status < 500) {
+          return false;
+        }
+        return failureCount < 1; // Only retry once for mutations
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 3000),
     },
+  },
+  // Mobile-specific configuration
+  logger: {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
   },
 });

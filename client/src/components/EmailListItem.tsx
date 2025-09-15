@@ -1,10 +1,12 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, memo, useMemo } from "react";
 import { Star, Paperclip, Circle, Archive, Trash, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useSwipeGestures, createEmailSwipeActions } from "@/hooks/useSwipeGestures";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { LazyImage } from "./LazyImage";
+import { performanceMonitor } from "@/lib/performanceMonitor";
 
 export interface EmailMessage {
   id: string;
@@ -49,7 +51,7 @@ const priorityColors = {
   3: "bg-destructive/20 border-destructive", // red
 };
 
-export function EmailListItem({
+export const EmailListItem = memo(function EmailListItem({
   email,
   isSelected = false,
   onClick,
@@ -109,6 +111,29 @@ export function EmailListItem({
 
   // Get current action feedback for visual display
   const actionFeedback = getActionFeedback();
+
+  // Memoize expensive computations for mobile performance
+  const memoizedPriorityStyle = useMemo(() => {
+    if (email.priority === 0) return {};
+    return {
+      className: priorityColors[email.priority as keyof typeof priorityColors] || "",
+      borderLeft: email.priority > 1 ? '3px solid hsl(var(--destructive))' : undefined
+    };
+  }, [email.priority]);
+
+  const memoizedTimeDisplay = useMemo(() => {
+    const now = new Date();
+    const emailDate = new Date(email.date);
+    const diffHours = (now.getTime() - emailDate.getTime()) / (1000 * 60 * 60);
+    
+    if (diffHours < 24) {
+      return emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else if (diffHours < 168) { // 7 days
+      return emailDate.toLocaleDateString([], { weekday: 'short' });
+    } else {
+      return emailDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+  }, [email.date]);
 
   return (
     <div className="relative overflow-hidden group">
@@ -307,4 +332,4 @@ export function EmailListItem({
       </div>
     </div>
   );
-}
+});

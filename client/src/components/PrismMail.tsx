@@ -8,7 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ThemeMenu } from "./ThemeMenu";
 import { MailSidebar } from "./MailSidebar";
-import { EmailListItem, type EmailMessage } from "./EmailListItem";
+import { type EmailMessage } from "./EmailListItem";
+import { OptimizedEmailList } from "./OptimizedEmailList";
 import { EmailViewer } from "./EmailViewer";
 import { ReadingMode } from "./ReadingMode";
 import { ComposeDialog } from "./ComposeDialog";
@@ -174,6 +175,69 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   // WebSocket connection for real-time email updates
   const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
   
+  // Get the selected account or fall back to first active account - with array safety
+  const primaryAccount: AccountConnection | undefined = accounts.length > 0 ? (
+    accounts.find((account: AccountConnection) => account.id === selectedAccount) ||
+    accounts.find((account: AccountConnection) => account.isActive && account.protocol === 'IMAP') ||
+    accounts.find((account: AccountConnection) => account.isActive)
+  ) : undefined;
+
+  // Fetch emails based on selected folder and account
+  const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
+    queryKey: selectedAccount === '' 
+      ? ['/api/mail/unified', selectedFolder]
+      : ['/api/mail', selectedFolder, selectedAccount],
+    queryFn: ({ queryKey }) => {
+      const [endpoint, folder] = queryKey;
+      if (endpoint === '/api/mail/unified') {
+        return fetch(`${endpoint}/${folder}`).then(res => res.json());
+      } else {
+        // For individual account view, pass the accountId parameter
+        const accountId = selectedAccount;
+        const url = `${endpoint}?folder=${folder}&accountId=${accountId}`;
+        console.log(`API Debug - Fetching emails: ${url}`);
+        return fetch(url).then(res => res.json());
+      }
+    },
+    enabled: selectedAccount === '' || !!primaryAccount,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+
+  // Sync mutation for manual email refresh
+  const syncMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const response = await fetch(`/api/accounts/${accountId}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ folder: 'INBOX', limit: 50 })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Sync failed: ${response.statusText}`);
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Email sync completed",
+        description: "Your emails have been synchronized successfully."
+      });
+      // Refresh the email list
+      refetchEmails();
+    },
+    onError: (error: any) => {
+      console.error('Email sync failed:', error);
+      toast({
+        title: "Email sync failed", 
+        description: error.message || "Failed to synchronize emails",
+        variant: "destructive"
+      });
+    }
+  });
+
   // Pull-to-refresh functionality
   const handleRefresh = useCallback(async () => {
     console.log('Pull-to-refresh triggered');
@@ -245,33 +309,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [accounts, selectedAccount]);
 
-  // Get the selected account or fall back to first active account - with array safety
-  const primaryAccount: AccountConnection | undefined = accounts.length > 0 ? (
-    accounts.find((account: AccountConnection) => account.id === selectedAccount) ||
-    accounts.find((account: AccountConnection) => account.isActive && account.protocol === 'IMAP') ||
-    accounts.find((account: AccountConnection) => account.isActive)
-  ) : undefined;
-
-  // Fetch emails - use unified API for "All Accounts" or general mail API with folder param for individual accounts
-  const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
-    queryKey: selectedAccount === '' 
-      ? ['/api/mail/unified', selectedFolder]
-      : ['/api/mail', selectedFolder, selectedAccount],
-    queryFn: ({ queryKey }) => {
-      const [endpoint, folder] = queryKey;
-      if (endpoint === '/api/mail/unified') {
-        return fetch(`${endpoint}/${folder}`).then(res => res.json());
-      } else {
-        // For individual account view, pass the accountId parameter
-        const accountId = selectedAccount;
-        const url = `${endpoint}?folder=${folder}&accountId=${accountId}`;
-        console.log(`API Debug - Fetching emails: ${url}`);
-        return fetch(url).then(res => res.json());
-      }
-    },
-    enabled: selectedAccount === '' || !!primaryAccount,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
 
   // Fetch unified folder counts for All Accounts view
   const { data: unifiedCounts } = useQuery<{
@@ -292,40 +329,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     ? emailResponse 
     : (emailResponse?.success && Array.isArray(emailResponse.data) ? emailResponse.data : []);
 
-  // Auto-sync emails when account becomes available
-  const syncMutation = useMutation({
-    mutationFn: async (accountId: string) => {
-      const response = await fetch(`/api/accounts/${accountId}/sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ folder: 'INBOX', limit: 50 })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Sync failed: ${response.statusText}`);
-      }
-      
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "Email sync completed",
-        description: "Your emails have been synchronized successfully."
-      });
-      // Refresh the email list
-      refetchEmails();
-    },
-    onError: (error: any) => {
-      console.error('Email sync failed:', error);
-      toast({
-        title: "Email sync failed", 
-        description: error.message || "Failed to synchronize emails",
-        variant: "destructive"
-      });
-    }
-  });
 
   // Listen for WebSocket messages and refresh emails automatically
   useEffect(() => {
@@ -1164,21 +1167,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 </div>
               </div>
               
-              <ScrollArea 
-                className="flex-1" 
-                data-scroll-container
-                onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
-                onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
-                onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
-                onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
-                onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
-                onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
-                onScroll={pullToRefresh.handlers.onScroll}
-              >
+              <div className="flex-1 flex flex-col relative">
                 {/* Pull-to-refresh indicator */}
                 {pullToRefresh.pullState.isActive && (
                   <div 
-                    className="flex items-center justify-center py-4 transition-all duration-300"
+                    className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
                     style={{ 
                       height: pullToRefresh.pullDistance,
                       opacity: pullToRefresh.pullProgress,
@@ -1199,42 +1192,39 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                   </div>
                 )}
 
-                <div className="divide-y">
-                  {filteredEmails.map((email) => (
-                    <EmailListItem
-                      key={email.id}
-                      email={email}
-                      isSelected={selectedEmail?.id === email.id}
-                      onClick={() => {
-                        setSelectedEmail(email);
-                        if (isMobile) {
-                          setIsMobileEmailViewOpen(true);
-                        }
-                        console.log('Selected email:', email.subject);
-                      }}
-                      onToggleRead={(emailId) => handleToggleRead(emailId)}
-                      onToggleFlagged={(emailId) => handleToggleFlagged(emailId)}
-                      onToggleStar={handleStar}
-                      onArchive={handleArchive}
-                      onDelete={handleDelete}
-                      onFlag={(emailId) => handleToggleFlagged(emailId)}
-                      enableSwipeGestures={isMobile}
-                      showSwipeHints={false}
-                    />
-                  ))}
-                  {emailsLoading && (
-                    <div className="p-8 text-center">
-                      Loading emails...
-                    </div>
-                  )}
-                  {!emailsLoading && filteredEmails.length === 0 && (
-                    <div className="p-8 text-center text-muted-foreground">
-                      <div className="text-lg font-medium mb-2">No emails found</div>
-                      <div className="text-sm">Try changing your filter or search terms</div>
-                    </div>
-                  )}
+                {/* Optimized email list with virtual scrolling */}
+                <div 
+                  className="flex-1"
+                  data-scroll-container
+                  onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
+                  onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
+                  onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
+                  onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
+                  onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
+                  onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
+                >
+                  <OptimizedEmailList
+                    emails={filteredEmails}
+                    selectedEmail={selectedEmail}
+                    onEmailSelect={(email) => {
+                      setSelectedEmail(email);
+                      if (isMobile) {
+                        setIsMobileEmailViewOpen(true);
+                      }
+                      console.log('Selected email:', email.subject);
+                    }}
+                    onToggleRead={handleToggleRead}
+                    onToggleFlagged={handleToggleFlagged}
+                    onToggleStar={handleStar}
+                    onArchive={handleArchive}
+                    onDelete={handleDelete}
+                    enableSwipeGestures={isMobile}
+                    isLoading={emailsLoading}
+                    searchQuery={searchQuery}
+                    className="h-full"
+                  />
                 </div>
-              </ScrollArea>
+              </div>
             </div>
 
             {/* Desktop Email viewer - Hidden on mobile */}

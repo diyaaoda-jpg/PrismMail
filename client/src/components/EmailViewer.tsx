@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, memo } from "react";
 import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, ZoomIn, ZoomOut, Printer, Eye, EyeOff, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
@@ -14,6 +14,9 @@ import { useTheme } from "@/components/ThemeProvider";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSwipeGestures } from "@/hooks/useSwipeGestures";
 import { triggerHapticFeedback, clamp } from "@/lib/gestureUtils";
+import { LazyImage } from "./LazyImage";
+import { useOptimizedEmailQuery } from "@/hooks/useOptimizedQuery";
+import { performanceMonitor } from "@/lib/performanceMonitor";
 import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
@@ -34,7 +37,52 @@ interface EmailViewerProps {
   enableGestures?: boolean;
 }
 
-export function EmailViewer({
+// Memoized attachment component for performance
+const AttachmentItem = memo(function AttachmentItem({ attachment, onDownload }: {
+  attachment: { id: string; fileName: string; fileSize: number; mimeType: string };
+  onDownload: (id: string) => void;
+}) {
+  const handleDownload = useCallback(() => {
+    onDownload(attachment.id);
+  }, [attachment.id, onDownload]);
+
+  const formatFileSize = useCallback((bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }, []);
+
+  const isImage = attachment.mimeType.startsWith('image/');
+  
+  return (
+    <div className="flex items-center gap-3 p-3 border rounded-lg hover-elevate active-elevate-2">
+      <div className="flex-shrink-0">
+        {isImage ? (
+          <Image className="h-8 w-8 text-blue-500" />
+        ) : (
+          <FileText className="h-8 w-8 text-gray-500" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{attachment.fileName}</p>
+        <p className="text-xs text-muted-foreground">{formatFileSize(attachment.fileSize)}</p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleDownload}
+        className="hover-elevate active-elevate-2"
+        data-testid={`button-download-${attachment.id}`}
+      >
+        <Download className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+});
+
+export const EmailViewer = memo(function EmailViewer({
   email,
   currentUserEmail,
   onReply,
@@ -873,4 +921,4 @@ export function EmailViewer({
     </div>
   </div>
   );
-}
+});

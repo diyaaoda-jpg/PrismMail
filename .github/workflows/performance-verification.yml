@@ -1,0 +1,84 @@
+# Performance Verification CI Workflow
+# Automatically verifies performance budgets and prevents regressions
+
+name: Performance Verification
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  performance-verification:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build production bundle
+      run: npm run build
+      
+    - name: Analyze production build
+      run: node scripts/production-build-analysis.js
+      
+    - name: Check bundle budgets
+      run: node scripts/bundle-budget-check.js
+      
+    - name: Verify performance targets
+      run: node scripts/performance-verification.js
+      
+    - name: Upload performance artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: performance-reports
+        path: |
+          build-analysis-report.json
+          bundle-budget-report.json
+          performance-verification-report.json
+          build-summary.json
+          performance-summary.json
+          
+    - name: Comment PR with performance results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const bundleSummary = JSON.parse(fs.readFileSync('build-summary.json', 'utf8'));
+            const perfSummary = JSON.parse(fs.readFileSync('performance-summary.json', 'utf8'));
+            
+            const status = bundleSummary.passed && perfSummary.passed ? '✅' : '❌';
+            const bundleSize = bundleSummary.gzippedSizeKB;
+            const budgetUsed = (bundleSize / 500 * 100).toFixed(1);
+            
+            const comment = `## ${status} Performance Verification
+            
+            **Bundle Size:** ${bundleSize}KB gzipped (${budgetUsed}% of 500KB budget)
+            **Performance Score:** ${perfSummary.criticalPassRate.toFixed(1)}%
+            **Status:** ${bundleSummary.passed && perfSummary.passed ? 'PASSED' : 'FAILED'}
+            
+            ${!bundleSummary.passed || !perfSummary.passed ? '⚠️ Performance budget exceeded. Review bundle size or performance metrics.' : ''}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          } catch (error) {
+            console.log('Could not post performance comment:', error);
+          }
