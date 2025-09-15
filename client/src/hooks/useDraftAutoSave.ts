@@ -45,10 +45,10 @@ export function useDraftAutoSave(options: UseDraftAutoSaveOptions): UseDraftAuto
   const [currentDraftId, setCurrentDraftId] = React.useState<string | undefined>(initialDraftId);
 
   // Refs for managing timers and current draft data
-  const debounceTimerRef = useRef<NodeJS.Timeout>();
-  const autoSaveTimerRef = useRef<NodeJS.Timeout>();
-  const lastSavedDataRef = useRef<string>('');
-  const pendingDraftDataRef = useRef<Partial<DraftContent>>({});
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const lastSavedDataRef = React.useRef<string>('');
+  const pendingDraftDataRef = React.useRef<Partial<DraftContent>>({});
 
   // Local storage key based on account and draft
   const getLocalStorageKey = React.useCallback((drafId?: string) => {
