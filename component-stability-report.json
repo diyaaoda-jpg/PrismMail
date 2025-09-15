@@ -1,0 +1,222 @@
+{
+  "summary": {
+    "duration": "0.02s",
+    "passed": 21,
+    "failed": 2,
+    "warnings": 7,
+    "stabilityScore": "70.0%",
+    "timestamp": "2025-09-15T20:30:07.932Z"
+  },
+  "results": [
+    {
+      "timestamp": "2025-09-15T20:30:07.909Z",
+      "status": "INFO",
+      "message": "🔬 Starting Component Stability Testing"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.916Z",
+      "status": "INFO",
+      "message": "=== Testing Email List Rendering Performance ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.917Z",
+      "status": "PASS",
+      "message": "Virtual scrolling threshold (>50 emails): Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.917Z",
+      "status": "PASS",
+      "message": "Fixed item height for performance: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.918Z",
+      "status": "PASS",
+      "message": "Memoized email items: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.918Z",
+      "status": "PASS",
+      "message": "Performance logging: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.918Z",
+      "status": "WARN",
+      "message": "Container height management: Missing optimization"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.918Z",
+      "status": "PASS",
+      "message": "Skeleton loading states: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.918Z",
+      "status": "PASS",
+      "message": "Render optimizations: Found 9 memoized operations"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.919Z",
+      "status": "INFO",
+      "message": "=== Testing Auto-save Functionality ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "PASS",
+      "message": "Auto-save interval (30s): Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "PASS",
+      "message": "Debounce delay (2s): Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "FAIL",
+      "message": "Local storage fallback: Missing functionality"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "FAIL",
+      "message": "Draft cleanup on unmount: Missing functionality"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "PASS",
+      "message": "Manual save capability: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "PASS",
+      "message": "Draft status tracking: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.920Z",
+      "status": "PASS",
+      "message": "ComposeDialog auto-save integration: Connected"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.921Z",
+      "status": "WARN",
+      "message": "Auto-save error handling: Missing"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.921Z",
+      "status": "INFO",
+      "message": "=== Testing WebSocket Connection Stability ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "WARN",
+      "message": "Connection state management: Missing functionality"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "PASS",
+      "message": "Automatic reconnection: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "PASS",
+      "message": "Message handling: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "PASS",
+      "message": "Connection cleanup: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "PASS",
+      "message": "Error handling: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.922Z",
+      "status": "PASS",
+      "message": "Heartbeat/ping mechanism: Implementation found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.923Z",
+      "status": "WARN",
+      "message": "WebSocket integration in PrismMail: Incomplete"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.923Z",
+      "status": "PASS",
+      "message": "Real-time update processing: Implemented"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.923Z",
+      "status": "INFO",
+      "message": "=== Testing Memory Management Patterns ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.926Z",
+      "status": "WARN",
+      "message": "Cleanup patterns: Only 3 found, may have memory leaks"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.926Z",
+      "status": "PASS",
+      "message": "Memoization patterns: Found 51 optimizations"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.926Z",
+      "status": "PASS",
+      "message": "Event listener cleanup: Found 11 cleanup handlers"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.926Z",
+      "status": "INFO",
+      "message": "=== Testing Hook Dependencies ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.928Z",
+      "status": "WARN",
+      "message": "Dependency arrays: Only 0 found, may miss updates"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.929Z",
+      "status": "PASS",
+      "message": "Stale closure detection: No obvious issues found"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.929Z",
+      "status": "INFO",
+      "message": "=== Testing Error Boundaries ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.930Z",
+      "status": "WARN",
+      "message": "Error boundaries: Not implemented"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.931Z",
+      "status": "PASS",
+      "message": "Error handling: Found 2 try-catch blocks"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.932Z",
+      "status": "INFO",
+      "message": "=== Component Stability Test Report ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.932Z",
+      "status": "INFO",
+      "message": "Duration: 0.02 seconds"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.932Z",
+      "status": "INFO",
+      "message": "Passed: 21 | Failed: 2 | Warnings: 7"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.932Z",
+      "status": "INFO",
+      "message": "Stability Score: 70.0%"
+    },
+    {
+      "timestamp": "2025-09-15T20:30:07.932Z",
+      "status": "FAIL",
+      "message": "❌ Component stability needs attention"
+    }
+  ]
+}

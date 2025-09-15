@@ -1,0 +1,230 @@
+{
+  "summary": {
+    "duration": "0.04s",
+    "passed": 17,
+    "failed": 0,
+    "warnings": 11,
+    "performanceScore": "60.7%",
+    "targets": {
+      "renderTime": 100,
+      "layoutShift": 0.1,
+      "bundleSize": 3,
+      "touchResponse": 100,
+      "memoryUsage": 100,
+      "firstContentfulPaint": 2000
+    },
+    "timestamp": "2025-09-15T20:34:12.062Z"
+  },
+  "results": [
+    {
+      "timestamp": "2025-09-15T20:34:12.024Z",
+      "status": "INFO",
+      "message": "⚡ Starting Performance Validation Testing"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.028Z",
+      "status": "INFO",
+      "message": "=== Testing Bundle Size Performance ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.030Z",
+      "status": "PASS",
+      "message": "Total bundle size: 1.53 MB"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.030Z",
+      "status": "WARN",
+      "message": "index-ChY3bSaV.js: 1059.2 KB"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.031Z",
+      "status": "PASS",
+      "message": "index.js: 322.9 KB"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.031Z",
+      "status": "PASS",
+      "message": "index-b_wEG7vu.css: 131.1 KB"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.031Z",
+      "status": "PASS",
+      "message": "sw.js: 49.6 KB"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.031Z",
+      "status": "INFO",
+      "message": "=== Testing Component Render Performance ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.034Z",
+      "status": "PASS",
+      "message": "Memoization patterns: 54 found"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.034Z",
+      "status": "PASS",
+      "message": "Virtual scrolling optimizations: 1"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.034Z",
+      "status": "PASS",
+      "message": "Potentially expensive operations: 0"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.037Z",
+      "status": "WARN",
+      "message": "Performance monitoring: Missing"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.037Z",
+      "status": "INFO",
+      "message": "=== Testing Layout Shift Prevention ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.039Z",
+      "status": "WARN",
+      "message": "Skeleton loading states: 1 components"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.039Z",
+      "status": "PASS",
+      "message": "Components with fixed dimensions: 2"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.039Z",
+      "status": "WARN",
+      "message": "Layout shift prevention patterns: 0"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.042Z",
+      "status": "INFO",
+      "message": "Image optimization patterns: 0"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.043Z",
+      "status": "INFO",
+      "message": "=== Testing Touch Response Optimization ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.046Z",
+      "status": "PASS",
+      "message": "Touch event handlers: 96"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.046Z",
+      "status": "WARN",
+      "message": "Passive event listeners: 0"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.046Z",
+      "status": "WARN",
+      "message": "Debounce/throttle patterns: 1"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.046Z",
+      "status": "PASS",
+      "message": "Touch CSS optimizations: 2"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.048Z",
+      "status": "WARN",
+      "message": "Touch-friendly button sizes: 2/15"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.049Z",
+      "status": "INFO",
+      "message": "=== Testing Memory Usage Patterns ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.051Z",
+      "status": "PASS",
+      "message": "Cleanup patterns: 5"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.051Z",
+      "status": "WARN",
+      "message": "Potential memory leaks: 3"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.052Z",
+      "status": "PASS",
+      "message": "Memory optimization patterns: 4"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.052Z",
+      "status": "PASS",
+      "message": "Virtual scrolling for large lists: Implemented"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.053Z",
+      "status": "INFO",
+      "message": "=== Testing Network Performance ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.056Z",
+      "status": "PASS",
+      "message": "Cache strategies: 2 files"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.056Z",
+      "status": "PASS",
+      "message": "Error handling: 3 files"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.056Z",
+      "status": "WARN",
+      "message": "Network optimizations: 0"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.057Z",
+      "status": "PASS",
+      "message": "Offline support: 2/2 components"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.057Z",
+      "status": "INFO",
+      "message": "=== Testing Build Performance ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.059Z",
+      "status": "WARN",
+      "message": "Build optimization configs: 0/3"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.059Z",
+      "status": "PASS",
+      "message": "TypeScript incremental compilation: Enabled"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.060Z",
+      "status": "WARN",
+      "message": "Total dependencies: 104"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.060Z",
+      "status": "INFO",
+      "message": "=== Performance Validation Report ==="
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.061Z",
+      "status": "INFO",
+      "message": "Duration: 0.04 seconds"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.061Z",
+      "status": "INFO",
+      "message": "Passed: 17 | Failed: 0 | Warnings: 11"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.062Z",
+      "status": "INFO",
+      "message": "Performance Score: 60.7%"
+    },
+    {
+      "timestamp": "2025-09-15T20:34:12.062Z",
+      "status": "FAIL",
+      "message": "❌ Performance needs significant optimization"
+    }
+  ]
+}
