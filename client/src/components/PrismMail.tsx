@@ -129,12 +129,15 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
 
   // Fetch user's accounts - ensure it's always an array
-  const { data: accountsResponse, isLoading: accountsLoading } = useQuery({
+  const { data: accountsResponse, isLoading: accountsLoading } = useQuery<{
+    success: boolean;
+    data: AccountConnection[];
+  }>({
     queryKey: ['/api/accounts']
   });
   
   // Extract accounts from API response wrapper and ensure it's always an array
-  const accounts = Array.isArray(accountsResponse?.data) ? accountsResponse.data : [];
+  const accounts: AccountConnection[] = Array.isArray(accountsResponse?.data) ? accountsResponse.data : [];
 
   // Fetch user preferences for auto-sync settings
   const { data: userPrefs } = useQuery<UserPrefs>({
@@ -161,10 +164,10 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [accounts, selectedAccount]);
 
   // Get the selected account or fall back to first active account - with array safety
-  const primaryAccount = accounts.length > 0 ? (
-    accounts.find(account => account.id === selectedAccount) ||
-    accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
-    accounts.find(account => account.isActive)
+  const primaryAccount: AccountConnection | undefined = accounts.length > 0 ? (
+    accounts.find((account: AccountConnection) => account.id === selectedAccount) ||
+    accounts.find((account: AccountConnection) => account.isActive && account.protocol === 'IMAP') ||
+    accounts.find((account: AccountConnection) => account.isActive)
   ) : undefined;
 
   // Fetch emails - use unified API for "All Accounts" or general mail API with folder param for individual accounts
@@ -287,9 +290,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
 
     // Get all active accounts, prioritizing IMAP - with array safety
-    const activeAccounts = accounts.length > 0 ? accounts.filter(account => account.isActive) : [];
-    const imapAccounts = activeAccounts.filter(account => account.protocol === 'IMAP');
-    const ewsAccounts = activeAccounts.filter(account => account.protocol === 'EWS');
+    const activeAccounts = accounts.length > 0 ? accounts.filter((account: AccountConnection) => account.isActive) : [];
+    const imapAccounts = activeAccounts.filter((account: AccountConnection) => account.protocol === 'IMAP');
+    const ewsAccounts = activeAccounts.filter((account: AccountConnection) => account.protocol === 'EWS');
     
     // Prioritize IMAP accounts for auto-sync
     const accountsToSync = imapAccounts.length > 0 ? imapAccounts : ewsAccounts;
@@ -303,7 +306,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
     const intervalId = setInterval(() => {
       // Sync accounts in priority order (IMAP first)
-      accountsToSync.forEach((account, index) => {
+      accountsToSync.forEach((account: AccountConnection, index: number) => {
         setTimeout(() => {
           console.log('Auto-sync triggered for account:', account.name, `(${account.protocol})`);
           syncMutation.mutate(account.id);
