@@ -6,6 +6,7 @@ import {
   priorityRules,
   vipContacts,
   userPrefs,
+  attachments,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -20,6 +21,8 @@ import {
   type InsertVipContact,
   type UserPrefs,
   type InsertUserPrefs,
+  type Attachment,
+  type InsertAttachment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
@@ -64,6 +67,12 @@ export interface IStorage {
   upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
   deleteAccountFolder(id: string): Promise<void>;
   updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void>;
+  // Attachment operations
+  getEmailAttachments(emailId: string): Promise<Attachment[]>;
+  createAttachment(attachment: InsertAttachment): Promise<Attachment>;
+  getAttachment(id: string): Promise<Attachment | undefined>;
+  deleteAttachment(id: string): Promise<void>;
+  deleteEmailAttachments(emailId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
