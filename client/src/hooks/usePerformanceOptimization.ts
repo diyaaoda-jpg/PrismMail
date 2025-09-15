@@ -4,7 +4,7 @@ import { performanceMonitor } from '@/lib/performanceMonitor';
 // Custom hook for performance optimization across components
 export function usePerformanceOptimization(componentName: string) {
   const renderStartTime = useRef<number>(performance.now());
-  const [isOptimized, setIsOptimized] = useState(false);
+  const [isOptimized, setIsOptimized] = React.useState(false);
 
   // Monitor component render performance
   React.useEffect(() => {
@@ -20,7 +20,7 @@ export function usePerformanceOptimization(componentName: string) {
   });
 
   // Debounced function creator for performance
-  const createDebouncedCallback = useCallback(<T extends (...args: any[]) => any>(
+  const createDebouncedCallback = React.useCallback(<T extends (...args: any[]) => any>(
     callback: T,
     delay: number = 300
   ): T => {
@@ -33,7 +33,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, []);
 
   // Throttled function creator for performance
-  const createThrottledCallback = useCallback(<T extends (...args: any[]) => any>(
+  const createThrottledCallback = React.useCallback(<T extends (...args: any[]) => any>(
     callback: T,
     limit: number = 100
   ): T => {
@@ -49,7 +49,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, []);
 
   // Memory usage monitoring
-  const checkMemoryUsage = useCallback(() => {
+  const checkMemoryUsage = React.useCallback(() => {
     if ('memory' in performance) {
       const memory = (performance as any).memory;
       const memoryUsageMB = memory.usedJSHeapSize / 1024 / 1024;
@@ -64,7 +64,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, [componentName]);
 
   // Performance optimization enabler
-  const enableOptimizations = useCallback(() => {
+  const enableOptimizations = React.useCallback(() => {
     setIsOptimized(true);
     
     // Enable performance optimizations
@@ -131,7 +131,7 @@ export function useOptimizedScroll(
   const lastScrollTop = React.useRef(0);
   const ticking = React.useRef(false);
 
-  const handleScroll = useCallback((e: Event) => {
+  const handleScroll = React.useCallback((e: Event) => {
     const scrollTop = (e.target as HTMLElement).scrollTop;
     
     if (Math.abs(scrollTop - lastScrollTop.current) < threshold) {
@@ -153,7 +153,7 @@ export function useOptimizedScroll(
 
 // Hook for managing component visibility for performance
 export function useComponentVisibility() {
-  const [isVisible, setIsVisible] = useState(true);
+  const [isVisible, setIsVisible] = React.useState(true);
   const elementRef = useRef<HTMLElement>(null);
 
   React.useEffect(() => {
@@ -186,10 +186,10 @@ export function useOptimizedState<T>(
   initialValue: T,
   equalityFn?: (a: T, b: T) => boolean
 ) {
-  const [state, setState] = useState(initialValue);
+  const [state, setState] = React.useState(initialValue);
   const previousValue = React.useRef(initialValue);
 
-  const optimizedSetState = useCallback((newValue: T | ((prev: T) => T)) => {
+  const optimizedSetState = React.useCallback((newValue: T | ((prev: T) => T)) => {
     const nextValue = typeof newValue === 'function' 
       ? (newValue as (prev: T) => T)(previousValue.current)
       : newValue;
@@ -211,7 +211,7 @@ export function useBackgroundTask() {
   const tasksRef = useRef<Array<() => void>>([]);
   const isProcessing = React.useRef(false);
 
-  const scheduleTask = useCallback((task: () => void) => {
+  const scheduleTask = React.useCallback((task: () => void) => {
     tasksRef.current.push(task);
     
     if (!isProcessing.current) {
@@ -230,7 +230,7 @@ export function useBackgroundTask() {
     }
   }, []);
 
-  const processTasks = useCallback(() => {
+  const processTasks = React.useCallback(() => {
     const startTime = performance.now();
     
     while (tasksRef.current.length > 0 && (performance.now() - startTime) < 5) {

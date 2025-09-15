@@ -95,7 +95,7 @@ export function usePullToRefresh(
   // Refs for tracking gesture state without re-renders
   const startPointRef = React.useRef<TouchPoint | null>(null);
   const currentPointRef = React.useRef<TouchPoint | null>(null);
-  const isActiveRef = React.React.useRef(false);
+  const isActiveRef = React.useRef(false);
   const scrollElementRef = React.useRef<HTMLElement | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const refreshPromiseRef = React.useRef<Promise<void> | null>(null);
