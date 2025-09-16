@@ -1794,17 +1794,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // For now, return a proper error for EWS accounts with JSON response
-      if (account.protocol === 'EWS') {
-        throw new ApiError(
-          ErrorCodes.EMAIL_SEND_FAILED,
-          'EWS email sending not yet implemented',
-          501,
-          'Email sending via EWS protocol is currently under development'
-        );
-      }
-
-      // For IMAP accounts, redirect to the main send endpoint
       // Get encrypted account settings
       const encryptedAccount = await storage.getAccountConnectionEncrypted(accountId);
       if (!encryptedAccount) {
@@ -1816,15 +1805,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // TODO: Implement actual email sending logic here
-      // For now, return a success response to fix the JSON parsing issue
+      let sendResult;
+
+      if (account.protocol === 'EWS') {
+        // Use EWS sending service
+        const { EwsSendService } = await import('./services/ewsSendService');
+        
+        sendResult = await EwsSendService.sendEmail(accountId, encryptedAccount.settingsJson, {
+          to: [emailRequest.to], // Convert string to array
+          cc: emailRequest.cc ? [emailRequest.cc] : undefined, // Convert string to array if present
+          bcc: emailRequest.bcc ? [emailRequest.bcc] : undefined, // Convert string to array if present
+          subject: emailRequest.subject,
+          bodyText: emailRequest.body,
+          bodyHtml: emailRequest.bodyHtml
+        });
+
+        if (!sendResult.success) {
+          throw new ApiError(
+            ErrorCodes.EMAIL_SEND_FAILED,
+            'Failed to send email via EWS',
+            500,
+            sendResult.error || 'Unknown EWS sending error'
+          );
+        }
+      } else {
+        // For IMAP accounts, we would use SMTP here
+        // TODO: Implement SMTP sending for IMAP accounts
+        throw new ApiError(
+          ErrorCodes.EMAIL_SEND_FAILED,
+          'IMAP/SMTP email sending not yet implemented',
+          501,
+          'Please use an EWS account for email sending'
+        );
+      }
+
       const response = {
         success: true,
-        messageId: `sent-${Date.now()}`,
+        messageId: sendResult.messageId,
         sentAt: new Date()
       };
 
-      console.log(`[${requestId}] Email send completed (placeholder implementation)`);
+      console.log(`[${requestId}] Email sent successfully via ${account.protocol}`);
       res.json(createSuccessResponse(response, 'Email sent successfully'));
 
     } catch (error) {
