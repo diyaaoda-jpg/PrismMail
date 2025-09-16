@@ -62,6 +62,9 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
                      accountsList.find(account => account.isActive) ||
                      accountsList[0];
   }
+  
+  // If still no account but dialog is open, wait for accounts to load
+  const hasAccountsData = !!accountsData && !isLoadingAccounts;
 
   // Extract email from account settings
   const getAccountEmail = (account: AccountConnection | undefined): string => {
@@ -188,13 +191,43 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       return;
     }
 
+    // Wait for accounts to load if they're still loading
+    if (isLoadingAccounts || !hasAccountsData) {
+      toast({
+        title: "Please Wait",
+        description: "Loading account information...",
+        variant: "default"
+      });
+      return;
+    }
+
     // Use the auto-selected account if no specific accountId was provided
     const sendingAccountId = accountId || currentAccount?.id;
+    
+    // Debug logging
+    console.log('Debug - Account selection:', {
+      accountId,
+      currentAccount: currentAccount?.id,
+      sendingAccountId,
+      accountsData: !!accountsData,
+      accountsList: accountsList?.length || 0,
+      hasAccountsData,
+      isLoadingAccounts
+    });
+    
+    if (!accountsList || accountsList.length === 0) {
+      toast({
+        title: "No Email Accounts",
+        description: "Please configure at least one email account before sending emails.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     if (!sendingAccountId || !currentAccount) {
       toast({
         title: "No Account Selected",
-        description: "Please select an account to send emails",
+        description: `Could not select an account for sending. Available accounts: ${accountsList.length}. Please check your account configuration.`,
         variant: "destructive"
       });
       return;
