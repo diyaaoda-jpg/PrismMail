@@ -203,25 +203,21 @@ function createReplyAttribution(email: EmailMessage, isForward: boolean = false)
   
   if (isForward) {
     const htmlAttribution = `
-<br><br>
-<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 10px;">
+<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 20px;">
 <p><strong>---------- Forwarded message ----------</strong></p>
 <p><strong>From:</strong> ${email.from}</p>
 <p><strong>Date:</strong> ${formattedDate}</p>
 <p><strong>Subject:</strong> ${email.subject}</p>
-</div>
-<br>`;
+</div>`;
     
     const plainAttribution = `\n\n---------- Forwarded message ----------\nFrom: ${email.from}\nDate: ${formattedDate}\nSubject: ${email.subject}\n\n`;
     
     return { html: htmlAttribution, plain: plainAttribution };
   } else {
     const htmlAttribution = `
-<br><br>
-<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 10px;">
+<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 20px;">
 <p>On ${formattedDate}, ${email.from} wrote:</p>
-</div>
-<br>`;
+</div>`;
     
     const plainAttribution = `\n\nOn ${formattedDate}, ${email.from} wrote:\n\n`;
     
