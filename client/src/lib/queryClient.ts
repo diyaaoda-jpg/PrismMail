@@ -77,9 +77,4 @@ export const queryClient = new QueryClient({
     },
   },
   // Mobile-specific configuration
-  logger: {
-    log: console.log,
-    warn: console.warn,
-    error: console.error,
-  },
 });
