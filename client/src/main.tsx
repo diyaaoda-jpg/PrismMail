@@ -4,16 +4,20 @@ import "./index.css";
 import { initializeServiceWorker } from "./lib/serviceWorker";
 import { performanceMonitor } from "./lib/performanceMonitor";
 
-// Initialize service worker for offline support
-initializeServiceWorker().then((registered) => {
-  if (registered) {
-    console.log('Service worker registered successfully');
-  } else {
-    console.log('Service worker registration failed or not supported');
-  }
-}).catch((error) => {
-  console.error('Service worker initialization error:', error);
-});
+// Initialize service worker for offline support (only in production)
+if (import.meta.env.PROD) {
+  initializeServiceWorker().then((registered) => {
+    if (registered) {
+      console.log('Service worker registered successfully');
+    } else {
+      console.log('Service worker registration failed or not supported');
+    }
+  }).catch((error) => {
+    console.error('Service worker initialization error:', error);
+  });
+} else {
+  console.log('Service worker disabled in development mode');
+}
 
 // Initialize comprehensive performance monitoring after app loads
 setTimeout(() => {

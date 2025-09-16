@@ -1,5 +1,4 @@
 import type { Express } from "express";
-import { createServer, type Server } from "http";
 import { storage, type SearchEmailsParams } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings, insertAttachmentSchema, saveDraftRequestSchema, type SaveDraftRequest, type SaveDraftResponse, type LoadDraftResponse, type ListDraftsResponse, type DeleteDraftResponse, createSignatureRequestSchema, updateSignatureRequestSchema, type CreateSignatureRequest, type UpdateSignatureRequest, type SignatureResponse, type ListSignaturesResponse, type DeleteSignatureResponse, pushSubscriptionRequestSchema, updateNotificationPreferencesRequestSchema, updateAccountNotificationPreferencesRequestSchema, type PushSubscriptionRequest, type PushSubscriptionResponse, type UpdateNotificationPreferencesRequest, type UpdateAccountNotificationPreferencesRequest, type NotificationPreferencesResponse } from "@shared/schema";
@@ -302,7 +301,7 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
   };
 }
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express): Promise<void> {
   // Auth middleware
   await setupAuth(app);
 
@@ -3634,20 +3633,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         preferences: {
           global: globalPrefs ? {
-            enableNotifications: globalPrefs.enableNotifications,
-            enableNewEmailNotifications: globalPrefs.enableNewEmailNotifications,
-            enableVipNotifications: globalPrefs.enableVipNotifications,
-            enableSystemNotifications: globalPrefs.enableSystemNotifications,
-            enableQuietHours: globalPrefs.enableQuietHours,
-            quietStartHour: globalPrefs.quietStartHour,
-            quietEndHour: globalPrefs.quietEndHour,
-            quietTimezone: globalPrefs.quietTimezone,
-            enableGrouping: globalPrefs.enableGrouping,
-            enableSound: globalPrefs.enableSound,
-            enableVibration: globalPrefs.enableVibration,
-            priorityFilter: globalPrefs.priorityFilter,
-            batchDelaySeconds: globalPrefs.batchDelaySeconds,
-            maxNotificationsPerHour: globalPrefs.maxNotificationsPerHour,
+            enableNotifications: globalPrefs.enableNotifications ?? true,
+            enableNewEmailNotifications: globalPrefs.enableNewEmailNotifications ?? true,
+            enableVipNotifications: globalPrefs.enableVipNotifications ?? true,
+            enableSystemNotifications: globalPrefs.enableSystemNotifications ?? true,
+            enableQuietHours: globalPrefs.enableQuietHours ?? false,
+            quietStartHour: globalPrefs.quietStartHour ?? 22,
+            quietEndHour: globalPrefs.quietEndHour ?? 8,
+            quietTimezone: globalPrefs.quietTimezone ?? 'America/New_York',
+            enableGrouping: globalPrefs.enableGrouping ?? true,
+            enableSound: globalPrefs.enableSound ?? true,
+            enableVibration: globalPrefs.enableVibration ?? true,
+            priorityFilter: globalPrefs.priorityFilter ?? 'all',
+            batchDelaySeconds: globalPrefs.batchDelaySeconds ?? 30,
+            maxNotificationsPerHour: globalPrefs.maxNotificationsPerHour ?? 20,
           } : {
             enableNotifications: true,
             enableNewEmailNotifications: true,
@@ -3669,11 +3668,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return {
               accountId: pref.accountId,
               accountName: account?.name || 'Unknown Account',
-              enableNotifications: pref.enableNotifications,
-              notifyForFolders: pref.notifyForFolders,
-              enableVipFiltering: pref.enableVipFiltering,
-              enablePriorityFiltering: pref.enablePriorityFiltering,
-              minimumPriority: pref.minimumPriority,
+              enableNotifications: pref.enableNotifications ?? true,
+              notifyForFolders: pref.notifyForFolders ?? '',
+              enableVipFiltering: pref.enableVipFiltering ?? false,
+              enablePriorityFiltering: pref.enablePriorityFiltering ?? false,
+              minimumPriority: pref.minimumPriority ?? 0,
             };
           }),
         },
@@ -3869,6 +3868,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(statusCode).json(response);
   });
 
-  const httpServer = createServer(app);
-  return httpServer;
+  // Routes registered - no server creation here
+  return;
 }

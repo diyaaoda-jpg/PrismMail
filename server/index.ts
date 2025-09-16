@@ -5,6 +5,7 @@ import { parse as parseCookie } from "cookie";
 import { parse as parseUrl } from "url";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { createServer } from "http";
 import { initializeEwsPushNotifications } from "./ewsPushNotifications";
 import { initializeEwsStreamingService } from "./ewsStreaming";
 import { initializeImapIdleService } from "./imapIdle";
@@ -48,9 +49,17 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const server = await registerRoutes(app);
+  // Register API routes (does not create server)
+  registerRoutes(app);
   
-  // Interface for authenticated WebSocket connections
+  // Create single HTTP server instance  
+  const server = createServer(app);
+  
+  // Feature flag to disable WebSocket for debugging Vite HMR conflicts
+  const ENABLE_WS = false; // disabled for testing
+  
+  if (ENABLE_WS) {
+    // Interface for authenticated WebSocket connections
   interface AuthenticatedWebSocket {
     ws: any;
     userId: string;
@@ -64,7 +73,7 @@ app.use((req, res, next) => {
   // Helper function to authenticate WebSocket connection using query parameter
   // For simplicity, we'll require the client to pass userId as a query parameter
   // In a production system, you'd want more robust session validation
-  async function authenticateWebSocket(req: IncomingMessage): Promise<{ userId: string; userEmail?: string } | null> {
+  const authenticateWebSocket = async (req: IncomingMessage): Promise<{ userId: string; userEmail?: string } | null> => {
     try {
       // Parse URL and get query parameters  
       const url = parseUrl(req.url || '', true);
@@ -85,7 +94,7 @@ app.use((req, res, next) => {
       console.log(`WebSocket authentication success: ${user.email} (${userId})`);
       return {
         userId: user.id,
-        userEmail: user.email
+        userEmail: user.email || undefined
       };
     } catch (error) {
       console.error('WebSocket authentication error:', error);
@@ -94,7 +103,7 @@ app.use((req, res, next) => {
   }
 
   // Helper function to get user's account IDs
-  async function getUserAccountIds(userId: string): Promise<Set<string>> {
+  const getUserAccountIds = async (userId: string): Promise<Set<string>> => {
     try {
       const userAccounts = await storage.getUserAccountConnections(userId);
       return new Set(userAccounts.map(account => account.id));
@@ -189,14 +198,15 @@ app.use((req, res, next) => {
     // Send push notifications for new emails
     try {
       // Get account owner's user ID from the account
-      const account = await storage.getAccountConnection(data.accountId);
+      const userAccounts = await storage.getUserAccountConnections(data.accountId);
+      const account = userAccounts.find(acc => acc.id === data.accountId);
       if (!account) {
         console.warn(`Account ${data.accountId} not found for push notification`);
         return;
       }
 
       // Get user's notification preferences
-      const userPrefs = await storage.getUserNotificationPreferences(account.userId);
+      const userPrefs = await storage.getNotificationPreferences(account.userId);
       const accountPrefs = await storage.getAccountNotificationPreferences(account.userId, data.accountId);
       
       // Check if push notifications are enabled for this user and account
@@ -205,14 +215,14 @@ app.use((req, res, next) => {
         return;
       }
 
-      if (accountPrefs && !accountPrefs.enableNotifications) {
+      if (accountPrefs && !accountPrefs[0]?.enableNotifications) {
         console.log(`Push notifications disabled for account ${data.accountId}`);
         return;
       }
 
       // Check if this folder should trigger notifications
-      if (accountPrefs?.notifyForFolders) {
-        const allowedFolders = accountPrefs.notifyForFolders.split(',');
+      if (accountPrefs?.[0]?.notifyForFolders) {
+        const allowedFolders = accountPrefs[0].notifyForFolders.split(',');
         if (!allowedFolders.includes(data.folder.toLowerCase())) {
           console.log(`Folder ${data.folder} not in notification list for account ${data.accountId}`);
           return;
@@ -229,8 +239,8 @@ app.use((req, res, next) => {
           isVip: false // TODO: Add VIP detection logic
         },
         {
-          showSender: userPrefs?.showSenderInNotifications ?? true,
-          showSubject: userPrefs?.showSubjectInNotifications ?? true,
+          showSender: true, // Default to showing sender
+          showSubject: true, // Default to showing subject
           showPreview: false // Never show email body preview for privacy
         }
       );
@@ -267,7 +277,10 @@ app.use((req, res, next) => {
     });
   });
   
-  console.log('WebSocket server initialized');
+    console.log('WebSocket server initialized');
+  } else {
+    console.log('WebSocket server disabled for Vite HMR debugging');
+  }
   
   // Initialize EWS push notifications service
   try {
