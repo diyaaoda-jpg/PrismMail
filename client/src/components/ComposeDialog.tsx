@@ -140,11 +140,30 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       const response = await apiRequest('POST', `/api/accounts/${emailData.sendingAccountId}/send`, emailData);
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to send email');
+        let errorMessage = 'Failed to send email';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch (parseError) {
+          // If we can't parse error response as JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
-      return response.json() as Promise<SendEmailResponse>;
+      // Handle successful response
+      try {
+        const result = await response.json();
+        return result as SendEmailResponse;
+      } catch (parseError) {
+        // If response isn't JSON but was successful, return a simple success response
+        console.log('Email sent successfully but response was not JSON:', parseError);
+        return {
+          success: true,
+          sentAt: new Date(),
+          messageId: 'sent-' + Date.now()
+        } as SendEmailResponse;
+      }
     },
     onSuccess: (response) => {
       toast({
