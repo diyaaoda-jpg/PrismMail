@@ -309,6 +309,57 @@ export async function setupAuth(app: Express) {
       }
     });
     
+    // Browser-accessible quick login for development
+    app.get("/api/dev/quick-login", async (req, res) => {
+      console.log('[AUTH] Browser quick login attempt');
+      
+      try {
+        // Generate unique user for this session
+        const timestamp = Date.now();
+        const userId = `dev-user-${timestamp}`;
+        const email = `user${timestamp}@dev.prismmail.local`;
+        
+        // Create/update user in storage
+        await storage.upsertUser({
+          id: userId,
+          email: email,
+          firstName: 'Development',
+          lastName: 'User',
+          profileImageUrl: null,
+        });
+        
+        // Create mock user session
+        const mockUser = {
+          claims: {
+            sub: userId,
+            email: email,
+            first_name: 'Development',
+            last_name: 'User',
+            exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+          },
+          access_token: 'dev-access-token',
+          refresh_token: 'dev-refresh-token',
+          expires_at: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
+        };
+        
+        // Establish session and redirect to home
+        req.login(mockUser, (err) => {
+          if (err) {
+            console.error('[AUTH] Browser quick login failed:', err);
+            return res.status(500).send('Authentication failed. Please try again.');
+          }
+          
+          console.log('[AUTH] Browser quick login successful for:', email);
+          // Redirect to home page which will now show authenticated content
+          res.redirect('/');
+        });
+        
+      } catch (error) {
+        console.error('[AUTH] Browser quick login error:', error);
+        res.status(500).send('Authentication error. Please check logs.');
+      }
+    });
+    
     // Development logout route
     app.post("/api/dev/logout", (req, res) => {
       req.logout(() => {
