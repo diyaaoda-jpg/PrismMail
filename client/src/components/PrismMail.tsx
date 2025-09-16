@@ -17,8 +17,7 @@ import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "react-resizable-panels";
-import { cn, debounce } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -156,26 +155,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   
   // Inline compose state for replies
   const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
-  
-  // Resizable panel state and persistence
-  const [panelSizes, setPanelSizes] = useState<number[]>(() => {
-    const saved = localStorage.getItem('prismmail-panel-sizes');
-    return saved ? JSON.parse(saved) : [35, 65]; // Default: 35% email list, 65% viewer
-  });
-  
-  // Debounced localStorage save to prevent jank during dragging
-  const debouncedSavePanelSizes = useCallback(
-    debounce((sizes: number[]) => {
-      localStorage.setItem('prismmail-panel-sizes', JSON.stringify(sizes));
-    }, 200),
-    []
-  );
-
-  // Handle panel size changes and persist to localStorage
-  const handlePanelLayout = useCallback((sizes: number[]) => {
-    setPanelSizes(sizes);
-    debouncedSavePanelSizes(sizes);
-  }, [debouncedSavePanelSizes]);
 
   // Fetch user's accounts - ensure it's always an array
   const { data: accountsResponse, isLoading: accountsLoading } = useQuery<{
@@ -379,15 +358,15 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       // Also invalidate the unified counts to update badges
       queryClient.invalidateQueries({ queryKey: ['/api/mail/unified-counts'] });
     }
-  }, [wsMessage?.type, wsMessage?.data, refetchEmails, toast]); // Include refetchEmails and toast dependencies
+  }, [wsMessage, refetchEmails, toast]);
 
   // Auto-sync when a new account becomes active (only once when account changes)
   useEffect(() => {
-    if (primaryAccount && emails.length === 0 && !syncMutation.isPending) {
+    if (primaryAccount && emails.length === 0) {
       console.log('Auto-syncing emails for account:', primaryAccount.name, `(${primaryAccount.protocol})`);
       syncMutation.mutate(primaryAccount.id);
     }
-  }, [primaryAccount?.id, emails.length, syncMutation]); // Include syncMutation dependency
+  }, [primaryAccount?.id]); // Only depend on account ID, not the mutation or emails.length
 
   // Auto-sync scheduling based on user preferences - prefer IMAP accounts
   useEffect(() => {
@@ -425,7 +404,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       console.log('Cleaning up auto-sync interval');
       clearInterval(intervalId);
     };
-  }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts.length]); // Use length for array stability
+  }, [userPrefs?.autoSync, userPrefs?.syncInterval, accounts]);
 
   // Show real emails only - no mock data fallback
   const displayEmails = Array.isArray(emails) ? emails : [];
@@ -472,7 +451,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     
     // Mark as read when selected (only for real emails)
     if (!email.isRead && primaryAccount && emails.length > 0) {
-      // Call handleToggleRead directly to avoid stale closure
       handleToggleRead(email.id);
     }
     
@@ -482,7 +460,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
     
     console.log('Selected email:', email.subject);
-  }, [primaryAccount?.id, emails.length, isMobile]); // Use stable primaryAccount.id
+  }, [primaryAccount, emails.length, isMobile]);
 
   const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
@@ -1171,249 +1149,140 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
         {/* Email list and viewer layout - Only show when not in mobile email view */}
         {!isMobile || !isMobileEmailViewOpen ? (
-          isMobile ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Email list */}
-              <div className="border-r flex flex-col flex-1">
-                <div className="p-3 border-b bg-card">
-                  <div className="flex items-center justify-between">
-                    <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                    <span className="text-sm text-muted-foreground">
-                      {filteredEmails.length} emails
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="flex-1 flex flex-col relative">
-                  {/* Pull-to-refresh indicator */}
-                  {pullToRefresh.pullState.isActive && (
-                    <div 
-                      className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
-                      style={{ 
-                        height: pullToRefresh.pullDistance,
-                        opacity: pullToRefresh.pullProgress,
-                      }}
-                    >
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <RefreshCw 
-                          className={cn(
-                            "h-4 w-4 transition-transform duration-300",
-                            pullToRefresh.isRefreshing && "animate-spin",
-                            pullToRefresh.pullProgress > 0.8 && "rotate-180"
-                          )} 
-                        />
-                        <span className="text-sm font-medium">
-                          {pullToRefresh.getStatusText()}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Optimized email list with virtual scrolling */}
-                  <div 
-                    className="flex-1"
-                    data-scroll-container
-                    onTouchStart={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
-                    onTouchMove={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
-                    onTouchEnd={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
-                    onPointerDown={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
-                    onPointerMove={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
-                    onPointerUp={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
-                  >
-                    <OptimizedEmailList
-                      emails={filteredEmails}
-                      selectedEmail={selectedEmail}
-                      onEmailSelect={(email) => {
-                        setSelectedEmail(email);
-                        if (isMobile) {
-                          setIsMobileEmailViewOpen(true);
-                        }
-                        console.log('Selected email:', email.subject);
-                      }}
-                      onToggleRead={handleToggleRead}
-                      onToggleFlagged={handleToggleFlagged}
-                      onToggleStar={(id: string) => {
-                        const email = filteredEmails.find(e => e.id === id);
-                        if (email) handleStar(email);
-                      }}
-                      onArchive={(id: string) => {
-                        const email = filteredEmails.find(e => e.id === id);
-                        if (email) handleArchive(email);
-                      }}
-                      onDelete={(id: string) => {
-                        const email = filteredEmails.find(e => e.id === id);
-                        if (email) handleDelete(email);
-                      }}
-                      enableSwipeGestures={isMobile}
-                      isLoading={emailsLoading}
-                      searchQuery={searchQuery}
-                      className="h-full"
-                    />
-                  </div>
+          <div className={cn(
+            "flex-1 flex overflow-hidden",
+            isMobile ? "flex-col" : ""
+          )}>
+            {/* Email list */}
+            <div className={cn(
+              "border-r flex flex-col",
+              isMobile ? "flex-1" : "w-96"
+            )}>
+              <div className="p-3 border-b bg-card">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-medium capitalize">{selectedFolder}</h2>
+                  <span className="text-sm text-muted-foreground">
+                    {filteredEmails.length} emails
+                  </span>
                 </div>
               </div>
-            </div>
-          ) : (
-            <ResizablePanelGroup 
-              direction="horizontal" 
-              className="flex-1 overflow-hidden"
-              onLayout={handlePanelLayout}
-            >
-              {/* Email List Panel - Minimum 25% width for readability, maximum 60% to preserve viewer space */}
-              <ResizablePanel 
-                defaultSize={panelSizes[0]} 
-                minSize={25} 
-                maxSize={60}
-                id="email-list"
-              >
-                <div className="border-r flex flex-col h-full">
-                  <div className="p-3 border-b bg-card">
-                    <div className="flex items-center justify-between">
-                      <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                      <span className="text-sm text-muted-foreground">
-                        {filteredEmails.length} emails
+              
+              <div className="flex-1 flex flex-col relative">
+                {/* Pull-to-refresh indicator */}
+                {pullToRefresh.pullState.isActive && (
+                  <div 
+                    className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
+                    style={{ 
+                      height: pullToRefresh.pullDistance,
+                      opacity: pullToRefresh.pullProgress,
+                    }}
+                  >
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <RefreshCw 
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-300",
+                          pullToRefresh.isRefreshing && "animate-spin",
+                          pullToRefresh.pullProgress > 0.8 && "rotate-180"
+                        )} 
+                      />
+                      <span className="text-sm font-medium">
+                        {pullToRefresh.getStatusText()}
                       </span>
                     </div>
                   </div>
-                  
-                  <div className="flex-1 flex flex-col relative">
-                    {/* Pull-to-refresh indicator */}
-                    {pullToRefresh.pullState.isActive && (
-                      <div 
-                        className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
-                        style={{ 
-                          height: pullToRefresh.pullDistance,
-                          opacity: pullToRefresh.pullProgress,
-                        }}
-                      >
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <RefreshCw 
-                            className={cn(
-                              "h-4 w-4 transition-transform duration-300",
-                              pullToRefresh.isRefreshing && "animate-spin",
-                              pullToRefresh.pullProgress > 0.8 && "rotate-180"
-                            )} 
-                          />
-                          <span className="text-sm font-medium">
-                            {pullToRefresh.getStatusText()}
-                          </span>
+                )}
+
+                {/* Optimized email list with virtual scrolling */}
+                <div 
+                  className="flex-1"
+                  data-scroll-container
+                  onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
+                  onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
+                  onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
+                  onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
+                  onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
+                  onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
+                >
+                  <OptimizedEmailList
+                    emails={filteredEmails}
+                    selectedEmail={selectedEmail}
+                    onEmailSelect={(email) => {
+                      setSelectedEmail(email);
+                      if (isMobile) {
+                        setIsMobileEmailViewOpen(true);
+                      }
+                      console.log('Selected email:', email.subject);
+                    }}
+                    onToggleRead={handleToggleRead}
+                    onToggleFlagged={handleToggleFlagged}
+                    onToggleStar={handleStar}
+                    onArchive={handleArchive}
+                    onDelete={handleDelete}
+                    enableSwipeGestures={isMobile}
+                    isLoading={emailsLoading}
+                    searchQuery={searchQuery}
+                    className="h-full"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Email viewer - Hidden on mobile */}
+            {!isMobile && (
+              <div className="flex-1 flex flex-col">
+                <EmailViewer
+                  email={selectedEmail}
+                  currentUserEmail={user?.email}
+                  onReply={handleReply}
+                  onReplyAll={handleReplyAll}
+                  onForward={handleForward}
+                  onArchive={handleArchive}
+                  onDelete={handleDelete}
+                  onToggleStar={handleStar}
+                />
+                
+                {/* Inline Composer for Replies */}
+                {inlineComposeDraft && (
+                  <div className="border-t bg-card">
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-lg">Reply</h3>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setComposeReplyTo(inlineComposeDraft);
+                              setIsComposeOpen(true);
+                              setInlineComposeDraft(null);
+                            }}
+                            data-testid="button-pop-out-compose"
+                          >
+                            Pop out
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setInlineComposeDraft(null)}
+                            data-testid="button-close-inline-compose"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
-                    )}
-
-                    {/* Optimized email list with virtual scrolling */}
-                    <div 
-                      className="flex-1"
-                      data-scroll-container
-                      onTouchStart={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
-                      onTouchMove={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
-                      onTouchEnd={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
-                      onPointerDown={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
-                      onPointerMove={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
-                      onPointerUp={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
-                    >
-                      <OptimizedEmailList
-                        emails={filteredEmails}
-                        selectedEmail={selectedEmail}
-                        onEmailSelect={(email) => {
-                          setSelectedEmail(email);
-                          if (isMobile) {
-                            setIsMobileEmailViewOpen(true);
-                          }
-                          console.log('Selected email:', email.subject);
-                        }}
-                        onToggleRead={handleToggleRead}
-                        onToggleFlagged={handleToggleFlagged}
-                        onToggleStar={(id: string) => {
-                          const email = filteredEmails.find(e => e.id === id);
-                          if (email) handleStar(email);
-                        }}
-                        onArchive={(id: string) => {
-                          const email = filteredEmails.find(e => e.id === id);
-                          if (email) handleArchive(email);
-                        }}
-                        onDelete={(id: string) => {
-                          const email = filteredEmails.find(e => e.id === id);
-                          if (email) handleDelete(email);
-                        }}
-                        enableSwipeGestures={isMobile}
-                        isLoading={emailsLoading}
-                        searchQuery={searchQuery}
-                        className="h-full"
+                      
+                      <ComposeDialog
+                        isOpen={true}
+                        onClose={() => setInlineComposeDraft(null)}
+                        accountId={primaryAccount?.id}
+                        replyTo={inlineComposeDraft}
                       />
                     </div>
                   </div>
-                </div>
-              </ResizablePanel>
-
-              {/* Resizable Handle */}
-              <ResizableHandle 
-                className="w-1 bg-border hover:bg-accent transition-colors data-[panel-group-direction=horizontal]:w-1 data-[panel-group-direction=horizontal]:h-full flex items-center justify-center group" 
-                data-testid="handle-resize-panels"
-              />
-
-              {/* Email Viewer Panel - Minimum 40% width for email content readability, maximum 75% to preserve list */}
-              <ResizablePanel 
-                defaultSize={panelSizes[1]} 
-                minSize={40} 
-                maxSize={75}
-                id="email-viewer"
-              >
-                <div className="flex-1 flex flex-col h-full">
-                  <EmailViewer
-                    email={selectedEmail}
-                    currentUserEmail={user?.email}
-                    onReply={handleReply}
-                    onReplyAll={handleReplyAll}
-                    onForward={handleForward}
-                    onArchive={handleArchive}
-                    onDelete={handleDelete}
-                    onToggleStar={handleStar}
-                  />
-                  
-                  {/* Inline Composer for Replies */}
-                  {inlineComposeDraft && (
-                    <div className="border-t bg-card">
-                      <div className="p-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="font-semibold text-lg">Reply</h3>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setComposeReplyTo(inlineComposeDraft);
-                                setIsComposeOpen(true);
-                                setInlineComposeDraft(null);
-                              }}
-                              data-testid="button-pop-out-compose"
-                            >
-                              Pop out
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setInlineComposeDraft(null)}
-                              data-testid="button-close-inline-compose"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        
-                        <ComposeDialog
-                          isOpen={true}
-                          onClose={() => setInlineComposeDraft(null)}
-                          accountId={primaryAccount?.id}
-                          replyTo={inlineComposeDraft}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          )
+                )}
+              </div>
+            )}
+          </div>
         ) : null}
         </div>
       </div>

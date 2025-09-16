@@ -194,84 +194,16 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
     };
   }, [isVisualViewportSupported, onShow, onHide, adjustViewport]);
 
-  // Refs to avoid stale closures in focus/blur handlers
-  const keyboardStateRef = useRef(keyboardState);
-  const onHideRef = useRef(onHide);
-  const scrollActiveElementIntoViewRef = useRef(scrollActiveElementIntoView);
-
-  // Update refs when values change
+  // Set up focus/blur listeners
   useEffect(() => {
-    keyboardStateRef.current = keyboardState;
-  }, [keyboardState]);
-
-  useEffect(() => {
-    onHideRef.current = onHide;
-  }, [onHide]);
-
-  useEffect(() => {
-    scrollActiveElementIntoViewRef.current = scrollActiveElementIntoView;
-  }, [scrollActiveElementIntoView]);
-
-  // Set up focus/blur listeners with refs to avoid stale closures
-  useEffect(() => {
-    const handleFocusInEvent = (event: FocusEvent) => {
-      const target = event.target as HTMLElement;
-      const isInputElement = target.tagName === 'INPUT' || 
-                            target.tagName === 'TEXTAREA' || 
-                            target.contentEditable === 'true';
-
-      if (isInputElement && scrollActiveElementIntoViewRef.current) {
-        // On iOS, keyboard show is detected via viewport resize
-        // Add a delay to allow keyboard to appear
-        setTimeout(() => {
-          const scrollToElement = (element: HTMLElement) => {
-            if (!element) return;
-
-            // Use refs to get current values and avoid stale closures
-            const rect = element.getBoundingClientRect();
-            const viewportHeight = window.visualViewport?.height || window.innerHeight;
-            const keyboardOffset = keyboardStateRef.current.height || 300; // Current keyboard height
-            
-            if (rect.bottom > viewportHeight - keyboardOffset) {
-              element.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center',
-                inline: 'nearest'
-              });
-            }
-          };
-          scrollToElement(target);
-        }, 150);
-      }
-    };
-
-    const handleFocusOutEvent = () => {
-      // Delay to avoid false negatives when switching between inputs
-      setTimeout(() => {
-        const activeElement = document.activeElement as HTMLElement;
-        const isInputFocused = activeElement?.tagName === 'INPUT' || 
-                             activeElement?.tagName === 'TEXTAREA' ||
-                             activeElement?.contentEditable === 'true';
-        
-        // Use refs to get current values and avoid stale closures
-        const currentKeyboardState = keyboardStateRef.current;
-        const currentOnHide = onHideRef.current;
-        
-        if (!isInputFocused && currentKeyboardState.isVisible) {
-          setKeyboardState(prev => ({ ...prev, isVisible: false, height: 0 }));
-          currentOnHide?.();
-        }
-      }, 100);
-    };
-
-    document.addEventListener('focusin', handleFocusInEvent);
-    document.addEventListener('focusout', handleFocusOutEvent);
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
     
     return () => {
-      document.removeEventListener('focusin', handleFocusInEvent);
-      document.removeEventListener('focusout', handleFocusOutEvent);
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
     };
-  }, []); // No dependencies needed since handlers use refs
+  }, [handleFocusIn, handleFocusOut]);
 
   // Utility methods
   const scrollToElement = useCallback((element: HTMLElement) => {

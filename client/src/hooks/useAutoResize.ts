@@ -51,7 +51,7 @@ export function useAutoResize(
     [adjustHeight, debounceMs]
   );
 
-  // Set up resize observer for content changes with stable dependencies
+  // Set up resize observer for content changes
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea || !enabled) return;
@@ -59,37 +59,21 @@ export function useAutoResize(
     // Initial setup
     textarea.style.resize = 'none';
     textarea.style.boxSizing = 'border-box';
-    
-    // Use current adjustHeight function avoiding stale closure
-    const initialAdjust = () => {
-      if (!enabled) return;
-      textarea.style.height = 'auto';
-      const scrollHeight = textarea.scrollHeight;
-      const newHeight = Math.min(Math.max(scrollHeight, minHeight), maxHeight);
-      textarea.style.height = `${newHeight}px`;
-      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
-    };
-    initialAdjust();
+    adjustHeight(textarea);
 
-    // Handle input events with debouncing
-    let debounceTimer: NodeJS.Timeout;
-    const handleInput = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        initialAdjust(); // Use local function to avoid stale closure
-      }, debounceMs);
-    };
+    // Handle input events
+    const handleInput = () => debouncedResize(textarea);
     
     // Handle paste events (may change content significantly)
     const handlePaste = () => {
       // Use setTimeout to let paste complete first
-      setTimeout(initialAdjust, 0);
+      setTimeout(() => adjustHeight(textarea), 0);
     };
 
     // Handle window resize (orientation change on mobile)
     const handleResize = () => {
       // Recalculate on window resize
-      setTimeout(initialAdjust, 100);
+      setTimeout(() => adjustHeight(textarea), 100);
     };
 
     textarea.addEventListener('input', handleInput);
@@ -97,12 +81,11 @@ export function useAutoResize(
     window.addEventListener('resize', handleResize);
 
     return () => {
-      clearTimeout(debounceTimer);
       textarea.removeEventListener('input', handleInput);
       textarea.removeEventListener('paste', handlePaste);
       window.removeEventListener('resize', handleResize);
     };
-  }, [textareaRef, enabled, minHeight, maxHeight, debounceMs]); // Only stable dependencies
+  }, [textareaRef, enabled, adjustHeight, debouncedResize]);
 
   // Return resize function for manual triggering
   const triggerResize = useCallback(() => {

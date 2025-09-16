@@ -25,21 +25,18 @@ export function VirtualScrollList<T>({
   const [scrollTop, setScrollTop] = useState(0);
   const scrollElementRef = useRef<HTMLDivElement>(null);
 
-  // Calculate visible range with overscan for smooth scrolling - Optimized to prevent excessive re-calculations
+  // Calculate visible range with overscan for smooth scrolling
   const visibleRange = useMemo(() => {
     const start = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
     const visibleCount = Math.ceil(containerHeight / itemHeight);
     const end = Math.min(items.length, start + visibleCount + overscan * 2);
     
     return { start, end };
-  }, [Math.floor(scrollTop / itemHeight), containerHeight, items.length, overscan]); // Reduce sensitivity to scrollTop changes
+  }, [scrollTop, itemHeight, containerHeight, items.length, overscan]);
 
-  // Get visible items efficiently - Memoize more aggressively to prevent unnecessary re-renders
+  // Get visible items efficiently
   const visibleItems = useMemo(() => {
-    if (visibleRange.start >= items.length) return [];
-    
-    const slicedItems = items.slice(visibleRange.start, visibleRange.end);
-    return slicedItems.map((item, index) => ({
+    return items.slice(visibleRange.start, visibleRange.end).map((item, index) => ({
       item,
       index: visibleRange.start + index,
       key: itemKey(item, visibleRange.start + index),
@@ -49,22 +46,11 @@ export function VirtualScrollList<T>({
   // Total height of the virtual list
   const totalHeight = items.length * itemHeight;
 
-  // Handle scroll events with throttling for performance - Add RAF throttling to prevent excessive renders
+  // Handle scroll events with throttling for performance
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const newScrollTop = e.currentTarget.scrollTop;
-    
-    // Throttle scroll updates using requestAnimationFrame
-    if (!window.requestIdleCallback) {
-      requestAnimationFrame(() => {
-        setScrollTop(newScrollTop);
-        onScroll?.(newScrollTop);
-      });
-    } else {
-      window.requestIdleCallback(() => {
-        setScrollTop(newScrollTop);
-        onScroll?.(newScrollTop);
-      });
-    }
+    setScrollTop(newScrollTop);
+    onScroll?.(newScrollTop);
   }, [onScroll]);
 
   // Scroll to specific item (for navigation)

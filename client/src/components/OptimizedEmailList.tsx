@@ -58,19 +58,19 @@ const MemoizedEmailItem = memo(function MemoizedEmailItem({
   );
 });
 
-// Skeleton loading component for better perceived performance - LAYOUT SHIFT FIX: Fixed dimensions
+// Skeleton loading component for better perceived performance
 const EmailListSkeleton = memo(function EmailListSkeleton({ count = 10 }: { count?: number }) {
   return (
     <div className="space-y-1 p-4">
       {Array.from({ length: count }).map((_, index) => (
-        <div key={index} className="animate-pulse" style={{ height: '80px' }}> {/* Fixed height to match email items */}
-          <div className="flex items-center space-x-3 p-4 border rounded-lg h-full"> {/* h-full to match container */}
-            <div className="h-8 w-8 bg-muted rounded-full flex-shrink-0"></div> {/* flex-shrink-0 to prevent size changes */}
-            <div className="flex-1 space-y-2 min-w-0"> {/* min-w-0 to prevent overflow */}
-              <div className="h-4 bg-muted rounded" style={{ width: '75%' }}></div> {/* Fixed percentage widths */}
-              <div className="h-3 bg-muted rounded" style={{ width: '50%' }}></div>
+        <div key={index} className="animate-pulse">
+          <div className="flex items-center space-x-3 p-3 border rounded-lg">
+            <div className="h-8 w-8 bg-muted rounded-full"></div>
+            <div className="flex-1 space-y-2">
+              <div className="h-4 bg-muted rounded w-3/4"></div>
+              <div className="h-3 bg-muted rounded w-1/2"></div>
             </div>
-            <div className="h-3 bg-muted rounded flex-shrink-0" style={{ width: '48px' }}></div> {/* Fixed width */}
+            <div className="h-3 bg-muted rounded w-12"></div>
           </div>
         </div>
       ))}
@@ -98,16 +98,18 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
   // Use virtual scrolling hook for container size management
   const { containerHeight } = useVirtualScrollList(emails, containerRef, itemHeight);
 
-  // Memoized email filtering for performance - CRITICAL FIX: Remove performance monitor to prevent render loop
+  // Memoized email filtering for performance
   const filteredEmails = useMemo(() => {
-    if (!searchQuery) return emails;
-    
-    const query = searchQuery.toLowerCase();
-    return emails.filter(email => 
-      email.from.toLowerCase().includes(query) ||
-      email.subject.toLowerCase().includes(query) ||
-      email.snippet.toLowerCase().includes(query)
-    );
+    return performanceMonitor.measureEmailListRender(() => {
+      if (!searchQuery) return emails;
+      
+      const query = searchQuery.toLowerCase();
+      return emails.filter(email => 
+        email.from.toLowerCase().includes(query) ||
+        email.subject.toLowerCase().includes(query) ||
+        email.snippet.toLowerCase().includes(query)
+      );
+    });
   }, [emails, searchQuery]);
 
   // Memoized handlers for performance
@@ -135,31 +137,19 @@ export const OptimizedEmailList = memo(function OptimizedEmailList({
     onToggleStar?.(id);
   }, [onToggleStar]);
 
-  // Performance monitoring effect - Stable to prevent excessive re-runs
+  // Performance monitoring effect
   useEffect(() => {
-    let timeoutId: number;
-    
-    // Use setTimeout to measure after React's reconciliation is complete
     const startTime = performance.now();
-    const emailCount = filteredEmails.length; // Capture count to avoid closure issues
     
-    timeoutId = setTimeout(() => {
+    return () => {
       const endTime = performance.now();
       const renderTime = endTime - startTime;
       
       if (renderTime > 16) { // Longer than 1 frame at 60fps
-        console.warn(`[EmailList] Slow render detected: ${renderTime.toFixed(2)}ms for ${emailCount} emails`);
-      } else {
-        console.log(`[EmailList] Render completed: ${renderTime.toFixed(2)}ms for ${emailCount} emails`);
-      }
-    }, 0);
-    
-    return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+        console.warn(`[EmailList] Slow render detected: ${renderTime.toFixed(2)}ms for ${emails.length} emails`);
       }
     };
-  }, [emails.length, searchQuery]); // More stable dependencies
+  }, [emails.length]);
 
   // Show loading skeleton
   if (isLoading) {

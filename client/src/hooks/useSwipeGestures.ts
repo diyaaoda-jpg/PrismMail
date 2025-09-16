@@ -20,7 +20,7 @@ import {
 
 // Swipe action configuration
 export interface SwipeAction {
-  type: 'archive' | 'read' | 'star' | 'delete' | 'flag' | 'snooze' | 'previous' | 'next' | 'menu' | 'compose';
+  type: 'archive' | 'read' | 'star' | 'delete' | 'flag' | 'snooze' | 'previous' | 'next';
   icon: string;
   color: string;
   label: string;

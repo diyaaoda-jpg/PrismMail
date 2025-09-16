@@ -90,26 +90,15 @@ export function useIntersectionObserver(
 ) {
   const targetRef = useRef<HTMLElement>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const callbackRef = useRef(callback);
-  const optionsRef = useRef(options);
-
-  // Update refs when props change
-  useEffect(() => {
-    callbackRef.current = callback;
-    optionsRef.current = options;
-  });
 
   useEffect(() => {
     if (!targetRef.current) return;
 
-    observerRef.current = new IntersectionObserver(
-      (entries) => callbackRef.current(entries),
-      {
-        threshold: 0.1,
-        rootMargin: '50px',
-        ...optionsRef.current
-      }
-    );
+    observerRef.current = new IntersectionObserver(callback, {
+      threshold: 0.1,
+      rootMargin: '50px',
+      ...options
+    });
 
     observerRef.current.observe(targetRef.current);
 
@@ -118,7 +107,7 @@ export function useIntersectionObserver(
         observerRef.current.disconnect();
       }
     };
-  }, []); // No dependencies - refs handle updates
+  }, [callback, options]);
 
   return targetRef;
 }

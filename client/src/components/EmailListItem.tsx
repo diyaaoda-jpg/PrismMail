@@ -68,29 +68,27 @@ export const EmailListItem = memo(function EmailListItem({
   const itemRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
-  // Create swipe configuration for this email - PERFORMANCE FIX: Memoize to prevent recreation
-  const swipeConfig = useMemo(() => {
-    if (!enableSwipeGestures || !isMobile) return { leftActions: [], rightActions: [] };
-    
-    return createEmailSwipeActions(
-      {
-        id: email.id,
-        isRead: email.isRead,
-        isStarred: email.isStarred,
-        isArchived: email.isArchived,
-      },
-      {
-        onArchive: (id) => onArchive?.(id),
-        onDelete: (id) => onDelete?.(id),
-        onToggleRead: (id) => onToggleRead?.(id),
-        onToggleStar: (id) => onToggleStar?.(id) || onToggleFlagged?.(id),
-        onFlag: (id) => onFlag?.(id) || onToggleFlagged?.(id),
-      }
-    );
-  }, [enableSwipeGestures, isMobile, email.id, email.isRead, email.isStarred, email.isArchived, onArchive, onDelete, onToggleRead, onToggleStar, onToggleFlagged, onFlag]);
+  // Create swipe configuration for this email
+  const swipeConfig = createEmailSwipeActions(
+    {
+      id: email.id,
+      isRead: email.isRead,
+      isStarred: email.isStarred,
+      isArchived: email.isArchived,
+    },
+    {
+      onArchive: (id) => onArchive?.(id),
+      onDelete: (id) => onDelete?.(id),
+      onToggleRead: (id) => onToggleRead?.(id),
+      onToggleStar: (id) => onToggleStar?.(id) || onToggleFlagged?.(id),
+      onFlag: (id) => onFlag?.(id) || onToggleFlagged?.(id),
+    }
+  );
 
-  // Initialize swipe gestures - Only when needed
-  const { swipeState, handlers, getActionFeedback } = useSwipeGestures(swipeConfig);
+  // Initialize swipe gestures
+  const { swipeState, handlers, getActionFeedback } = useSwipeGestures(
+    enableSwipeGestures && isMobile ? swipeConfig : { leftActions: [], rightActions: [] }
+  );
 
   const handleToggleRead = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -124,11 +122,9 @@ export const EmailListItem = memo(function EmailListItem({
   }, [email.priority]);
 
   const memoizedTimeDisplay = useMemo(() => {
-    // PERFORMANCE FIX: Use more efficient date handling and cache current time
-    const emailDate = email.date instanceof Date ? email.date : new Date(email.date);
-    const emailTime = emailDate.getTime();
-    const now = Date.now(); // More efficient than new Date()
-    const diffHours = (now - emailTime) / 3600000; // Pre-calculated milliseconds per hour
+    const now = new Date();
+    const emailDate = new Date(email.date);
+    const diffHours = (now.getTime() - emailDate.getTime()) / (1000 * 60 * 60);
     
     if (diffHours < 24) {
       return emailDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -206,25 +202,23 @@ export const EmailListItem = memo(function EmailListItem({
             `transform-gpu translate-x-[${Math.min(swipeState.distance, 200)}px]`
         )}
         style={{
-          // PERFORMANCE FIX: Memoize transform calculation to prevent excessive style recalculations
-          transform: swipeState.isActive && enableSwipeGestures && isMobile
-            ? `translateX(${swipeState.direction === 'left' ? '-' : ''}${Math.min(swipeState.distance, 200)}px)`
-            : undefined,
-          // Add will-change for GPU acceleration when swiping
-          willChange: swipeState.isActive ? 'transform' : undefined
+          transform: enableSwipeGestures && isMobile && swipeState.isActive
+            ? swipeState.direction === 'left' 
+              ? `translateX(-${Math.min(swipeState.distance, 200)}px)`
+              : swipeState.direction === 'right'
+              ? `translateX(${Math.min(swipeState.distance, 200)}px)`
+              : 'none'
+            : 'none'
         }}
         onClick={handleClick}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        // PERFORMANCE FIX: Only attach handlers when actually needed
-        {...(enableSwipeGestures && isMobile ? {
-          onTouchStart: handlers.onTouchStart,
-          onTouchMove: handlers.onTouchMove,
-          onTouchEnd: handlers.onTouchEnd,
-          onPointerDown: handlers.onPointerDown,
-          onPointerMove: handlers.onPointerMove,
-          onPointerUp: handlers.onPointerUp
-        } : {})}
+        onTouchStart={enableSwipeGestures ? handlers.onTouchStart : undefined}
+        onTouchMove={enableSwipeGestures ? handlers.onTouchMove : undefined}
+        onTouchEnd={enableSwipeGestures ? handlers.onTouchEnd : undefined}
+        onPointerDown={enableSwipeGestures ? handlers.onPointerDown : undefined}
+        onPointerMove={enableSwipeGestures ? handlers.onPointerMove : undefined}
+        onPointerUp={enableSwipeGestures ? handlers.onPointerUp : undefined}
         data-testid={`email-item-${email.id}`}
       >
       {/* Priority indicator */}
