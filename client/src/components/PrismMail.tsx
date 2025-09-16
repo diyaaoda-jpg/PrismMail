@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit, ChevronDown } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { BookOpen, Settings, RefreshCw, X } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -8,25 +8,17 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ThemeMenu } from "./ThemeMenu";
 import { MailSidebar } from "./MailSidebar";
-import { type EmailMessage } from "./EmailListItem";
-import { OptimizedEmailList } from "./OptimizedEmailList";
+import { EmailListItem, type EmailMessage } from "./EmailListItem";
 import { EmailViewer } from "./EmailViewer";
 import { ReadingMode } from "./ReadingMode";
 import { ComposeDialog } from "./ComposeDialog";
 import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
-import { OfflineIndicator } from "./OfflineIndicator";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
-import { useOfflineActions } from "@/hooks/useOfflineActions";
-import { usePullToRefresh } from "@/hooks/usePullToRefresh";
-import { useSwipeGestures } from "@/hooks/useSwipeGestures";
-import { triggerHapticFeedback } from "@/lib/gestureUtils";
 import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
@@ -49,9 +41,6 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T14:30:00'),
     isRead: false,
     isFlagged: true,
-    isStarred: true,
-    isArchived: false,
-    isDeleted: false,
     priority: 3,
     hasAttachments: true,
     snippet: 'Hi team, we need to finalize the Q4 budget allocations before the board meeting next week. Please review the attached documents and come prepared with your department\'s requirements.',
@@ -64,9 +53,6 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T10:15:00'),
     isRead: false,
     isFlagged: false,
-    isStarred: false,
-    isArchived: false,
-    isDeleted: false,
     priority: 2,
     hasAttachments: false,
     snippet: 'Great news! The project proposal has been approved by the executive committee. We can now proceed with the implementation phase.',
@@ -79,9 +65,6 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-10T09:45:00'),
     isRead: true,
     isFlagged: false,
-    isStarred: false,
-    isArchived: false,
-    isDeleted: false,
     priority: 0,
     hasAttachments: false,
     snippet: 'A new pull request has been opened for the authentication feature by @developer123. Please review when you have a chance.',
@@ -94,9 +77,6 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-09T16:20:00'),
     isRead: true,
     isFlagged: true,
-    isStarred: true,
-    isArchived: false,
-    isDeleted: false,
     priority: 1,
     hasAttachments: true,
     snippet: 'Check out the latest product updates, feature releases, and upcoming events in this week\'s newsletter.',
@@ -109,9 +89,6 @@ const mockEmails: EmailMessage[] = [
     date: new Date('2025-01-09T11:10:00'),
     isRead: false,
     isFlagged: false,
-    isStarred: false,
-    isArchived: false,
-    isDeleted: false,
     priority: 3,
     hasAttachments: false,
     snippet: 'We detected a login attempt from an unrecognized device. Please verify this was you or secure your account immediately.',
@@ -142,11 +119,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
   
-  // Mobile-specific state
-  const isMobile = useIsMobile();
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = useState(false);
-  
   // Dialog states
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -175,6 +147,22 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   // WebSocket connection for real-time email updates
   const { isConnected: wsConnected, lastMessage: wsMessage } = useWebSocket();
   
+
+  // Auto-select account on load with IMAP preference
+  useEffect(() => {
+    if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
+      // Prefer IMAP accounts over EWS for auto-sync
+      const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
+                               accounts.find(account => account.isActive) ||
+                               accounts[0];
+      
+      if (preferredAccount) {
+        setSelectedAccount(preferredAccount.id);
+        console.log('Auto-selected account (IMAP preferred):', preferredAccount.name, preferredAccount.protocol);
+      }
+    }
+  }, [accounts, selectedAccount]);
+
   // Get the selected account or fall back to first active account - with array safety
   const primaryAccount: AccountConnection | undefined = accounts.length > 0 ? (
     accounts.find((account: AccountConnection) => account.id === selectedAccount) ||
@@ -182,7 +170,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     accounts.find((account: AccountConnection) => account.isActive)
   ) : undefined;
 
-  // Fetch emails based on selected folder and account
+  // Fetch emails - use unified API for "All Accounts" or general mail API with folder param for individual accounts
   const { data: emailResponse, isLoading: emailsLoading, refetch: refetchEmails } = useQuery({
     queryKey: selectedAccount === '' 
       ? ['/api/mail/unified', selectedFolder]
@@ -203,7 +191,26 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
-  // Sync mutation for manual email refresh
+  // Fetch unified folder counts for All Accounts view
+  const { data: unifiedCounts } = useQuery<{
+    unified: Record<string, { unread: number; total: number }>;
+    accounts: Array<{
+      accountId: string;
+      accountName: string;
+      folders: Record<string, { unread: number; total: number }>;
+    }>;
+  }>({
+    queryKey: ['/api/mail/unified-counts'],
+    enabled: selectedAccount === '',
+    staleTime: 1000 * 60 * 2, // 2 minutes
+  });
+
+  // Extract emails with tolerant parsing - handle both wrapped {success,data} and raw array formats
+  const emails: EmailMessage[] = Array.isArray(emailResponse) 
+    ? emailResponse 
+    : (emailResponse?.success && Array.isArray(emailResponse.data) ? emailResponse.data : []);
+
+  // Auto-sync emails when account becomes available
   const syncMutation = useMutation({
     mutationFn: async (accountId: string) => {
       const response = await fetch(`/api/accounts/${accountId}/sync`, {
@@ -237,98 +244,6 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       });
     }
   });
-
-  // Pull-to-refresh functionality
-  const handleRefresh = useCallback(async () => {
-    console.log('Pull-to-refresh triggered');
-    if (primaryAccount) {
-      // Trigger sync for the current account
-      await syncMutation.mutateAsync(primaryAccount.id);
-    } else {
-      // Refetch emails if no specific account
-      await refetchEmails();
-    }
-  }, [primaryAccount, syncMutation, refetchEmails]);
-
-  const pullToRefresh = usePullToRefresh(handleRefresh, {
-    threshold: 80,
-    maxPullDistance: 120,
-    enableHapticFeedback: isMobile,
-    refreshingText: 'Refreshing emails...',
-    pullText: 'Pull to refresh',
-    readyText: 'Release to refresh',
-    completedText: 'Emails updated',
-  });
-
-  // Edge swipe gestures for navigation
-  const edgeSwipeConfig = {
-    leftActions: [{
-      type: 'menu' as const,
-      icon: 'Menu',
-      color: 'hsl(var(--primary))',
-      label: 'Open Menu',
-      threshold: 60,
-      callback: () => {
-        setIsMobileSidebarOpen(true);
-        if (isMobile) triggerHapticFeedback('light');
-      },
-    }],
-    rightActions: [{
-      type: 'compose' as const,
-      icon: 'Edit',
-      color: 'hsl(var(--chart-2))',
-      label: 'Compose',
-      threshold: 60,
-      callback: () => {
-        setIsComposeOpen(true);
-        if (isMobile) triggerHapticFeedback('light');
-      },
-    }],
-    enableHapticFeedback: isMobile,
-    preventScrolling: false,
-  };
-
-  const edgeSwipes = useSwipeGestures(isMobile ? edgeSwipeConfig : { leftActions: [], rightActions: [] });
-  
-  // Refs for gesture handling
-  const mainContainerRef = useRef<HTMLDivElement>(null);
-  
-
-  // Auto-select account on load with IMAP preference
-  useEffect(() => {
-    if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
-      // Prefer IMAP accounts over EWS for auto-sync
-      const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
-                               accounts.find(account => account.isActive) ||
-                               accounts[0];
-      
-      if (preferredAccount) {
-        setSelectedAccount(preferredAccount.id);
-        console.log('Auto-selected account (IMAP preferred):', preferredAccount.name, preferredAccount.protocol);
-      }
-    }
-  }, [accounts, selectedAccount]);
-
-
-  // Fetch unified folder counts for All Accounts view
-  const { data: unifiedCounts } = useQuery<{
-    unified: Record<string, { unread: number; total: number }>;
-    accounts: Array<{
-      accountId: string;
-      accountName: string;
-      folders: Record<string, { unread: number; total: number }>;
-    }>;
-  }>({
-    queryKey: ['/api/mail/unified-counts'],
-    enabled: selectedAccount === '',
-    staleTime: 1000 * 60 * 2, // 2 minutes
-  });
-
-  // Extract emails with tolerant parsing - handle both wrapped {success,data} and raw array formats
-  const emails: EmailMessage[] = Array.isArray(emailResponse) 
-    ? emailResponse 
-    : (emailResponse?.success && Array.isArray(emailResponse.data) ? emailResponse.data : []);
-
 
   // Listen for WebSocket messages and refresh emails automatically
   useEffect(() => {
@@ -453,14 +368,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     if (!email.isRead && primaryAccount && emails.length > 0) {
       handleToggleRead(email.id);
     }
-    
-    // Open mobile email viewer
-    if (isMobile) {
-      setIsMobileEmailViewOpen(true);
-    }
-    
     console.log('Selected email:', email.subject);
-  }, [primaryAccount, emails.length, isMobile]);
+  }, [primaryAccount, emails.length]);
 
   const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
@@ -631,129 +540,79 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   }, [emails, handleEmailSelect]);
 
-  // Organization mutations using React Query
-  const starMutation = useMutation({
-    mutationFn: async ({ emailId, isStarred }: { emailId: string; isStarred: boolean }) => {
-      return apiRequest('PATCH', `/api/mail/${emailId}/star`, { isStarred: !isStarred });
-    },
-    onMutate: async ({ emailId, isStarred }) => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
-      
-      // Snapshot the previous value
-      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
-      
-      // Optimistically update to the new value
-      queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], (old: any) => {
-        if (!old?.data) return old;
-        return {
-          ...old,
-          data: old.data.map((email: EmailMessage) =>
-            email.id === emailId ? { ...email, isStarred: !isStarred } : email
-          )
-        };
-      });
-      
-      return { previousEmails };
-    },
-    onError: (err, variables, context) => {
-      // If the mutation fails, use the context returned from onMutate to roll back
-      if (context?.previousEmails) {
-        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
-      }
-      toast({
-        title: "Star failed",
-        description: "Failed to update star status",
-        variant: "destructive"
-      });
-    },
-    onSettled: () => {
-      // Always refetch after error or success
-      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
-    },
-  });
-
-  const archiveMutation = useMutation({
-    mutationFn: async ({ emailId, isArchived }: { emailId: string; isArchived: boolean }) => {
-      return apiRequest('PATCH', `/api/mail/${emailId}/archive`, { isArchived: !isArchived });
-    },
-    onMutate: async ({ emailId }) => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
-      
-      // Clear selection if we archived the currently selected email
-      if (selectedEmail?.id === emailId) {
-        setSelectedEmail(null);
+  const handleArchive = useCallback(async (email: EmailMessage) => {
+    if (!primaryAccount) return;
+    
+    // Clear selection if we archived the currently selected email
+    if (selectedEmail?.id === email.id) {
+      setSelectedEmail(null);
+    }
+    
+    try {
+      // Move to archive folder (only for real emails)
+      if (emails.length > 0) {
+        const response = await fetch(`/api/mail/${email.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ folder: 'ARCHIVE' })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to archive email');
+        }
       }
       
-      // Snapshot the previous value
-      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
-      
-      return { previousEmails };
-    },
-    onError: (err, variables, context) => {
-      if (context?.previousEmails) {
-        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
-      }
+      // Refresh the email list to remove archived email from current view
+      refetchEmails();
+    } catch (error) {
+      console.error('Failed to archive email:', error);
       toast({
         title: "Archive failed",
-        description: "Failed to archive email",
+        description: "Failed to archive the email",
         variant: "destructive"
       });
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
-    },
-  });
+    }
+    console.log('Archived:', email.subject);
+  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
 
-  const deleteMutation = useMutation({
-    mutationFn: async ({ emailId, isDeleted }: { emailId: string; isDeleted: boolean }) => {
-      return apiRequest('PATCH', `/api/mail/${emailId}/delete`, { isDeleted: !isDeleted });
-    },
-    onMutate: async ({ emailId }) => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['/api/mail'] });
-      
-      // Clear selection if we deleted the currently selected email
-      if (selectedEmail?.id === emailId) {
-        setSelectedEmail(null);
+  const handleDelete = useCallback(async (email: EmailMessage) => {
+    if (!primaryAccount) return;
+    
+    // If we deleted the selected email, clear selection
+    if (selectedEmail?.id === email.id) {
+      setSelectedEmail(null);
+    }
+    
+    try {
+      // Move to trash folder (only for real emails)
+      if (emails.length > 0) {
+        const response = await fetch(`/api/mail/${email.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ folder: 'TRASH' })
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to delete email');
+        }
       }
       
-      // Snapshot the previous value
-      const previousEmails = queryClient.getQueryData(['/api/mail', selectedFolder, selectedAccount]);
-      
-      return { previousEmails };
-    },
-    onError: (err, variables, context) => {
-      if (context?.previousEmails) {
-        queryClient.setQueryData(['/api/mail', selectedFolder, selectedAccount], context.previousEmails);
-      }
+      // Refresh the email list to remove deleted email from current view
+      refetchEmails();
+    } catch (error) {
+      console.error('Failed to delete email:', error);
       toast({
         title: "Delete failed",
-        description: "Failed to delete email",
+        description: "Failed to delete the email",
         variant: "destructive"
       });
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/mail'] });
-    },
-  });
-
-  // Organization action handlers
-  const handleStar = useCallback((email: EmailMessage) => {
-    starMutation.mutate({ emailId: email.id, isStarred: email.isStarred });
-    console.log('Starred:', email.subject, !email.isStarred);
-  }, [starMutation]);
-
-  const handleArchive = useCallback((email: EmailMessage) => {
-    archiveMutation.mutate({ emailId: email.id, isArchived: email.isArchived });
-    console.log('Archived:', email.subject, !email.isArchived);
-  }, [archiveMutation]);
-
-  const handleDelete = useCallback((email: EmailMessage) => {
-    deleteMutation.mutate({ emailId: email.id, isDeleted: email.isDeleted });
-    console.log('Deleted:', email.subject, !email.isDeleted);
-  }, [deleteMutation]);
+    }
+    console.log('Deleted:', email.subject);
+  }, [primaryAccount, selectedEmail, emails.length, refetchEmails, toast]);
 
   const getUserDisplayName = () => {
     if (user?.firstName || user?.lastName) {
@@ -767,372 +626,152 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
-  // Mobile-specific handlers
-  const handleMobileSidebarToggle = () => {
-    setIsMobileSidebarOpen(!isMobileSidebarOpen);
-  };
-
-  const handleMobileBackToList = () => {
-    setIsMobileEmailViewOpen(false);
-    setSelectedEmail(null);
-  };
-
-  const handleMobileCompose = () => {
-    setIsComposeOpen(true);
-    setIsMobileSidebarOpen(false);
-  };
-
-  const handleMobileSearch = () => {
-    setIsSearchOpen(true);
-    setIsMobileSidebarOpen(false);
-  };
-
   return (
-    <div 
-      ref={mainContainerRef}
-      className="h-screen bg-background"
-      onTouchStart={isMobile ? edgeSwipes.handlers.onTouchStart : undefined}
-      onTouchMove={isMobile ? edgeSwipes.handlers.onTouchMove : undefined}
-      onTouchEnd={isMobile ? edgeSwipes.handlers.onTouchEnd : undefined}
-      onPointerDown={isMobile ? edgeSwipes.handlers.onPointerDown : undefined}
-      onPointerMove={isMobile ? edgeSwipes.handlers.onPointerMove : undefined}
-      onPointerUp={isMobile ? edgeSwipes.handlers.onPointerUp : undefined}
-    >
-      {/* Edge swipe visual feedback */}
-      {edgeSwipes.swipeState.isActive && (
-        <div className="fixed inset-0 pointer-events-none z-50">
-          {edgeSwipes.swipeState.direction === 'right' && (
-            <div 
-              className="absolute left-0 top-0 h-full bg-primary/20 transition-all duration-200"
-              style={{ width: Math.min(edgeSwipes.swipeState.distance, 100) }}
+    <div className="h-screen flex bg-background">
+      {/* Sidebar */}
+      <MailSidebar
+        selectedFolder={selectedFolder}
+        selectedAccount={selectedAccount}
+        onFolderSelect={(folderId, accountId) => {
+          setSelectedFolder(folderId);
+          if (accountId) {
+            setSelectedAccount(accountId);
+          } else {
+            // When selecting unified folder, clear selected account to show all accounts
+            setSelectedAccount('');
+          }
+        }}
+        onAccountSelect={(accountId) => {
+          setSelectedAccount(accountId);
+          // Keep the current folder when switching accounts
+        }}
+        onCompose={handleCompose}
+        onSearch={handleSearch}
+        onSettings={handleSettings}
+        unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
+          Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
+            ...acc,
+            [folderType]: counts.unread
+          }), {}) : 
+          mockUnreadCounts
+        }
+        accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
+          unifiedCounts.accounts.reduce((acc, account) => ({
+            ...acc,
+            [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
+              ...folderAcc,
+              [folderType]: counts.unread
+            }), {})
+          }), {}) : 
+          {}
+        }
+        accounts={accounts}
+      />
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-semibold">PrismMail</h1>
+            
+            <Button
+              variant="outline"
+              onClick={handleOpenReadingMode}
+              disabled={!selectedEmail}
+              data-testid="button-reading-mode"
+              className="hover-elevate active-elevate-2"
             >
-              <div className="flex items-center justify-center h-full px-4">
-                <Menu className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-          )}
-          {edgeSwipes.swipeState.direction === 'left' && (
-            <div 
-              className="absolute right-0 top-0 h-full bg-chart-2/20 transition-all duration-200"
-              style={{ width: Math.min(edgeSwipes.swipeState.distance, 100) }}
-            >
-              <div className="flex items-center justify-center h-full px-4">
-                <Edit className="h-6 w-6 text-chart-2" />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className={cn(
-        "flex",
-        isMobile ? "h-full flex-col" : "h-full"
-      )}>
-        {/* Mobile Sidebar Sheet Overlay */}
-        <Sheet open={isMobile && isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
-          <SheetContent side="left" className="w-80 p-0">
-            <SheetHeader className="sr-only">
-              <SheetTitle>Navigation Menu</SheetTitle>
-            </SheetHeader>
-            <MailSidebar
-              selectedFolder={selectedFolder}
-              selectedAccount={selectedAccount}
-              onFolderSelect={(folderId, accountId) => {
-                setSelectedFolder(folderId);
-                if (accountId) {
-                  setSelectedAccount(accountId);
-                } else {
-                  setSelectedAccount('');
-                }
-                setIsMobileSidebarOpen(false);
-              }}
-              onAccountSelect={(accountId) => {
-                setSelectedAccount(accountId);
-                setIsMobileSidebarOpen(false);
-              }}
-              onCompose={handleMobileCompose}
-              onSearch={handleMobileSearch}
-              onSettings={handleSettings}
-              unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
-                Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
-                  ...acc,
-                  [folderType]: counts.unread
-                }), {}) : 
-                mockUnreadCounts
-              }
-              accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
-                unifiedCounts.accounts.reduce((acc, account) => ({
-                  ...acc,
-                  [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
-                    ...folderAcc,
-                    [folderType]: counts.unread
-                  }), {})
-                }), {}) : 
-                {}
-              }
-              accounts={accounts}
-            />
-          </SheetContent>
-        </Sheet>
-
-        {/* Desktop Sidebar - Hidden on mobile */}
-        {!isMobile && (
-          <MailSidebar
-            selectedFolder={selectedFolder}
-            selectedAccount={selectedAccount}
-            onFolderSelect={(folderId, accountId) => {
-              setSelectedFolder(folderId);
-              if (accountId) {
-                setSelectedAccount(accountId);
-              } else {
-                setSelectedAccount('');
-              }
-            }}
-            onAccountSelect={(accountId) => {
-              setSelectedAccount(accountId);
-            }}
-            onCompose={handleCompose}
-            onSearch={handleSearch}
-            onSettings={handleSettings}
-            unreadCounts={selectedAccount === '' && unifiedCounts?.unified ? 
-              Object.entries(unifiedCounts.unified).reduce((acc, [folderType, counts]) => ({
-                ...acc,
-                [folderType]: counts.unread
-              }), {}) : 
-              mockUnreadCounts
-            }
-            accountFolderCounts={selectedAccount !== '' && unifiedCounts?.accounts ? 
-              unifiedCounts.accounts.reduce((acc, account) => ({
-                ...acc,
-                [account.accountId]: Object.entries(account.folders).reduce((folderAcc, [folderType, counts]) => ({
-                  ...folderAcc,
-                  [folderType]: counts.unread
-                }), {})
-              }), {}) : 
-              {}
-            }
-            accounts={accounts}
-          />
-        )}
-
-        {/* Main content area */}
-        <div className={cn(
-          "flex-1 flex flex-col",
-          isMobile ? "h-full" : ""
-        )}>
-        {/* Desktop Header - Hidden on mobile */}
-        {!isMobile && (
-          <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
-            <div className="flex items-center gap-4">
-              <h1 className="text-lg font-semibold">PrismMail</h1>
-              
-              <Button
-                variant="outline"
-                onClick={handleOpenReadingMode}
-                disabled={!selectedEmail}
-                data-testid="button-reading-mode"
-                className="hover-elevate active-elevate-2"
-              >
-                <BookOpen className="h-4 w-4 mr-2" />
-                Reading Mode
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {primaryAccount && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => syncMutation.mutate(primaryAccount.id)}
-                  disabled={syncMutation.isPending}
-                  data-testid="button-sync"
-                  className="hover-elevate active-elevate-2"
-                >
-                  <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
-                  <span className="sr-only">Sync emails</span>
-                </Button>
-              )}
-              
-              <OfflineIndicator variant="badge" />
-              
-              <ThemeMenu variant="dropdown" />
-              
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-8 w-8 rounded-full hover-elevate active-elevate-2" data-testid="button-user-menu">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={user?.profileImageUrl} alt={getUserDisplayName()} />
-                      <AvatarFallback>{getUserInitials()}</AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end">
-                  <div className="flex items-center justify-start gap-2 p-2">
-                    <div className="flex flex-col space-y-1 leading-none">
-                      <p className="font-medium">{getUserDisplayName()}</p>
-                      {user?.email && (
-                        <p className="text-xs text-muted-foreground">{user.email}</p>
-                      )}
-                    </div>
-                  </div>
-                  <Separator />
-                  <DropdownMenuItem onClick={handleSettings} data-testid="button-settings">
-                    <Settings className="h-4 w-4 mr-2" />
-                    Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
-                    Logout
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+              <BookOpen className="h-4 w-4 mr-2" />
+              Reading Mode
+            </Button>
           </div>
-        )}
 
-        {/* Mobile Email Viewer - Full screen overlay */}
-        {isMobile && isMobileEmailViewOpen && selectedEmail && (
-          <div className="fixed inset-0 top-14 bg-background z-30 flex flex-col">
-            <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
+          <div className="flex items-center gap-2">
+            {primaryAccount && (
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={handleMobileBackToList}
+                onClick={() => syncMutation.mutate(primaryAccount.id)}
+                disabled={syncMutation.isPending}
+                data-testid="button-sync"
                 className="hover-elevate active-elevate-2"
-                data-testid="button-mobile-back"
               >
-                <ArrowLeft className="h-5 w-5" />
+                <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
+                <span className="sr-only">Sync emails</span>
               </Button>
-              
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleOpenReadingMode}
-                  className="hover-elevate active-elevate-2"
-                  data-testid="button-mobile-reading-mode"
-                >
-                  <BookOpen className="h-4 w-4 mr-1" />
-                  Reading
+            )}
+            
+            <ThemeMenu variant="dropdown" />
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-8 w-8 rounded-full hover-elevate active-elevate-2" data-testid="button-user-menu">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={user?.profileImageUrl} alt={getUserDisplayName()} />
+                    <AvatarFallback>{getUserInitials()}</AvatarFallback>
+                  </Avatar>
                 </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="end">
+                <div className="flex items-center justify-start gap-2 p-2">
+                  <div className="flex flex-col space-y-1 leading-none">
+                    <p className="font-medium">{getUserDisplayName()}</p>
+                    {user?.email && (
+                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                    )}
+                  </div>
+                </div>
+                <Separator />
+                <DropdownMenuItem onClick={handleSettings} data-testid="button-settings">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout} data-testid="button-logout">
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Email list and viewer */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Email list */}
+          <div className="w-96 border-r flex flex-col">
+            <div className="p-3 border-b bg-card">
+              <div className="flex items-center justify-between">
+                <h2 className="font-medium capitalize">{selectedFolder}</h2>
+                <span className="text-sm text-muted-foreground">
+                  {filteredEmails.length} emails
+                </span>
               </div>
             </div>
             
-            <div className="flex-1 overflow-hidden">
-              <EmailViewer
-                email={selectedEmail}
-                currentUserEmail={user?.email}
-                onReply={handleReply}
-                onReplyAll={handleReplyAll}
-                onForward={handleForward}
-                onArchive={handleArchive}
-                onDelete={handleDelete}
-                onToggleStar={handleStar}
-                onBack={handleMobileBackToList}
-              />
-            </div>
+            <ScrollArea className="flex-1">
+              <div className="divide-y">
+                {filteredEmails.map((email) => (
+                  <EmailListItem
+                    key={email.id}
+                    email={email}
+                    isSelected={selectedEmail?.id === email.id}
+                    onClick={() => handleEmailSelect(email)}
+                    onToggleRead={handleToggleRead}
+                    onToggleFlagged={handleToggleFlagged}
+                  />
+                ))}
+                {filteredEmails.length === 0 && (
+                  <div className="p-8 text-center text-muted-foreground">
+                    <div className="text-lg font-medium mb-2">No emails found</div>
+                    <div className="text-sm">Try changing your filter or search terms</div>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
           </div>
-        )}
 
-        {/* Mobile Header - Only shown on mobile for main view */}
-        {isMobile && (
-          <div className="h-14 border-b flex items-center justify-between px-4 bg-card shrink-0">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="hover-elevate active-elevate-2"
-                data-testid="button-mobile-menu"
-                aria-label="Open sidebar menu"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-              
-              <h1 className="text-lg font-semibold">
-                {isMobileEmailViewOpen && selectedEmail ? 
-                  "Email" : 
-                  (selectedFolder === 'inbox' ? 'Inbox' : selectedFolder.charAt(0).toUpperCase() + selectedFolder.slice(1))
-                }
-              </h1>
-              
-              {!isMobileEmailViewOpen && filteredEmails.length > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  ({filteredEmails.length})
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {isMobileEmailViewOpen && selectedEmail ? (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleMobileBackToList}
-                    className="hover-elevate active-elevate-2"
-                    data-testid="button-mobile-back"
-                    aria-label="Back to email list"
-                  >
-                    <ArrowLeft className="h-5 w-5" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleOpenReadingMode}
-                    className="hover-elevate active-elevate-2"
-                    data-testid="button-mobile-reading-mode"
-                    aria-label="Open reading mode"
-                  >
-                    <BookOpen className="h-4 w-4 mr-1" />
-                    Reading
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {primaryAccount && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => syncMutation.mutate(primaryAccount.id)}
-                      disabled={syncMutation.isPending}
-                      data-testid="button-mobile-sync"
-                      className="hover-elevate active-elevate-2"
-                      aria-label="Sync emails"
-                    >
-                      <RefreshCw className={cn("h-4 w-4", syncMutation.isPending && "animate-spin")} />
-                    </Button>
-                  )}
-                  
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleSearch}
-                    className="hover-elevate active-elevate-2"
-                    data-testid="button-mobile-search"
-                    aria-label="Search emails"
-                  >
-                    <Search className="h-4 w-4" />
-                  </Button>
-                  
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleCompose}
-                    className="hover-elevate active-elevate-2"
-                    data-testid="button-mobile-compose"
-                    aria-label="Compose new email"
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Mobile Email Viewer - Full screen overlay */}
-        {isMobile && isMobileEmailViewOpen && selectedEmail && (
-          <div className="flex-1 overflow-hidden">
+          {/* Email viewer and inline composer */}
+          <div className="flex-1 flex flex-col">
             <EmailViewer
               email={selectedEmail}
               currentUserEmail={user?.email}
@@ -1141,149 +780,49 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               onForward={handleForward}
               onArchive={handleArchive}
               onDelete={handleDelete}
-              onToggleStar={handleStar}
-              onBack={handleMobileBackToList}
+              onToggleFlagged={(email) => handleToggleFlagged(email.id)}
             />
-          </div>
-        )}
-
-        {/* Email list and viewer layout - Only show when not in mobile email view */}
-        {!isMobile || !isMobileEmailViewOpen ? (
-          <div className={cn(
-            "flex-1 flex overflow-hidden",
-            isMobile ? "flex-col" : ""
-          )}>
-            {/* Email list */}
-            <div className={cn(
-              "border-r flex flex-col",
-              isMobile ? "flex-1" : "w-96"
-            )}>
-              <div className="p-3 border-b bg-card">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                  <span className="text-sm text-muted-foreground">
-                    {filteredEmails.length} emails
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex-1 flex flex-col relative">
-                {/* Pull-to-refresh indicator */}
-                {pullToRefresh.pullState.isActive && (
-                  <div 
-                    className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
-                    style={{ 
-                      height: pullToRefresh.pullDistance,
-                      opacity: pullToRefresh.pullProgress,
-                    }}
-                  >
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <RefreshCw 
-                        className={cn(
-                          "h-4 w-4 transition-transform duration-300",
-                          pullToRefresh.isRefreshing && "animate-spin",
-                          pullToRefresh.pullProgress > 0.8 && "rotate-180"
-                        )} 
-                      />
-                      <span className="text-sm font-medium">
-                        {pullToRefresh.getStatusText()}
-                      </span>
+            
+            {/* Inline Composer for Replies */}
+            {inlineComposeDraft && (
+              <div className="border-t bg-card">
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-lg">Reply</h3>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setComposeReplyTo(inlineComposeDraft);
+                          setIsComposeOpen(true);
+                          setInlineComposeDraft(null);
+                        }}
+                        data-testid="button-pop-out-compose"
+                      >
+                        Pop out
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setInlineComposeDraft(null)}
+                        data-testid="button-close-inline-compose"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                )}
-
-                {/* Optimized email list with virtual scrolling */}
-                <div 
-                  className="flex-1"
-                  data-scroll-container
-                  onTouchStart={isMobile ? pullToRefresh.handlers.onTouchStart : undefined}
-                  onTouchMove={isMobile ? pullToRefresh.handlers.onTouchMove : undefined}
-                  onTouchEnd={isMobile ? pullToRefresh.handlers.onTouchEnd : undefined}
-                  onPointerDown={isMobile ? pullToRefresh.handlers.onPointerDown : undefined}
-                  onPointerMove={isMobile ? pullToRefresh.handlers.onPointerMove : undefined}
-                  onPointerUp={isMobile ? pullToRefresh.handlers.onPointerUp : undefined}
-                >
-                  <OptimizedEmailList
-                    emails={filteredEmails}
-                    selectedEmail={selectedEmail}
-                    onEmailSelect={(email) => {
-                      setSelectedEmail(email);
-                      if (isMobile) {
-                        setIsMobileEmailViewOpen(true);
-                      }
-                      console.log('Selected email:', email.subject);
-                    }}
-                    onToggleRead={handleToggleRead}
-                    onToggleFlagged={handleToggleFlagged}
-                    onToggleStar={handleStar}
-                    onArchive={handleArchive}
-                    onDelete={handleDelete}
-                    enableSwipeGestures={isMobile}
-                    isLoading={emailsLoading}
-                    searchQuery={searchQuery}
-                    className="h-full"
+                  
+                  <ComposeDialog
+                    isOpen={true}
+                    onClose={() => setInlineComposeDraft(null)}
+                    accountId={primaryAccount?.id}
+                    replyTo={inlineComposeDraft}
                   />
                 </div>
               </div>
-            </div>
-
-            {/* Desktop Email viewer - Hidden on mobile */}
-            {!isMobile && (
-              <div className="flex-1 flex flex-col">
-                <EmailViewer
-                  email={selectedEmail}
-                  currentUserEmail={user?.email}
-                  onReply={handleReply}
-                  onReplyAll={handleReplyAll}
-                  onForward={handleForward}
-                  onArchive={handleArchive}
-                  onDelete={handleDelete}
-                  onToggleStar={handleStar}
-                />
-                
-                {/* Inline Composer for Replies */}
-                {inlineComposeDraft && (
-                  <div className="border-t bg-card">
-                    <div className="p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-lg">Reply</h3>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setComposeReplyTo(inlineComposeDraft);
-                              setIsComposeOpen(true);
-                              setInlineComposeDraft(null);
-                            }}
-                            data-testid="button-pop-out-compose"
-                          >
-                            Pop out
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setInlineComposeDraft(null)}
-                            data-testid="button-close-inline-compose"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      
-                      <ComposeDialog
-                        isOpen={true}
-                        onClose={() => setInlineComposeDraft(null)}
-                        accountId={primaryAccount?.id}
-                        replyTo={inlineComposeDraft}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
             )}
           </div>
-        ) : null}
         </div>
       </div>
 

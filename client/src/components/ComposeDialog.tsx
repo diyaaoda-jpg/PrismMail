@@ -7,45 +7,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { X, Send, Paperclip, Bold, Italic, Underline, FileText, Image, Download, Trash2, Save, Clock, CheckCircle2, AlertCircle, Edit2 } from "lucide-react";
+import { X, Send, Paperclip, Bold, Italic, Underline, FileText, Image, Download, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings, LoadDraftResponse, DraftContent, Signature, ListSignaturesResponse } from "@shared/schema";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings } from "@shared/schema";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { useDraftAutoSave } from '@/hooks/useDraftAutoSave';
-import { useMobileCompose } from '@/hooks/useMobileCompose';
-import { useAutoResize } from '@/hooks/useAutoResize';
 
 interface ComposeDialogProps {
   isOpen: boolean;
   onClose: () => void;
   accountId?: string; // Account ID for sending emails
-  draftId?: string; // Draft ID to load when opening
   replyTo?: {
     to: string;
     cc?: string;
@@ -66,7 +44,7 @@ interface AttachmentFile {
   uploading?: boolean;
 }
 
-export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: ComposeDialogProps) {
+export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState({
@@ -77,40 +55,10 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     body: replyTo?.body || ""
   });
 
-  // Draft management states
-  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
-  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
-  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
-
-  // Signature management states
-  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
-  const [signatureInserted, setSignatureInserted] = useState(false);
-
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Mobile compose optimization
-  const mobileCompose = useMobileCompose({
-    isOpen, // Pass isOpen to fix body scroll lock
-    onSend: () => handleSend(),
-    onClose: () => handleClose(), // This is safe - handleClose will handle confirmation
-    onSaveDraft: () => saveDraftManually(),
-    enableSwipeGestures: true,
-    enableHapticFeedback: true,
-    keyboardAdjustment: true,
-  });
-
-  // Auto-resize hook for subject textarea only (body uses TipTap editor which handles its own sizing)
-  const { triggerResize: triggerSubjectResize } = useAutoResize(mobileCompose.subjectRef, {
-    minHeight: mobileCompose.isMobile ? 44 : 36,
-    maxHeight: mobileCompose.isMobile ? 120 : 100,
-    enabled: true,
-  });
-
-  // Note: Body content uses TipTap EditorContent which doesn't need useAutoResize
-  // TipTap handles content sizing through CSS and its own content management
 
   // Fetch account information for the From field
   const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
@@ -118,14 +66,8 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     enabled: isOpen, // Fetch accounts whenever dialog is open
   });
 
-  // Find the current account from the accounts list with proper typing - MUST be before signatures query
-  interface AccountsResponse {
-    data: AccountConnection[];
-  }
-  
-  const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData 
-    ? (accountsData as AccountsResponse).data 
-    : undefined;
+  // Find the current account from the accounts list
+  const accountsList = accountsData && typeof accountsData === 'object' && accountsData !== null && 'data' in accountsData ? (accountsData as any).data as AccountConnection[] : undefined;
   
   // Auto-select account: use provided accountId, or fall back to first active account
   let currentAccount = accountsList?.find((account: AccountConnection) => account.id === accountId);
@@ -137,18 +79,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
                      accountsList.find(account => account.isActive) ||
                      accountsList[0];
   }
-
-  // Fetch signatures for current account - MUST be after currentAccount is computed
-  const { data: signaturesResponse } = useQuery<ListSignaturesResponse>({
-    queryKey: ['/api/signatures', currentAccount?.id],
-    enabled: isOpen && !!currentAccount,
-  });
-
-  const signatures = signaturesResponse?.signatures || [];
-  const defaultSignature = signatures.find(sig => 
-    sig.isDefault && sig.isActive && 
-    (sig.accountId === currentAccount?.id || !sig.accountId)
-  );
 
   // Extract email from account settings
   const getAccountEmail = (account: AccountConnection | undefined): string => {
@@ -179,39 +109,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   const accountEmail = getAccountEmail(currentAccount);
   const fromDisplay = currentAccount ? `${currentAccount.name} <${accountEmail}>` : '';
 
-  // Initialize draft auto-save hook
-  const {
-    saveDraft,
-    saveDraftManually,
-    deleteDraft,
-    status: draftStatus,
-    currentDraftId,
-    clearDraft
-  } = useDraftAutoSave({
-    accountId: accountId || currentAccount?.id,
-    draftId,
-    autoSaveInterval: 30000, // 30 seconds
-    debounceDelay: 2000, // 2 seconds
-    enableLocalStorage: true
-  });
-
-  // Load draft when dialog opens with draftId
-  const { data: draftData, isLoading: isDraftLoading } = useQuery({
-    queryKey: ['/api/accounts', accountId || currentAccount?.id, 'drafts', draftId],
-    queryFn: async () => {
-      if (!draftId || !accountId || !currentAccount?.id) return null;
-      
-      const response = await apiRequest('GET', `/api/accounts/${accountId || currentAccount?.id}/drafts/${draftId}`);
-      if (!response.ok) {
-        throw new Error('Failed to load draft');
-      }
-      
-      const result = await response.json();
-      return result.data as LoadDraftResponse;
-    },
-    enabled: isOpen && !!draftId && !!(accountId || currentAccount?.id),
-  });
-
   // Initialize TipTap editor
   const editor = useEditor({
     extensions: [StarterKit],
@@ -223,160 +120,20 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-      setFormData(prev => {
-        const newData = { ...prev, body: html };
-        // Trigger auto-save when body changes
-        triggerAutoSave(newData);
-        return newData;
-      });
+      setFormData(prev => ({ ...prev, body: html }));
     },
   });
 
-  // Enhanced signature insertion with race condition prevention
-  const insertSignature = useCallback((signature: Signature, preventAutoSave = false) => {
-    if (!editor) return;
-
-    const signatureHtml = signature.contentHtml || `<p>${signature.contentText || ''}</p>`;
-    
-    // Get current content
-    const currentContent = editor.getHTML();
-    
-    // Check if signature already exists to prevent duplication
-    const hasExistingSignature = currentContent.includes('data-signature-id=');
-    
-    // Remove any existing signature (look for signature wrapper)
-    const contentWithoutSignature = currentContent.replace(
-      /<div data-signature-id="[^"]*">[\s\S]*?<\/div>/g, 
-      ''
-    ).trim();
-    
-    // Add signature wrapper with ID for easy removal/replacement
-    const signatureMarker = `<!-- SIGNATURE_START:${signature.id} -->`;
-    const signatureEndMarker = `<!-- SIGNATURE_END:${signature.id} -->`;
-    const signatureWithWrapper = `<br/>${signatureMarker}<div data-signature-id="${signature.id}">${signatureHtml}</div>${signatureEndMarker}`;
-    
-    // Insert at the end of content
-    const newContent = contentWithoutSignature + signatureWithWrapper;
-    
-    // Temporarily disable auto-save to prevent race condition
-    if (preventAutoSave) {
-      const originalOnUpdate = editor.options.onUpdate;
-      editor.setOptions({ onUpdate: () => {} });
-      
-      editor.commands.setContent(newContent);
-      
-      // Re-enable auto-save after a brief delay
-      setTimeout(() => {
-        editor.setOptions({ onUpdate: originalOnUpdate });
-      }, 100);
-    } else {
-      editor.commands.setContent(newContent);
-    }
-    
-    setSelectedSignatureId(signature.id);
-    setSignatureInserted(true);
-  }, [editor]);
-
-  // Auto-insert default signature with improved race condition handling
-  useEffect(() => {
-    if (editor && defaultSignature && !signatureInserted && !replyTo && !draftId && isOpen && isDraftLoaded !== null) {
-      // Use a timeout to ensure editor is fully initialized and draft loading is complete
-      const signatureTimeout = setTimeout(() => {
-        const currentContent = editor.getHTML();
-        // Only insert signature if content doesn't already contain one
-        if (!currentContent.includes('data-signature-id=')) {
-          insertSignature(defaultSignature, true); // Prevent auto-save during insertion
-        } else {
-          setSignatureInserted(true);
-        }
-      }, 150);
-      
-      return () => clearTimeout(signatureTimeout);
-    }
-  }, [editor, defaultSignature, signatureInserted, replyTo, draftId, isOpen, isDraftLoaded, insertSignature]);
-
-  // Reset signature state when dialog opens/closes
-  useEffect(() => {
-    if (isOpen) {
-      setSignatureInserted(false);
-      setSelectedSignatureId(null);
-    }
-  }, [isOpen]);
-
-  // Auto-save trigger function with signature state tracking
-  const triggerAutoSave = useCallback((data: typeof formData) => {
-    if (!currentAccount?.id || (!draftId && !data.to && !data.subject && !data.body)) {
-      return; // Don't save empty drafts
-    }
-    
-    // Skip auto-save if we're still in the process of loading draft or inserting signature
-    if (!isDraftLoaded && draftId) {
-      return; // Don't auto-save while draft is loading
-    }
-
-    const draftContent: Partial<DraftContent> = {
-      accountId: currentAccount.id,
-      to: data.to,
-      cc: data.cc,
-      bcc: data.bcc,
-      subject: data.subject,
-      body: data.body,
-      bodyHtml: data.body,
-      attachmentIds: attachments.filter(att => att.id).map(att => att.id!),
-    };
-
-    saveDraft(draftContent);
-  }, [currentAccount?.id, draftId, attachments, saveDraft, isDraftLoaded]);
-
-  // Load draft when dialog opens with signature detection
-  useEffect(() => {
-    if (draftData?.draft && !isDraftLoaded) {
-      const draft = draftData.draft;
-      const draftBody = draft.bodyHtml || draft.body || '';
-      
-      setFormData({
-        to: draft.to || "",
-        cc: draft.cc || "",
-        bcc: draft.bcc || "",
-        subject: draft.subject || "",
-        body: draftBody
-      });
-
-      // Update editor content and check for existing signature
-      if (editor) {
-        editor.commands.setContent(draftBody);
-        
-        // Check if draft already contains a signature
-        const hasSignature = draftBody.includes('data-signature-id=');
-        if (hasSignature) {
-          setSignatureInserted(true);
-          // Extract signature ID if present
-          const signatureIdMatch = draftBody.match(/data-signature-id="([^"]*)"/)
-          if (signatureIdMatch) {
-            setSelectedSignatureId(signatureIdMatch[1]);
-          }
-        }
-      }
-
-      setIsDraftLoaded(true);
-      
-      toast({
-        title: "Draft Loaded",
-        description: "Your draft has been restored.",
-      });
-    }
-  }, [draftData, isDraftLoaded, editor, toast]);
-
   // Update editor content when replyTo changes
   useEffect(() => {
-    if (editor && replyTo?.body && !isDraftLoaded) {
+    if (editor && replyTo?.body) {
       editor.commands.setContent(replyTo.body);
     }
-  }, [editor, replyTo, isDraftLoaded]);
+  }, [editor, replyTo]);
 
   // Update form data when replyTo changes
   useEffect(() => {
-    if (replyTo && !isDraftLoaded) {
+    if (replyTo) {
       setFormData({
         to: replyTo.to || "",
         cc: replyTo.cc || "",
@@ -393,7 +150,11 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
       const formData = new FormData();
       formData.append('attachments', file);
       
-      const response = await apiRequest('POST', '/api/attachments/upload', formData);
+      const response = await apiRequest('POST', '/api/attachments/upload', formData, {
+        headers: {
+          // Don't set Content-Type, let the browser set it with boundary for FormData
+        }
+      });
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -667,113 +428,43 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   };
 
   const handleClose = () => {
-    // Check for unsaved changes and show confirmation if needed
-    const hasUnsavedContent = formData.to || formData.subject || formData.body || attachments.length > 0;
-    
-    if (hasUnsavedContent && draftStatus !== 'saving' && draftStatus !== 'saved') {
-      // Set up pending close action for unsaved changes dialog
-      setPendingCloseAction(() => () => {
-        // Apply haptic feedback on mobile
-        if (mobileCompose.isMobile) {
-          mobileCompose.triggerHaptic('light');
-        }
-        
-        // Clear editor and form
-        if (editor) {
-          editor.commands.clearContent();
-        }
-        
-        // Clear draft and reset form
-        clearDraft();
-        setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
-        setAttachments([]);
-        setIsDraftLoaded(false);
-        setSignatureInserted(false);
-        setSelectedSignatureId(null);
-        
-        // Call the original onClose
-        onClose();
-      });
-      setShowUnsavedChangesDialog(true);
-      return;
-    }
-    
-    // No unsaved changes, close immediately
-    // Apply haptic feedback on mobile
-    if (mobileCompose.isMobile) {
-      mobileCompose.triggerHaptic('light');
-    }
-    
-    // Clear editor and form
-    if (editor) {
-      editor.commands.clearContent();
-    }
-    
-    // Clear draft and reset form
-    clearDraft();
-    setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
-    setAttachments([]);
-    setIsDraftLoaded(false);
-    setSignatureInserted(false);
-    setSelectedSignatureId(null);
-    
-    // Call the original onClose
     onClose();
+    // Reset form and attachments after close
+    setTimeout(() => {
+      setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
+      setAttachments([]);
+    }, 300);
   };
 
-  // Render compose content
-  const renderComposeContent = () => (
-    <div 
-      ref={mobileCompose.composeRef}
-      className={`flex flex-col h-full ${mobileCompose.isMobile ? 'pb-safe' : ''} ${isDragOver ? 'border-primary border-2 border-dashed' : ''}`}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().compose : undefined}
-    >
-      {/* Header */}
-      <div className={`flex items-center justify-between p-4 border-b ${mobileCompose.isMobile ? 'bg-background/95 backdrop-blur-sm' : ''}`}>
-        <h2 className="text-lg font-semibold">
-          {replyTo ? "Reply" : "Compose Email"}
-        </h2>
-        <div className="flex items-center space-x-2">
-          {/* Draft status indicator */}
-          {draftStatus === 'saving' && (
-            <div className="flex items-center space-x-1 text-muted-foreground text-sm">
-              <Clock className="h-3 w-3 animate-spin" />
-              <span>Saving...</span>
-            </div>
-          )}
-          {draftStatus === 'saved' && (
-            <div className="flex items-center space-x-1 text-muted-foreground text-sm">
-              <CheckCircle2 className="h-3 w-3" />
-              <span>Saved</span>
-            </div>
-          )}
-          {draftStatus === 'error' && (
-            <div className="flex items-center space-x-1 text-destructive text-sm">
-              <AlertCircle className="h-3 w-3" />
-              <span>Error</span>
-            </div>
-          )}
-
+  return (
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent 
+        className={`max-w-4xl max-h-[90vh] flex flex-col ${isDragOver ? 'border-primary border-2 border-dashed' : ''}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+          <DialogTitle className="text-lg font-semibold">Compose Email</DialogTitle>
+          <DialogDescription className="hidden">
+            Create and send a new email message.
+          </DialogDescription>
+          <div className="text-lg font-semibold sr-only">
+            {replyTo ? "Reply" : "Compose"}
+          </div>
           <Button
             variant="ghost"
-            size={mobileCompose.isMobile ? "default" : "icon"}
+            size="icon"
             onClick={handleClose}
             data-testid="button-close-compose"
-            className={mobileCompose.isMobile ? "px-4" : ""}
           >
             <X className="h-4 w-4" />
-            {mobileCompose.isMobile && <span className="ml-1">Close</span>}
           </Button>
-        </div>
-      </div>
-
-      {/* Form Content */}
-      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4`}>
-        {/* Recipient Fields */}
-        <div className="space-y-3">
+        </DialogHeader>
+        
+        <div className="flex-1 space-y-4 overflow-y-auto">
+          {/* Recipient Fields */}
+          <div className="space-y-3">
             {/* From Field - Read-only */}
             <div className="flex items-center space-x-2">
               <Label htmlFor="from" className="w-12 text-sm text-muted-foreground">
@@ -790,62 +481,44 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="to" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
+              <Label htmlFor="to" className="w-12 text-sm text-muted-foreground">
                 To:
               </Label>
               <Input
                 id="to"
                 value={formData.to}
-                onChange={(e) => {
-                  const newData = { ...formData, to: e.target.value };
-                  setFormData(newData);
-                  triggerAutoSave(newData);
-                }}
+                onChange={(e) => setFormData({ ...formData, to: e.target.value })}
                 placeholder="recipient@example.com"
                 className="flex-1"
                 data-testid="input-to"
-                {...mobileCompose.getMobileInputProps('email')}
-                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('to')!)}
               />
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="cc" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
+              <Label htmlFor="cc" className="w-12 text-sm text-muted-foreground">
                 CC:
               </Label>
               <Input
                 id="cc"
                 value={formData.cc}
-                onChange={(e) => {
-                  const newData = { ...formData, cc: e.target.value };
-                  setFormData(newData);
-                  triggerAutoSave(newData);
-                }}
+                onChange={(e) => setFormData({ ...formData, cc: e.target.value })}
                 placeholder="cc@example.com"
                 className="flex-1"
                 data-testid="input-cc"
-                {...mobileCompose.getMobileInputProps('email')}
-                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('cc')!)}
               />
             </div>
             
             <div className="flex items-center space-x-2">
-              <Label htmlFor="bcc" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
+              <Label htmlFor="bcc" className="w-12 text-sm text-muted-foreground">
                 BCC:
               </Label>
               <Input
                 id="bcc"
                 value={formData.bcc}
-                onChange={(e) => {
-                  const newData = { ...formData, bcc: e.target.value };
-                  setFormData(newData);
-                  triggerAutoSave(newData);
-                }}
+                onChange={(e) => setFormData({ ...formData, bcc: e.target.value })}
                 placeholder="bcc@example.com"
                 className="flex-1"
                 data-testid="input-bcc"
-                {...mobileCompose.getMobileInputProps('email')}
-                onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('bcc')!)}
               />
             </div>
           </div>
@@ -854,31 +527,16 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
 
           {/* Subject */}
           <div className="flex items-center space-x-2">
-            <Label htmlFor="subject" className={`${mobileCompose.isMobile ? 'w-16' : 'w-12'} text-sm text-muted-foreground`}>
+            <Label htmlFor="subject" className="w-12 text-sm text-muted-foreground">
               Subject:
             </Label>
-            <Textarea
-              ref={mobileCompose.subjectRef}
+            <Input
               id="subject"
               value={formData.subject}
-              onChange={(e) => {
-                const newData = { ...formData, subject: e.target.value };
-                setFormData(newData);
-                triggerAutoSave(newData);
-                triggerSubjectResize();
-              }}
+              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
               placeholder="Email subject"
-              className="flex-1 resize-none"
+              className="flex-1"
               data-testid="input-subject"
-              style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().subject : undefined}
-              rows={1}
-              onFocus={() => mobileCompose.keyboard.scrollToElement?.(document.getElementById('subject')!)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  mobileCompose.focusNextField('subject');
-                }
-              }}
             />
           </div>
 
@@ -975,63 +633,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
               <Underline className="h-4 w-4" />
             </Button>
             <Separator orientation="vertical" className="h-6 mx-2" />
-            
-            {/* Signature Selection */}
-            {signatures.length > 0 && (
-              <>
-                <Select
-                  value={selectedSignatureId || ""}
-                  onValueChange={(value) => {
-                    if (value === "none") {
-                      // Remove signature
-                      if (editor) {
-                        const currentContent = editor.getHTML();
-                        const contentWithoutSignature = currentContent.replace(
-                          /<div data-signature-id="[^"]*">[\s\S]*?<\/div>/g, 
-                          ''
-                        );
-                        editor.commands.setContent(contentWithoutSignature);
-                        setSelectedSignatureId(null);
-                      }
-                    } else {
-                      const signature = signatures.find(sig => sig.id === value);
-                      if (signature) {
-                        insertSignature(signature);
-                      }
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-32 h-8" data-testid="select-signature">
-                    <Edit2 className="h-3 w-3 mr-1" />
-                    <SelectValue placeholder="Signature" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No Signature</SelectItem>
-                    {signatures
-                      .filter(sig => sig.isActive)
-                      .sort((a, b) => {
-                        // Put default signature first
-                        if (a.isDefault && !b.isDefault) return -1;
-                        if (!a.isDefault && b.isDefault) return 1;
-                        return a.name.localeCompare(b.name);
-                      })
-                      .map((signature) => (
-                        <SelectItem key={signature.id} value={signature.id}>
-                          {signature.name}
-                          {signature.isDefault && (
-                            <Badge variant="secondary" className="ml-2 text-xs">
-                              Default
-                            </Badge>
-                          )}
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-                <Separator orientation="vertical" className="h-6 mx-2" />
-              </>
-            )}
-            
             <Button 
               variant="ghost" 
               size="sm" 
@@ -1052,22 +653,17 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
             />
           </div>
 
-          {/* Email Body - Auto-resizing Textarea with TipTap */}
-          <div className="flex-1 space-y-2">
-            <Label className="text-sm text-muted-foreground">Message:</Label>
-            <div className={`border rounded-md overflow-hidden ${mobileCompose.isMobile ? 'min-h-[200px]' : 'min-h-[300px]'}`}>
+          {/* Email Body - Rich Text Editor */}
+          <div className="flex-1">
+            <div className="min-h-[300px] border rounded-md">
               {editor ? (
                 <EditorContent 
                   editor={editor} 
-                  className={`prose-email ${mobileCompose.isMobile ? 'mobile-editor' : ''}`}
+                  className="prose-email"
                   data-testid="editor-body"
-                  style={mobileCompose.isMobile ? {
-                    ...mobileCompose.getMobileStyles().body,
-                    minHeight: '200px'
-                  } : undefined}
                 />
               ) : (
-                <div className={`flex items-center justify-center ${mobileCompose.isMobile ? 'min-h-[200px]' : 'min-h-[300px]'} text-muted-foreground`}>
+                <div className="flex items-center justify-center min-h-[300px] text-muted-foreground">
                   Loading editor...
                 </div>
               )}
@@ -1075,124 +671,39 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
           </div>
         </div>
 
-        {/* Mobile-Optimized Footer */}
-        <div className={`border-t bg-background ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
-          <div className={`flex ${mobileCompose.isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
-            {/* Character count and draft status */}
-            <div className={`flex items-center space-x-4 ${mobileCompose.isMobile ? 'justify-between' : ''}`}>
-              <div className="text-sm text-muted-foreground">
-                {formData.body?.length || 0} characters
-              </div>
-              
-              {/* Draft status */}
-              {draftStatus === 'saving' && (
-                <div className="flex items-center space-x-1 text-muted-foreground text-sm">
-                  <Clock className="h-3 w-3 animate-spin" />
-                  <span>Saving...</span>
+        {/* Footer Actions */}
+        <div className="flex items-center justify-between pt-4 border-t">
+          <div className="text-sm text-muted-foreground">
+            {formData.body.length} characters
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <Button 
+              variant="outline" 
+              onClick={handleClose}
+              data-testid="button-cancel-compose"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSend} 
+              disabled={sendEmailMutation.isPending}
+              data-testid="button-send-compose"
+            >
+              {sendEmailMutation.isPending ? (
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+                  <span>Sending...</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <Send className="h-4 w-4" />
+                  <span>Send</span>
                 </div>
               )}
-              {draftStatus === 'saved' && (
-                <div className="flex items-center space-x-1 text-green-600 text-sm">
-                  <CheckCircle2 className="h-3 w-3" />
-                  <span>Saved</span>
-                </div>
-              )}
-              {draftStatus === 'error' && (
-                <div className="flex items-center space-x-1 text-destructive text-sm">
-                  <AlertCircle className="h-3 w-3" />
-                  <span>Error saving</span>
-                </div>
-              )}
-            </div>
-            
-            {/* Action buttons */}
-            <div className={`flex ${mobileCompose.isMobile ? 'w-full space-x-3' : 'items-center space-x-2'}`}>
-              {mobileCompose.isMobile && (
-                <Button 
-                  variant="outline"
-                  onClick={() => saveDraftManually()}
-                  className="flex-1"
-                  disabled={!formData.to && !formData.subject && !formData.body}
-                  data-testid="button-save-draft"
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Draft
-                </Button>
-              )}
-              
-              <Button 
-                variant={mobileCompose.isMobile ? "secondary" : "outline"}
-                onClick={handleClose}
-                className={mobileCompose.isMobile ? "flex-1" : ""}
-                data-testid="button-cancel-compose"
-              >
-                Cancel
-              </Button>
-              
-              <Button 
-                onClick={mobileCompose.handleMobileSend}
-                disabled={sendEmailMutation.isPending}
-                className={`${mobileCompose.isMobile ? 'flex-1 font-semibold' : ''}`}
-                style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().sendButton : undefined}
-                data-testid="button-send-compose"
-              >
-                {sendEmailMutation.isPending ? (
-                  <div className="flex items-center space-x-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-foreground" />
-                    <span>Sending...</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-2">
-                    <Send className="h-4 w-4" />
-                    <span>Send</span>
-                  </div>
-                )}
-              </Button>
-            </div>
+            </Button>
           </div>
         </div>
-      </div>
-  );
-
-  // Responsive Dialog/Sheet system
-  if (mobileCompose.isMobile) {
-    return (
-      <Sheet open={isOpen} onOpenChange={handleClose}>
-        <SheetContent 
-          side="bottom"
-          className="h-full w-full p-0 rounded-none border-none"
-          onInteractOutside={(e) => e.preventDefault()}
-        >
-          <SheetHeader className="sr-only">
-            <SheetTitle>{replyTo ? "Reply" : "Compose Email"}</SheetTitle>
-            <SheetDescription>
-              Create and send a new email message.
-            </SheetDescription>
-          </SheetHeader>
-          {renderComposeContent()}
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
-  return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent 
-        className="max-w-4xl max-h-[90vh] p-0"
-        onInteractOutside={(e) => {
-          // Prevent closing when clicking outside on desktop if there's unsaved content
-          if (formData.to || formData.subject || formData.body) {
-            e.preventDefault();
-          }
-        }}
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{replyTo ? "Reply" : "Compose Email"}</DialogTitle>
-          <DialogDescription>
-            Create and send a new email message.
-          </DialogDescription>
-        </DialogHeader>
-        {renderComposeContent()}
       </DialogContent>
     </Dialog>
   );

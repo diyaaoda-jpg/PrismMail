@@ -18,8 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Plus, Trash2, Server, RefreshCw, Edit, FileText } from "lucide-react";
-import { SignatureEditor } from "./SignatureEditor";
+import { AlertCircle, Plus, Trash2, Server, RefreshCw, Edit } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Input } from "@/components/ui/input";
@@ -35,7 +34,7 @@ import { ThemeMenu } from "./ThemeMenu";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAccountConnectionSchema, type AccountConnection, type UserPrefs, imapSettingsSchema, ewsSettingsSchema, smtpSettingsSchema, type Signature, type CreateSignatureRequest, type ListSignaturesResponse, type SignatureResponse, type DeleteSignatureResponse } from "@shared/schema";
+import { insertAccountConnectionSchema, type AccountConnection, type UserPrefs, imapSettingsSchema, ewsSettingsSchema, smtpSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 
 interface SettingsDialogProps {
@@ -174,330 +173,6 @@ const accountFormSchema = z.object({
 });
 
 type AccountFormData = z.infer<typeof accountFormSchema>;
-
-// Signatures Tab Component
-interface SignaturesTabProps {
-  user: SettingsDialogProps['user'];
-}
-
-function SignaturesTab({ user }: SignaturesTabProps) {
-  const [showEditor, setShowEditor] = useState(false);
-  const [editingSignature, setEditingSignature] = useState<Signature | null>(null);
-  const [deleteSignatureId, setDeleteSignatureId] = useState<string | null>(null);
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-
-  // Fetch signatures
-  const { data: signaturesResponse, isLoading: signaturesLoading } = useQuery<ListSignaturesResponse>({
-    queryKey: ['/api/signatures'],
-    enabled: isOpen
-  });
-
-  // Fetch accounts for signature association
-  const { data: accountsResponse } = useQuery<{ accounts: AccountConnection[] }>({
-    queryKey: ['/api/accounts'],
-    enabled: isOpen
-  });
-
-  const signatures = signaturesResponse?.signatures || [];
-  const accounts = accountsResponse?.accounts || [];
-
-  // Create signature mutation
-  const createSignatureMutation = useMutation({
-    mutationFn: async (signatureData: CreateSignatureRequest) => {
-      const response = await apiRequest<SignatureResponse>('/api/signatures', {
-        method: 'POST',
-        body: JSON.stringify(signatureData)
-      });
-      return response;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/signatures'] });
-      setShowEditor(false);
-      setEditingSignature(null);
-      toast({
-        title: "Success",
-        description: "Signature created successfully"
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create signature",
-        variant: "destructive"
-      });
-    }
-  });
-
-  // Update signature mutation
-  const updateSignatureMutation = useMutation({
-    mutationFn: async ({ id, signatureData }: { id: string; signatureData: Partial<CreateSignatureRequest> }) => {
-      const response = await apiRequest<SignatureResponse>(`/api/signatures/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(signatureData)
-      });
-      return response;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/signatures'] });
-      setShowEditor(false);
-      setEditingSignature(null);
-      toast({
-        title: "Success",
-        description: "Signature updated successfully"
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update signature",
-        variant: "destructive"
-      });
-    }
-  });
-
-  // Delete signature mutation
-  const deleteSignatureMutation = useMutation({
-    mutationFn: async (signatureId: string) => {
-      const response = await apiRequest<DeleteSignatureResponse>(`/api/signatures/${signatureId}`, {
-        method: 'DELETE'
-      });
-      return response;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/signatures'] });
-      setDeleteSignatureId(null);
-      toast({
-        title: "Success",
-        description: "Signature deleted successfully"
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to delete signature",
-        variant: "destructive"
-      });
-    }
-  });
-
-  // Set default signature mutation
-  const setDefaultMutation = useMutation({
-    mutationFn: async ({ signatureId, accountId }: { signatureId: string; accountId?: string }) => {
-      const response = await apiRequest(`/api/signatures/${signatureId}/set-default`, {
-        method: 'POST',
-        body: JSON.stringify({ accountId })
-      });
-      return response;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/signatures'] });
-      toast({
-        title: "Success",
-        description: "Default signature updated"
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to set default signature",
-        variant: "destructive"
-      });
-    }
-  });
-
-  const handleSaveSignature = async (signatureData: CreateSignatureRequest) => {
-    if (editingSignature) {
-      await updateSignatureMutation.mutateAsync({
-        id: editingSignature.id,
-        signatureData
-      });
-    } else {
-      await createSignatureMutation.mutateAsync(signatureData);
-    }
-  };
-
-  const handleEditSignature = (signature: Signature) => {
-    setEditingSignature(signature);
-    setShowEditor(true);
-  };
-
-  const handleDeleteSignature = (signatureId: string) => {
-    setDeleteSignatureId(signatureId);
-  };
-
-  const confirmDeleteSignature = () => {
-    if (deleteSignatureId) {
-      deleteSignatureMutation.mutate(deleteSignatureId);
-    }
-  };
-
-  if (showEditor) {
-    return (
-      <SignatureEditor
-        signature={editingSignature || undefined}
-        accounts={accounts}
-        onSave={handleSaveSignature}
-        onCancel={() => {
-          setShowEditor(false);
-          setEditingSignature(null);
-        }}
-        isLoading={createSignatureMutation.isPending || updateSignatureMutation.isPending}
-      />
-    );
-  }
-
-  return (
-    <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">Email Signatures</h3>
-          <p className="text-sm text-muted-foreground">
-            Manage your email signatures and set defaults for different accounts
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowEditor(true)}
-          size="sm"
-          data-testid="button-create-signature"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Signature
-        </Button>
-      </div>
-
-      {/* Signatures List */}
-      <div className="space-y-3">
-        {signaturesLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin" />
-            <span className="ml-2">Loading signatures...</span>
-          </div>
-        ) : signatures.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-8">
-              <FileText className="w-12 h-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Email Signatures</h3>
-              <p className="text-muted-foreground text-center mb-4">
-                Create your first email signature to automatically include it in your messages.
-              </p>
-              <Button 
-                onClick={() => setShowEditor(true)} 
-                data-testid="button-create-first-signature"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Create Your First Signature
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          signatures.map((signature) => (
-            <Card key={signature.id} data-testid={`signature-card-${signature.id}`}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <CardTitle className="text-base flex items-center gap-2">
-                        {signature.name}
-                        {signature.isDefault && (
-                          <Badge variant="default" className="text-xs">
-                            Default
-                          </Badge>
-                        )}
-                        {!signature.isActive && (
-                          <Badge variant="secondary" className="text-xs">
-                            Inactive
-                          </Badge>
-                        )}
-                      </CardTitle>
-                      <CardDescription className="text-xs">
-                        {signature.accountId ? (
-                          <>Account: {accounts.find(acc => acc.id === signature.accountId)?.name || 'Unknown'}</>
-                        ) : (
-                          'All accounts'
-                        )}
-                        {signature.templateType && (
-                          <> • Template: {signature.templateType}</>
-                        )}
-                      </CardDescription>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!signature.isDefault && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setDefaultMutation.mutate({
-                          signatureId: signature.id,
-                          accountId: signature.accountId || undefined
-                        })}
-                        disabled={setDefaultMutation.isPending}
-                        data-testid={`button-set-default-${signature.id}`}
-                      >
-                        Set Default
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditSignature(signature)}
-                      data-testid={`button-edit-signature-${signature.id}`}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDeleteSignature(signature.id)}
-                      data-testid={`button-delete-signature-${signature.id}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              {signature.contentHtml && (
-                <CardContent className="pt-0">
-                  <div className="border rounded-md p-3 bg-muted/50 max-h-32 overflow-hidden">
-                    <div 
-                      className="prose prose-sm max-w-none text-xs"
-                      dangerouslySetInnerHTML={{ __html: signature.contentHtml }}
-                      data-testid={`signature-preview-${signature.id}`}
-                    />
-                  </div>
-                </CardContent>
-              )}
-            </Card>
-          ))
-        )}
-      </div>
-
-      {/* Delete Signature Confirmation Dialog */}
-      <AlertDialog open={!!deleteSignatureId} onOpenChange={() => setDeleteSignatureId(null)}>
-        <AlertDialogContent data-testid="dialog-delete-signature-confirmation">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Email Signature</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this signature? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel data-testid="button-cancel-delete-signature">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDeleteSignature}
-              className="bg-destructive hover:bg-destructive/90"
-              data-testid="button-confirm-delete-signature"
-            >
-              Delete Signature
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
-  );
-}
 
 export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const { toast } = useToast();
@@ -868,42 +543,11 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       accountForm.reset();
     },
     onError: (error: any) => {
-      console.error('Create account failed:', error);
-      
-      // Enhanced user-friendly error messages
-      let errorMessage = "Failed to connect to your email account. Please check your settings.";
-      
-      if (error.message) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes('dns') || msg.includes('hostname') || msg.includes('host not found')) {
-          errorMessage = "Cannot find the mail server. Please check the server address and try again.";
-        } else if (msg.includes('timeout') || msg.includes('timed out')) {
-          errorMessage = "Connection timed out. Please check your network connection and server settings.";
-        } else if (msg.includes('authentication') || msg.includes('login') || msg.includes('credentials')) {
-          errorMessage = "Authentication failed. Please check your username and password.";
-        } else if (msg.includes('ssl') || msg.includes('certificate')) {
-          errorMessage = "SSL/Security error. Please verify your SSL settings and server configuration.";
-        } else if (msg.includes('port') || msg.includes('connection refused')) {
-          errorMessage = "Cannot connect to the server. Please check the port number and server availability.";
-        } else {
-          // Use the original error message if it's descriptive enough
-          errorMessage = error.message;
-        }
-      }
-      
       toast({
-        title: "Account Setup Failed",
-        description: errorMessage,
+        title: "Connection Failed",
+        description: error.message || "Failed to connect to your email account. Please check your settings.",
         variant: "destructive"
       });
-      
-      // Reset form state to allow retry - this is the key fix!
-      // Clear any connection test results that might be confusing
-      setConnectionTestResult(null);
-      setShowConnectionHelp(false);
-      
-      // Form remains filled so user can fix issues and retry
-      // No need to reset the form completely, just ensure it's not stuck
     }
   });
 
@@ -967,42 +611,11 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
       accountForm.reset();
     },
     onError: (error: any) => {
-      console.error('Update account failed:', error);
-      
-      // Enhanced user-friendly error messages  
-      let errorMessage = "Failed to update your email account. Please check your settings.";
-      
-      if (error.message) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes('dns') || msg.includes('hostname') || msg.includes('host not found')) {
-          errorMessage = "Cannot find the mail server. Please check the server address and try again.";
-        } else if (msg.includes('timeout') || msg.includes('timed out')) {
-          errorMessage = "Connection timed out. Please check your network connection and server settings.";
-        } else if (msg.includes('authentication') || msg.includes('login') || msg.includes('credentials')) {
-          errorMessage = "Authentication failed. Please check your username and password.";
-        } else if (msg.includes('ssl') || msg.includes('certificate')) {
-          errorMessage = "SSL/Security error. Please verify your SSL settings and server configuration.";
-        } else if (msg.includes('port') || msg.includes('connection refused')) {
-          errorMessage = "Cannot connect to the server. Please check the port number and server availability.";
-        } else {
-          // Use the original error message if it's descriptive enough
-          errorMessage = error.message;
-        }
-      }
-      
       toast({
-        title: "Account Update Failed",
-        description: errorMessage,
+        title: "Update Failed",
+        description: error.message || "Failed to update your email account. Please check your settings.",
         variant: "destructive"
       });
-      
-      // Reset form state to allow retry - this is the key fix!
-      // Clear any connection test results that might be confusing
-      setConnectionTestResult(null);
-      setShowConnectionHelp(false);
-      
-      // Keep the form filled so user can fix issues and retry
-      // editAccountId stays set so user remains in edit mode
     }
   });
 
@@ -1187,10 +800,6 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
               <TabsTrigger value="security" data-testid="tab-security">
                 <Shield className="w-4 h-4 mr-2" />
                 Security
-              </TabsTrigger>
-              <TabsTrigger value="signatures" data-testid="tab-signatures">
-                <FileText className="w-4 h-4 mr-2" />
-                Signatures
               </TabsTrigger>
             </TabsList>
 
@@ -1884,11 +1493,6 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
                   </div>
                 </CardContent>
               </Card>
-            </TabsContent>
-
-            {/* Signatures Tab */}
-            <TabsContent value="signatures" className="space-y-6">
-              <SignaturesTab user={user} />
             </TabsContent>
           </Tabs>
         </DialogContent>
