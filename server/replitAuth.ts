@@ -14,18 +14,10 @@ if (!process.env.REPLIT_DOMAINS) {
 
 const getOidcConfig = memoize(
   async () => {
-    try {
-      // Try the correct Replit OIDC discovery endpoint
-      return await client.discovery(
-        new URL(process.env.ISSUER_URL ?? "https://replit.com"),
-        process.env.REPL_ID!
-      );
-    } catch (error) {
-      console.error('[AUTH] OIDC discovery failed, disabling authentication:', error);
-      console.log('[AUTH] Authentication will be disabled due to OIDC configuration failure');
-      // Return null to disable authentication instead of creating a broken fallback
-      return null;
-    }
+    return await client.discovery(
+      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+      process.env.REPL_ID!
+    );
   },
   { maxAge: 3600 * 1000 }
 );
@@ -108,42 +100,6 @@ export async function setupAuth(app: Express) {
   app.use(passport.session());
 
   const config = await getOidcConfig();
-
-  if (!config) {
-    console.log('[AUTH] OIDC configuration failed, setting up development authentication fallback');
-    
-    // Development mode fallback - add simple auth routes that will work for testing
-    app.get("/api/login", (req, res) => {
-      console.log('[AUTH] Development login redirect - OIDC not available');
-      res.status(503).json({
-        success: false,
-        error: {
-          code: 'AUTH_UNAVAILABLE',
-          message: 'Authentication service temporarily unavailable',
-          details: 'OIDC discovery failed - please check server configuration'
-        }
-      });
-    });
-
-    app.get("/api/callback", (req, res) => {
-      console.log('[AUTH] Development callback - OIDC not available');
-      res.status(503).json({
-        success: false,
-        error: {
-          code: 'AUTH_UNAVAILABLE', 
-          message: 'Authentication callback unavailable',
-          details: 'OIDC discovery failed - please check server configuration'
-        }
-      });
-    });
-
-    app.get("/api/logout", (req, res) => {
-      console.log('[AUTH] Development logout - redirecting to home');
-      res.redirect('/');
-    });
-    
-    return;
-  }
 
   const verify: VerifyFunction = async (
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
