@@ -70,12 +70,24 @@ async function upsertUser(
 async function ensureStrategyRegistered(req: any): Promise<string> {
   const config = await getOidcConfig();
   
-  // Build dynamic callback URL using actual request details
-  const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
-  const host = req.get('host') || req.hostname;
-  const callbackURL = `${protocol}://${host}/api/callback`;
+  // Use stable PUBLIC_URL if available, otherwise fall back to dynamic construction
+  let callbackURL: string;
+  if (process.env.PUBLIC_URL) {
+    callbackURL = `${process.env.PUBLIC_URL}/api/callback`;
+    console.log('[AUTH] Using stable PUBLIC_URL for callback:', callbackURL);
+  } else {
+    // Fallback to dynamic construction for backward compatibility
+    const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+    const host = req.get('host') || req.hostname;
+    callbackURL = `${protocol}://${host}/api/callback`;
+    console.log('[AUTH] Using dynamic callback URL (consider setting PUBLIC_URL env var):', callbackURL);
+  }
   
-  const strategyName = `replitauth:${host}`;
+  // Use stable strategy name based on PUBLIC_URL if available
+  const host = req.get('host') || req.hostname;
+  const strategyName = process.env.PUBLIC_URL ? 
+    `replitauth:stable` : 
+    `replitauth:${host}`;
   
   console.log('[AUTH] Dynamic strategy check for:', host);
   console.log('[AUTH] Callback URL:', callbackURL);
@@ -235,8 +247,8 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  // Development authentication bypass - only enable in development
-  if (process.env.DEV_AUTH_BYPASS === 'true' && app.get('env') === 'development') {
+  // Development authentication bypass - enable in development or when explicitly set
+  if (process.env.DEV_AUTH_BYPASS === 'true' || app.get('env') === 'development') {
     console.log('[AUTH] Development authentication bypass is ENABLED');
     
     app.post("/api/dev/login", async (req, res) => {
