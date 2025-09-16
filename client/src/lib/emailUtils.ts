@@ -317,16 +317,14 @@ export function makeForward(email: EmailMessage): ReplyOptions {
   const formattedDate = formatDate(date);
   
   const htmlAttribution = `
-<br><br>
-<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 10px;">
+<div style="border-top: 1px solid #ccc; padding-top: 10px; margin-top: 20px;">
 <p><strong>---------- Forwarded message ----------</strong></p>
 <p><strong>From:</strong> ${email.from}</p>
 ${email.to ? `<p><strong>To:</strong> ${email.to}</p>` : ''}
 ${email.cc ? `<p><strong>Cc:</strong> ${email.cc}</p>` : ''}
 <p><strong>Date:</strong> ${formattedDate}</p>
 <p><strong>Subject:</strong> ${email.subject}</p>
-</div>
-<br>`;
+</div>`;
   
   // For forwarding, include the content as-is without additional quoting
   const htmlBody = `${htmlAttribution}${content}`;
