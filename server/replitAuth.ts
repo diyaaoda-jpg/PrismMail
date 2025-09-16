@@ -14,8 +14,20 @@ if (!process.env.REPLIT_DOMAINS) {
 
 const getOidcConfig = memoize(
   async () => {
+    let issuerUrl = "https://replit.com/oidc";
+    
+    // Validate ISSUER_URL environment variable
+    if (process.env.ISSUER_URL) {
+      try {
+        new URL(process.env.ISSUER_URL);
+        issuerUrl = process.env.ISSUER_URL;
+      } catch (error) {
+        console.log('ISSUER_URL not set or invalid, using default:', issuerUrl);
+      }
+    }
+    
     return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+      new URL(issuerUrl),
       process.env.REPL_ID!
     );
   },
