@@ -12,10 +12,26 @@ if (!process.env.REPLIT_DOMAINS) {
   throw new Error("Environment variable REPLIT_DOMAINS not provided");
 }
 
+const DEFAULT_ISSUER = "https://replit.com/oidc";
+
+function resolveIssuerUrl(): URL {
+  const raw = process.env.ISSUER_URL;
+  try {
+    if (!raw || !/^https?:\/\//i.test(raw)) {
+      console.warn("ISSUER_URL not set or invalid, using default:", DEFAULT_ISSUER);
+      return new URL(DEFAULT_ISSUER);
+    }
+    return new URL(raw);
+  } catch (error) {
+    console.warn("ISSUER_URL invalid, falling back to default:", DEFAULT_ISSUER, "Error:", error);
+    return new URL(DEFAULT_ISSUER);
+  }
+}
+
 const getOidcConfig = memoize(
   async () => {
     return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+      resolveIssuerUrl(),
       process.env.REPL_ID!
     );
   },
