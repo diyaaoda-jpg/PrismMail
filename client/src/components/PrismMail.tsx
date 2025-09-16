@@ -497,7 +497,19 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, []);
 
   const handleReply = useCallback((email: EmailMessage) => {
+    console.log('DEBUG - Reply email data:', {
+      from: email.from,
+      replyTo: email.replyTo,
+      to: email.to,
+      subject: email.subject,
+      id: email.id
+    });
     const replyData = makeReply(email, user?.email);
+    console.log('DEBUG - makeReply result:', {
+      to: replyData.to,
+      subject: replyData.subject,
+      userEmail: user?.email
+    });
     setInlineComposeDraft({
       to: replyData.to,
       cc: replyData.cc,
