@@ -41,21 +41,17 @@ function Router() {
 
   return (
     <Switch>
-      {isLoading || !isAuthenticated ? (
-        <Route path="/">
+      <Route path="/">
+        {isLoading || !isAuthenticated ? (
           <LazyRouteWrapper name="Landing">
             <LazyLanding />
           </LazyRouteWrapper>
-        </Route>
-      ) : (
-        <>
-          <Route path="/">
-            <LazyRouteWrapper name="Home">
-              <LazyHome />
-            </LazyRouteWrapper>
-          </Route>
-        </>
-      )}
+        ) : (
+          <LazyRouteWrapper name="Home">
+            <LazyHome />
+          </LazyRouteWrapper>
+        )}
+      </Route>
       <Route>
         <LazyRouteWrapper name="NotFound">
           <LazyNotFound />

@@ -38,7 +38,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: false, // Set to false for development to work with http://localhost
       maxAge: sessionTtl,
     },
   });
@@ -57,40 +57,13 @@ function updateUserSession(
 async function upsertUser(
   claims: any,
 ) {
-  try {
-    console.log('[AUTH] Upserting user with claims:', {
-      sub: claims["sub"],
-      email: claims["email"] ? '[REDACTED]' : undefined,
-      firstName: claims["first_name"],
-      lastName: claims["last_name"]
-    });
-
-    const result = await storage.upsertUser({
-      id: claims["sub"],
-      email: claims["email"],
-      firstName: claims["first_name"],
-      lastName: claims["last_name"],
-      profileImageUrl: claims["profile_image_url"],
-    });
-
-    console.log('[AUTH] Successfully upserted user:', { id: result.id, email: result.email ? '[REDACTED]' : undefined });
-    return result;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('[AUTH] Critical error during user upsert:', {
-      error: errorMessage,
-      stack: errorStack,
-      claims: {
-        sub: claims["sub"],
-        email: claims["email"] ? '[REDACTED]' : undefined,
-        firstName: claims["first_name"],
-        lastName: claims["last_name"]
-      },
-      timestamp: new Date().toISOString()
-    });
-    throw new Error(`Authentication failed: Unable to create or update user record. ${errorMessage}`);
-  }
+  await storage.upsertUser({
+    id: claims["sub"],
+    email: claims["email"],
+    firstName: claims["first_name"],
+    lastName: claims["last_name"],
+    profileImageUrl: claims["profile_image_url"],
+  });
 }
 
 export async function setupAuth(app: Express) {
@@ -105,30 +78,10 @@ export async function setupAuth(app: Express) {
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback
   ) => {
-    try {
-      console.log('[AUTH] Starting OIDC verification process');
-      
-      const user = {};
-      updateUserSession(user, tokens);
-      
-      // Upsert user with comprehensive error handling
-      await upsertUser(tokens.claims());
-      
-      console.log('[AUTH] OIDC verification completed successfully');
-      verified(null, user);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      console.error('[AUTH] OIDC verification failed:', {
-        error: errorMessage,
-        stack: errorStack,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Pass the error to passport which will redirect to failure page
-      // instead of crashing the server
-      verified(error, false);
-    }
+    const user = {};
+    updateUserSession(user, tokens);
+    await upsertUser(tokens.claims());
+    verified(null, user);
   };
 
   // Get all domains including localhost for development
