@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -46,10 +46,10 @@ interface SearchResponse {
 }
 
 export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogProps) {
-  const [searchQuery, setSearchQuery] = React.useState("");
-  const [searchType, setSearchType] = React.useState("all");
-  const [debouncedQuery, setDebouncedQuery] = React.useState("");
-  const [recentSearches] = React.useState([
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchType, setSearchType] = useState("all");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [recentSearches] = useState([
     "Project proposal",
     "Meeting notes", 
     "Budget review",
@@ -58,7 +58,7 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
   const { toast } = useToast();
 
   // Debounce search query to avoid too many API calls
-  React.useEffect(() => {
+  useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery);
     }, 300);
@@ -96,7 +96,7 @@ export function SearchDialog({ isOpen, onClose, onSelectEmail }: SearchDialogPro
   });
 
   // Handle search errors
-  React.useEffect(() => {
+  useEffect(() => {
     if (error) {
       console.error('Search error:', error);
       toast({

@@ -1,5 +1,5 @@
 import { useQuery, useInfiniteQuery, QueryKey } from '@tanstack/react-query';
-import * as React from 'react';
+import { useMemo, useCallback } from 'react';
 import { performanceMonitor } from '@/lib/performanceMonitor';
 
 // Mobile-optimized query configuration
@@ -40,7 +40,7 @@ export function useOptimizedEmailQuery(
   const { enabled = true, folder = 'INBOX', accountId, limit = 50 } = options;
 
   // Memoize query function for stable reference
-  const queryFn = React.useCallback(async () => {
+  const queryFn = useCallback(async () => {
     const startTime = performance.now();
     
     try {
@@ -89,7 +89,7 @@ export function useOptimizedEmailQuery(
     enabled,
     ...MOBILE_QUERY_CONFIG,
     // Mobile-specific optimizations
-    select: React.useCallback((data: any) => {
+    select: useCallback((data: any) => {
       // Only process and transform data that will be displayed
       // Reduce memory usage by not storing unnecessary data
       if (Array.isArray(data)) {
@@ -112,7 +112,7 @@ export function useInfiniteEmailQuery(
 ) {
   const { enabled = true, folder = 'INBOX', accountId, pageSize = 50 } = options;
 
-  const queryFn = React.useCallback(async ({ pageParam = 0 }) => {
+  const queryFn = useCallback(async ({ pageParam = 0 }) => {
     const startTime = performance.now();
     
     try {
@@ -163,7 +163,7 @@ export function useInfiniteEmailQuery(
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     // Mobile memory optimization
     maxPages: 10, // Limit pages in memory for mobile devices
-    select: React.useCallback((data: any) => {
+    select: useCallback((data: any) => {
       // Flatten pages and optimize for virtual scrolling
       const allEmails = data.pages.flatMap((page: any) => page.emails || []);
       return {
@@ -187,12 +187,12 @@ export function useOptimizedSearchQuery(
   const { enabled = true, accountId, debounceMs = 300 } = options;
 
   // Debounce search term for mobile performance
-  const debouncedSearchTerm = React.useMemo(() => {
+  const debouncedSearchTerm = useMemo(() => {
     const timeoutId = setTimeout(() => searchTerm, debounceMs);
     return () => clearTimeout(timeoutId);
   }, [searchTerm, debounceMs]);
 
-  const queryFn = React.useCallback(async () => {
+  const queryFn = useCallback(async () => {
     if (!searchTerm || searchTerm.length < 2) {
       return [];
     }
@@ -231,7 +231,7 @@ export function useOptimizedSearchQuery(
 
 // Prefetch utilities for mobile performance
 export function usePrefetchOptimization() {
-  const prefetchEmail = React.useCallback(async (emailId: string) => {
+  const prefetchEmail = useCallback(async (emailId: string) => {
     // Prefetch email content for likely navigation
     const queryClient = (await import('@/lib/queryClient')).queryClient;
     
@@ -244,7 +244,7 @@ export function usePrefetchOptimization() {
     });
   }, []);
 
-  const prefetchFolder = React.useCallback(async (folder: string, accountId?: string) => {
+  const prefetchFolder = useCallback(async (folder: string, accountId?: string) => {
     // Prefetch folder contents for faster navigation
     const queryClient = (await import('@/lib/queryClient')).queryClient;
     

@@ -1,13 +1,13 @@
-import * as React from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { performanceMonitor } from '@/lib/performanceMonitor';
 
 // Custom hook for performance optimization across components
 export function usePerformanceOptimization(componentName: string) {
-  const renderStartTime = React.useRef<number>(performance.now());
-  const [isOptimized, setIsOptimized] = React.useState(false);
+  const renderStartTime = useRef<number>(performance.now());
+  const [isOptimized, setIsOptimized] = useState(false);
 
   // Monitor component render performance
-  React.useEffect(() => {
+  useEffect(() => {
     const endTime = performance.now();
     const renderTime = endTime - renderStartTime.current;
     
@@ -20,7 +20,7 @@ export function usePerformanceOptimization(componentName: string) {
   });
 
   // Debounced function creator for performance
-  const createDebouncedCallback = React.useCallback(<T extends (...args: any[]) => any>(
+  const createDebouncedCallback = useCallback(<T extends (...args: any[]) => any>(
     callback: T,
     delay: number = 300
   ): T => {
@@ -33,7 +33,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, []);
 
   // Throttled function creator for performance
-  const createThrottledCallback = React.useCallback(<T extends (...args: any[]) => any>(
+  const createThrottledCallback = useCallback(<T extends (...args: any[]) => any>(
     callback: T,
     limit: number = 100
   ): T => {
@@ -49,7 +49,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, []);
 
   // Memory usage monitoring
-  const checkMemoryUsage = React.useCallback(() => {
+  const checkMemoryUsage = useCallback(() => {
     if ('memory' in performance) {
       const memory = (performance as any).memory;
       const memoryUsageMB = memory.usedJSHeapSize / 1024 / 1024;
@@ -64,7 +64,7 @@ export function usePerformanceOptimization(componentName: string) {
   }, [componentName]);
 
   // Performance optimization enabler
-  const enableOptimizations = React.useCallback(() => {
+  const enableOptimizations = useCallback(() => {
     setIsOptimized(true);
     
     // Enable performance optimizations
@@ -88,18 +88,18 @@ export function useIntersectionObserver(
   callback: (entries: IntersectionObserverEntry[]) => void,
   options: IntersectionObserverInit = {}
 ) {
-  const targetRef = React.useRef<HTMLElement>(null);
-  const observerRef = React.useRef<IntersectionObserver | null>(null);
-  const callbackRef = React.useRef(callback);
-  const optionsRef = React.useRef(options);
+  const targetRef = useRef<HTMLElement>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const callbackRef = useRef(callback);
+  const optionsRef = useRef(options);
 
   // Update refs when props change
-  React.useEffect(() => {
+  useEffect(() => {
     callbackRef.current = callback;
     optionsRef.current = options;
   });
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!targetRef.current) return;
 
     observerRef.current = new IntersectionObserver(
@@ -128,10 +128,10 @@ export function useOptimizedScroll(
   callback: (scrollTop: number) => void,
   threshold: number = 10
 ) {
-  const lastScrollTop = React.useRef(0);
-  const ticking = React.useRef(false);
+  const lastScrollTop = useRef(0);
+  const ticking = useRef(false);
 
-  const handleScroll = React.useCallback((e: Event) => {
+  const handleScroll = useCallback((e: Event) => {
     const scrollTop = (e.target as HTMLElement).scrollTop;
     
     if (Math.abs(scrollTop - lastScrollTop.current) < threshold) {
@@ -153,10 +153,10 @@ export function useOptimizedScroll(
 
 // Hook for managing component visibility for performance
 export function useComponentVisibility() {
-  const [isVisible, setIsVisible] = React.useState(true);
-  const elementRef = React.useRef<HTMLElement>(null);
+  const [isVisible, setIsVisible] = useState(true);
+  const elementRef = useRef<HTMLElement>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!elementRef.current || !('IntersectionObserver' in window)) {
       return;
     }
@@ -186,10 +186,10 @@ export function useOptimizedState<T>(
   initialValue: T,
   equalityFn?: (a: T, b: T) => boolean
 ) {
-  const [state, setState] = React.useState(initialValue);
-  const previousValue = React.useRef(initialValue);
+  const [state, setState] = useState(initialValue);
+  const previousValue = useRef(initialValue);
 
-  const optimizedSetState = React.useCallback((newValue: T | ((prev: T) => T)) => {
+  const optimizedSetState = useCallback((newValue: T | ((prev: T) => T)) => {
     const nextValue = typeof newValue === 'function' 
       ? (newValue as (prev: T) => T)(previousValue.current)
       : newValue;
@@ -208,10 +208,10 @@ export function useOptimizedState<T>(
 
 // Hook for managing background tasks efficiently
 export function useBackgroundTask() {
-  const tasksRef = React.useRef<Array<() => void>>([]);
-  const isProcessing = React.useRef(false);
+  const tasksRef = useRef<Array<() => void>>([]);
+  const isProcessing = useRef(false);
 
-  const scheduleTask = React.useCallback((task: () => void) => {
+  const scheduleTask = useCallback((task: () => void) => {
     tasksRef.current.push(task);
     
     if (!isProcessing.current) {
@@ -230,7 +230,7 @@ export function useBackgroundTask() {
     }
   }, []);
 
-  const processTasks = React.useCallback(() => {
+  const processTasks = useCallback(() => {
     const startTime = performance.now();
     
     while (tasksRef.current.length > 0 && (performance.now() - startTime) < 5) {

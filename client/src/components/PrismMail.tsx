@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { BookOpen, Settings, RefreshCw, X, Menu, ArrowLeft, Search, Edit, ChevronDown } from "lucide-react";
 import { makeReply, makeReplyAll, makeForward } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
@@ -17,10 +17,10 @@ import { SearchDialog } from "./SearchDialog";
 import { SettingsDialog } from "./SettingsDialog";
 import { OfflineIndicator } from "./OfflineIndicator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "react-resizable-panels";
 import { cn, debounce } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useBreakpoint, useIsTabletOrMobile, useHasTouchInterface } from "@/hooks/use-breakpoint";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -136,53 +136,35 @@ interface AccountConnection {
 }
 
 export function PrismMail({ user, onLogout }: PrismMailProps) {
-  const [selectedFolder, setSelectedFolder] = React.useState('inbox');
-  const [selectedAccount, setSelectedAccount] = React.useState<string>('');
-  const [selectedEmail, setSelectedEmail] = React.useState<EmailMessage | null>(null);
-  const [isReadingMode, setIsReadingMode] = React.useState(false);
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const [selectedFolder, setSelectedFolder] = useState('inbox');
+  const [selectedAccount, setSelectedAccount] = useState<string>('');
+  const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
+  const [isReadingMode, setIsReadingMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
   
-  // Responsive state management - SINGLE SOURCE OF TRUTH to eliminate redundant listeners
-  const breakpoint = useBreakpoint();
-  const { isMobile, isTablet, isDesktop, isXl, currentBreakpoint, 
-         isTabletOrMobile, isDesktopOrXl, hasTouchInterface } = breakpoint;
-  
-  // Sidebar state - unified for mobile and tablet
-  const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-  
-  // Mobile-specific state for full-screen email view
-  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = React.useState(false);
-  
-  // Tablet-specific state
-  const [tabletSidebarMode, setTabletSidebarMode] = React.useState<'overlay' | 'push'>('push');
+  // Mobile-specific state
+  const isMobile = useIsMobile();
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileEmailViewOpen, setIsMobileEmailViewOpen] = useState(false);
   
   // Dialog states
-  const [isComposeOpen, setIsComposeOpen] = React.useState(false);
-  const [isSearchOpen, setIsSearchOpen] = React.useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
-  const [composeReplyTo, setComposeReplyTo] = React.useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [composeReplyTo, setComposeReplyTo] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | undefined>();
   
   // Inline compose state for replies
-  const [inlineComposeDraft, setInlineComposeDraft] = React.useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
+  const [inlineComposeDraft, setInlineComposeDraft] = useState<{to: string; cc?: string; bcc?: string; subject: string; body?: string} | null>(null);
   
-  // Responsive panel state and persistence - different defaults per breakpoint
-  const [panelSizes, setPanelSizes] = React.useState<number[]>(() => {
+  // Resizable panel state and persistence
+  const [panelSizes, setPanelSizes] = useState<number[]>(() => {
     const saved = localStorage.getItem('prismmail-panel-sizes');
-    if (saved) return JSON.parse(saved);
-    
-    // Responsive defaults based on screen size
-    if (typeof window !== 'undefined') {
-      const width = window.innerWidth;
-      if (width >= 1440) return [30, 70]; // XL: More space for email content
-      if (width >= 1024) return [35, 65]; // Desktop: Balanced split
-      if (width >= 768) return [40, 60];  // Tablet: Favor email list for touch
-    }
-    return [35, 65]; // Fallback
+    return saved ? JSON.parse(saved) : [35, 65]; // Default: 35% email list, 65% viewer
   });
   
   // Debounced localStorage save to prevent jank during dragging
-  const debouncedSavePanelSizes = React.useCallback(
+  const debouncedSavePanelSizes = useCallback(
     debounce((sizes: number[]) => {
       localStorage.setItem('prismmail-panel-sizes', JSON.stringify(sizes));
     }, 200),
@@ -190,7 +172,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   );
 
   // Handle panel size changes and persist to localStorage
-  const handlePanelLayout = React.useCallback((sizes: number[]) => {
+  const handlePanelLayout = useCallback((sizes: number[]) => {
     setPanelSizes(sizes);
     debouncedSavePanelSizes(sizes);
   }, [debouncedSavePanelSizes]);
@@ -278,7 +260,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
 
   // Pull-to-refresh functionality
-  const handleRefresh = React.useCallback(async () => {
+  const handleRefresh = useCallback(async () => {
     console.log('Pull-to-refresh triggered');
     if (primaryAccount) {
       // Trigger sync for the current account
@@ -299,17 +281,17 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     completedText: 'Emails updated',
   });
 
-  // Edge swipe gestures for navigation - enabled on touch devices (mobile/tablet)
+  // Edge swipe gestures for navigation
   const edgeSwipeConfig = {
     leftActions: [{
       type: 'menu' as const,
       icon: 'Menu',
       color: 'hsl(var(--primary))',
       label: 'Open Menu',
-      threshold: hasTouchInterface ? (isTablet ? 80 : 60) : 60, // Larger threshold for tablet
+      threshold: 60,
       callback: () => {
-        setIsSidebarOpen(true);
-        if (hasTouchInterface) triggerHapticFeedback('light');
+        setIsMobileSidebarOpen(true);
+        if (isMobile) triggerHapticFeedback('light');
       },
     }],
     rightActions: [{
@@ -317,24 +299,24 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
       icon: 'Edit',
       color: 'hsl(var(--chart-2))',
       label: 'Compose',
-      threshold: hasTouchInterface ? (isTablet ? 80 : 60) : 60, // Larger threshold for tablet
+      threshold: 60,
       callback: () => {
         setIsComposeOpen(true);
-        if (hasTouchInterface) triggerHapticFeedback('light');
+        if (isMobile) triggerHapticFeedback('light');
       },
     }],
-    enableHapticFeedback: hasTouchInterface,
+    enableHapticFeedback: isMobile,
     preventScrolling: false,
   };
 
-  const edgeSwipes = useSwipeGestures(hasTouchInterface ? edgeSwipeConfig : { leftActions: [], rightActions: [] });
+  const edgeSwipes = useSwipeGestures(isMobile ? edgeSwipeConfig : { leftActions: [], rightActions: [] });
   
   // Refs for gesture handling
-  const mainContainerRef = React.useRef<HTMLDivElement>(null);
+  const mainContainerRef = useRef<HTMLDivElement>(null);
   
 
   // Auto-select account on load with IMAP preference
-  React.useEffect(() => {
+  useEffect(() => {
     if (Array.isArray(accounts) && accounts.length > 0 && !selectedAccount) {
       // Prefer IMAP accounts over EWS for auto-sync
       const preferredAccount = accounts.find(account => account.isActive && account.protocol === 'IMAP') ||
@@ -370,7 +352,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
 
   // Listen for WebSocket messages and refresh emails automatically
-  React.useEffect(() => {
+  useEffect(() => {
     if (wsMessage?.type === 'emailSynced' || wsMessage?.type === 'emailReceived') {
       // Show a prominent notification to user with real-time indicator
       const messageData = wsMessage.data || {};
@@ -400,7 +382,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [wsMessage?.type, wsMessage?.data, refetchEmails, toast]); // Include refetchEmails and toast dependencies
 
   // Auto-sync when a new account becomes active (only once when account changes)
-  React.useEffect(() => {
+  useEffect(() => {
     if (primaryAccount && emails.length === 0 && !syncMutation.isPending) {
       console.log('Auto-syncing emails for account:', primaryAccount.name, `(${primaryAccount.protocol})`);
       syncMutation.mutate(primaryAccount.id);
@@ -408,7 +390,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   }, [primaryAccount?.id, emails.length, syncMutation]); // Include syncMutation dependency
 
   // Auto-sync scheduling based on user preferences - prefer IMAP accounts
-  React.useEffect(() => {
+  useEffect(() => {
     if (!userPrefs?.autoSync) {
       return; // No auto-sync if disabled
     }
@@ -485,7 +467,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   });
 
-  const handleEmailSelect = React.useCallback((email: EmailMessage) => {
+  const handleEmailSelect = useCallback((email: EmailMessage) => {
     setSelectedEmail(email);
     
     // Mark as read when selected (only for real emails)
@@ -502,7 +484,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Selected email:', email.subject);
   }, [primaryAccount?.id, emails.length, isMobile]); // Use stable primaryAccount.id
 
-  const handleToggleRead = React.useCallback(async (emailId: string) => {
+  const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
     
     // Update optimistically in UI
@@ -537,7 +519,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Toggled read status for email:', emailId);
   }, [primaryAccount, selectedFolder, emails, refetchEmails]);
 
-  const handleToggleFlagged = React.useCallback(async (emailId: string) => {
+  const handleToggleFlagged = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
     
     // Update optimistically in UI  
@@ -611,23 +593,23 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   };
 
   // Dialog handlers
-  const handleCompose = React.useCallback(() => {
+  const handleCompose = useCallback(() => {
     setComposeReplyTo(undefined);
     setIsComposeOpen(true);
     console.log('Compose clicked');
   }, []);
 
-  const handleSearch = React.useCallback(() => {
+  const handleSearch = useCallback(() => {
     setIsSearchOpen(true);
     console.log('Search clicked');
   }, []);
 
-  const handleSettings = React.useCallback(() => {
+  const handleSettings = useCallback(() => {
     setIsSettingsOpen(true);
     console.log('Settings clicked');
   }, []);
 
-  const handleReply = React.useCallback((email: EmailMessage) => {
+  const handleReply = useCallback((email: EmailMessage) => {
     const replyData = makeReply(email, user?.email);
     setInlineComposeDraft({
       to: replyData.to,
@@ -639,7 +621,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Reply to:', email.subject);
   }, [user?.email]);
 
-  const handleReplyAll = React.useCallback((email: EmailMessage) => {
+  const handleReplyAll = useCallback((email: EmailMessage) => {
     const replyAllData = makeReplyAll(email, user?.email);
     setInlineComposeDraft({
       to: replyAllData.to,
@@ -651,7 +633,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Reply all to:', email.subject);
   }, [user?.email]);
 
-  const handleForward = React.useCallback((email: EmailMessage) => {
+  const handleForward = useCallback((email: EmailMessage) => {
     const forwardData = makeForward(email);
     setInlineComposeDraft({
       to: forwardData.to,
@@ -663,7 +645,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     console.log('Forward:', email.subject);
   }, []);
 
-  const handleSelectEmailFromSearch = React.useCallback((emailId: string) => {
+  const handleSelectEmailFromSearch = useCallback((emailId: string) => {
     const email = emails.find(e => e.id === emailId);
     if (email) {
       setSelectedEmail(email);
@@ -780,17 +762,17 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   });
 
   // Organization action handlers
-  const handleStar = React.useCallback((email: EmailMessage) => {
+  const handleStar = useCallback((email: EmailMessage) => {
     starMutation.mutate({ emailId: email.id, isStarred: email.isStarred });
     console.log('Starred:', email.subject, !email.isStarred);
   }, [starMutation]);
 
-  const handleArchive = React.useCallback((email: EmailMessage) => {
+  const handleArchive = useCallback((email: EmailMessage) => {
     archiveMutation.mutate({ emailId: email.id, isArchived: email.isArchived });
     console.log('Archived:', email.subject, !email.isArchived);
   }, [archiveMutation]);
 
-  const handleDelete = React.useCallback((email: EmailMessage) => {
+  const handleDelete = useCallback((email: EmailMessage) => {
     deleteMutation.mutate({ emailId: email.id, isDeleted: email.isDeleted });
     console.log('Deleted:', email.subject, !email.isDeleted);
   }, [deleteMutation]);
@@ -807,9 +789,9 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
-  // Touch device handlers for mobile and tablet
-  const handleSidebarToggle = () => {
-    setIsSidebarOpen(!isSidebarOpen);
+  // Mobile-specific handlers
+  const handleMobileSidebarToggle = () => {
+    setIsMobileSidebarOpen(!isMobileSidebarOpen);
   };
 
   const handleMobileBackToList = () => {
@@ -819,12 +801,12 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
 
   const handleMobileCompose = () => {
     setIsComposeOpen(true);
-    setIsSidebarOpen(false);
+    setIsMobileSidebarOpen(false);
   };
 
   const handleMobileSearch = () => {
     setIsSearchOpen(true);
-    setIsSidebarOpen(false);
+    setIsMobileSidebarOpen(false);
   };
 
   return (
@@ -869,7 +851,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
         isMobile ? "h-full flex-col" : "h-full"
       )}>
         {/* Mobile Sidebar Sheet Overlay */}
-        <Sheet open={isTabletOrMobile && isSidebarOpen} onOpenChange={setIsSidebarOpen}>
+        <Sheet open={isMobile && isMobileSidebarOpen} onOpenChange={setIsMobileSidebarOpen}>
           <SheetContent side="left" className="w-80 p-0">
             <SheetHeader className="sr-only">
               <SheetTitle>Navigation Menu</SheetTitle>
@@ -884,11 +866,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                 } else {
                   setSelectedAccount('');
                 }
-                setIsSidebarOpen(false);
+                setIsMobileSidebarOpen(false);
               }}
               onAccountSelect={(accountId) => {
                 setSelectedAccount(accountId);
-                setIsSidebarOpen(false);
+                setIsMobileSidebarOpen(false);
               }}
               onCompose={handleMobileCompose}
               onSearch={handleMobileSearch}
@@ -915,8 +897,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           </SheetContent>
         </Sheet>
 
-        {/* Desktop Sidebar - Fixed sidebar for desktop and xl */}
-        {(isDesktop || isXl) && (
+        {/* Desktop Sidebar - Hidden on mobile */}
+        {!isMobile && (
           <MailSidebar
             selectedFolder={selectedFolder}
             selectedAccount={selectedAccount}
@@ -960,8 +942,8 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           "flex-1 flex flex-col",
           isMobile ? "h-full" : ""
         )}>
-        {/* Desktop Header - Hidden on mobile and tablet */}
-        {(isDesktop || isXl) && (
+        {/* Desktop Header - Hidden on mobile */}
+        {!isMobile && (
           <div className="h-14 border-b flex items-center justify-between px-4 bg-card">
             <div className="flex items-center gap-4">
               <h1 className="text-lg font-semibold">PrismMail</h1>
@@ -1080,7 +1062,7 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setIsSidebarOpen(true)}
+                onClick={() => setIsMobileSidebarOpen(true)}
                 className="hover-elevate active-elevate-2"
                 data-testid="button-mobile-menu"
                 aria-label="Open sidebar menu"
@@ -1187,236 +1169,98 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
           </div>
         )}
 
-        {/* Responsive layout based on breakpoint */}
-        {/* Mobile: Single pane with overlay email view */}
-        {isMobile && !isMobileEmailViewOpen && (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Email list */}
-            <div className="border-r flex flex-col flex-1">
-              <div className="p-3 border-b bg-card">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                  <span className="text-sm text-muted-foreground">
-                    {filteredEmails.length} emails
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex-1 flex flex-col relative">
-                {/* Pull-to-refresh indicator */}
-                {pullToRefresh.pullState.isActive && (
-                  <div 
-                    className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
-                    style={{ 
-                      height: pullToRefresh.pullDistance,
-                      opacity: pullToRefresh.pullProgress,
-                    }}
-                  >
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <RefreshCw 
-                        className={cn(
-                          "h-4 w-4 transition-transform duration-300",
-                          pullToRefresh.isRefreshing && "animate-spin",
-                          pullToRefresh.pullProgress > 0.8 && "rotate-180"
-                        )} 
-                      />
-                      <span className="text-sm font-medium">
-                        {pullToRefresh.getStatusText()}
-                      </span>
-                    </div>
+        {/* Email list and viewer layout - Only show when not in mobile email view */}
+        {!isMobile || !isMobileEmailViewOpen ? (
+          isMobile ? (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Email list */}
+              <div className="border-r flex flex-col flex-1">
+                <div className="p-3 border-b bg-card">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-medium capitalize">{selectedFolder}</h2>
+                    <span className="text-sm text-muted-foreground">
+                      {filteredEmails.length} emails
+                    </span>
                   </div>
-                )}
-
-                {/* Optimized email list with virtual scrolling */}
-                <div 
-                  className="flex-1"
-                  data-scroll-container
-                  onTouchStart={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
-                  onTouchMove={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
-                  onTouchEnd={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
-                  onPointerDown={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
-                  onPointerMove={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
-                  onPointerUp={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
-                >
-                  <OptimizedEmailList
-                    emails={filteredEmails}
-                    selectedEmail={selectedEmail}
-                    onEmailSelect={(email) => {
-                      setSelectedEmail(email);
-                      if (isMobile) {
-                        setIsMobileEmailViewOpen(true);
-                      }
-                      console.log('Selected email:', email.subject);
-                    }}
-                    onToggleRead={handleToggleRead}
-                    onToggleFlagged={handleToggleFlagged}
-                    onToggleStar={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleStar(email);
-                    }}
-                    onArchive={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleArchive(email);
-                    }}
-                    onDelete={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleDelete(email);
-                    }}
-                    enableSwipeGestures={hasTouchInterface}
-                    isLoading={emailsLoading}
-                    searchQuery={searchQuery}
-                    className="h-full"
-                  />
                 </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tablet: Fixed two-pane layout with touch-optimized sizing */}
-        {isTablet && (
-          <div className="flex flex-1 h-full">
-            {/* Email List Panel - Fixed width for touch interaction */}
-            <div className="w-[400px] min-w-[350px] border-r flex flex-col">
-              <div className="p-4 border-b bg-card">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-lg capitalize">{selectedFolder}</h2>
-                  <span className="text-sm text-muted-foreground bg-muted px-2 py-1 rounded-md">
-                    {filteredEmails.length}
-                  </span>
-                </div>
-              </div>
-              
-              <div className="flex-1 flex flex-col relative">
-                {/* Pull-to-refresh indicator */}
-                {pullToRefresh.pullState.isActive && (
-                  <div 
-                    className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
-                    style={{ 
-                      height: pullToRefresh.pullDistance,
-                      opacity: pullToRefresh.pullProgress,
-                    }}
-                  >
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <RefreshCw 
-                        className={cn(
-                          "h-5 w-5 transition-transform duration-300",
-                          pullToRefresh.isRefreshing && "animate-spin",
-                          pullToRefresh.pullProgress > 0.8 && "rotate-180"
-                        )} 
-                      />
-                      <span className="text-base font-medium">
-                        {pullToRefresh.getStatusText()}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Email list with touch-optimized interactions */}
-                <div 
-                  className="flex-1"
-                  data-scroll-container
-                  onTouchStart={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
-                  onTouchMove={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
-                  onTouchEnd={hasTouchInterface ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
-                  onPointerDown={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
-                  onPointerMove={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
-                  onPointerUp={hasTouchInterface ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
-                >
-                  <OptimizedEmailList
-                    emails={filteredEmails}
-                    selectedEmail={selectedEmail}
-                    onEmailSelect={handleEmailSelect}
-                    onToggleRead={handleToggleRead}
-                    onToggleFlagged={handleToggleFlagged}
-                    onToggleStar={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleStar(email);
-                    }}
-                    onArchive={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleArchive(email);
-                    }}
-                    onDelete={(id: string) => {
-                      const email = filteredEmails.find(e => e.id === id);
-                      if (email) handleDelete(email);
-                    }}
-                    enableSwipeGestures={hasTouchInterface}
-                    isLoading={emailsLoading}
-                    searchQuery={searchQuery}
-                    className="h-full"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Email Viewer Panel - Takes remaining space */}
-            <div className="flex-1 flex flex-col">
-              <EmailViewer
-                email={selectedEmail}
-                currentUserEmail={user?.email}
-                onReply={handleReply}
-                onReplyAll={handleReplyAll}
-                onForward={handleForward}
-                onArchive={handleArchive}
-                onDelete={handleDelete}
-                onToggleStar={handleStar}
-              />
-              
-              {/* Inline Composer for Replies on Tablet */}
-              {inlineComposeDraft && (
-                <div className="border-t bg-card">
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-semibold text-lg">Reply</h3>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="default"
-                          onClick={() => {
-                            setComposeReplyTo(inlineComposeDraft);
-                            setIsComposeOpen(true);
-                            setInlineComposeDraft(null);
-                          }}
-                          data-testid="button-pop-out-compose"
-                          className="hover-elevate active-elevate-2"
-                        >
-                          Pop out
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="default"
-                          onClick={() => setInlineComposeDraft(null)}
-                          data-testid="button-close-inline-compose"
-                          className="hover-elevate active-elevate-2"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                
+                <div className="flex-1 flex flex-col relative">
+                  {/* Pull-to-refresh indicator */}
+                  {pullToRefresh.pullState.isActive && (
+                    <div 
+                      className="flex items-center justify-center py-4 transition-all duration-300 absolute top-0 left-0 right-0 z-10"
+                      style={{ 
+                        height: pullToRefresh.pullDistance,
+                        opacity: pullToRefresh.pullProgress,
+                      }}
+                    >
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <RefreshCw 
+                          className={cn(
+                            "h-4 w-4 transition-transform duration-300",
+                            pullToRefresh.isRefreshing && "animate-spin",
+                            pullToRefresh.pullProgress > 0.8 && "rotate-180"
+                          )} 
+                        />
+                        <span className="text-sm font-medium">
+                          {pullToRefresh.getStatusText()}
+                        </span>
                       </div>
                     </div>
-                    
-                    <ComposeDialog
-                      isOpen={true}
-                      onClose={() => setInlineComposeDraft(null)}
-                      accountId={primaryAccount?.id}
-                      replyTo={inlineComposeDraft}
+                  )}
+
+                  {/* Optimized email list with virtual scrolling */}
+                  <div 
+                    className="flex-1"
+                    data-scroll-container
+                    onTouchStart={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchStart(e.nativeEvent) : undefined}
+                    onTouchMove={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchMove(e.nativeEvent) : undefined}
+                    onTouchEnd={isMobile ? (e: React.TouchEvent) => pullToRefresh.handlers.onTouchEnd(e.nativeEvent) : undefined}
+                    onPointerDown={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerDown(e.nativeEvent) : undefined}
+                    onPointerMove={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerMove(e.nativeEvent) : undefined}
+                    onPointerUp={isMobile ? (e: React.PointerEvent) => pullToRefresh.handlers.onPointerUp(e.nativeEvent) : undefined}
+                  >
+                    <OptimizedEmailList
+                      emails={filteredEmails}
+                      selectedEmail={selectedEmail}
+                      onEmailSelect={(email) => {
+                        setSelectedEmail(email);
+                        if (isMobile) {
+                          setIsMobileEmailViewOpen(true);
+                        }
+                        console.log('Selected email:', email.subject);
+                      }}
+                      onToggleRead={handleToggleRead}
+                      onToggleFlagged={handleToggleFlagged}
+                      onToggleStar={(id: string) => {
+                        const email = filteredEmails.find(e => e.id === id);
+                        if (email) handleStar(email);
+                      }}
+                      onArchive={(id: string) => {
+                        const email = filteredEmails.find(e => e.id === id);
+                        if (email) handleArchive(email);
+                      }}
+                      onDelete={(id: string) => {
+                        const email = filteredEmails.find(e => e.id === id);
+                        if (email) handleDelete(email);
+                      }}
+                      enableSwipeGestures={isMobile}
+                      isLoading={emailsLoading}
+                      searchQuery={searchQuery}
+                      className="h-full"
                     />
                   </div>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* Desktop & XL ONLY: Resizable three-pane layout - tablets get fixed layout */}
-        {isDesktopOrXl && (
-            <PanelGroup 
+          ) : (
+            <ResizablePanelGroup 
               direction="horizontal" 
               className="flex-1 overflow-hidden"
               onLayout={handlePanelLayout}
             >
               {/* Email List Panel - Minimum 25% width for readability, maximum 60% to preserve viewer space */}
-              <Panel 
+              <ResizablePanel 
                 defaultSize={panelSizes[0]} 
                 minSize={25} 
                 maxSize={60}
@@ -1500,16 +1344,16 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                     </div>
                   </div>
                 </div>
-              </Panel>
+              </ResizablePanel>
 
               {/* Resizable Handle */}
-              <PanelResizeHandle 
+              <ResizableHandle 
                 className="w-1 bg-border hover:bg-accent transition-colors data-[panel-group-direction=horizontal]:w-1 data-[panel-group-direction=horizontal]:h-full flex items-center justify-center group" 
                 data-testid="handle-resize-panels"
               />
 
               {/* Email Viewer Panel - Minimum 40% width for email content readability, maximum 75% to preserve list */}
-              <Panel 
+              <ResizablePanel 
                 defaultSize={panelSizes[1]} 
                 minSize={40} 
                 maxSize={75}
@@ -1567,9 +1411,10 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
                     </div>
                   )}
                 </div>
-              </Panel>
-            </PanelGroup>
-        )}
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )
+        ) : null}
         </div>
       </div>
 

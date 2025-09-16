@@ -3,7 +3,7 @@
  * Provides native-like pull-to-refresh behavior for email list
  */
 
-import * as React from "react";
+import { useRef, useCallback, useEffect, useState, useMemo } from "react";
 import {
   GESTURE_CONFIG,
   calculateVelocity,
@@ -93,15 +93,15 @@ export function usePullToRefresh(
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
   
   // Refs for tracking gesture state without re-renders
-  const startPointRef = React.useRef<TouchPoint | null>(null);
-  const currentPointRef = React.useRef<TouchPoint | null>(null);
-  const isActiveRef = React.useRef(false);
-  const scrollElementRef = React.useRef<HTMLElement | null>(null);
-  const rafRef = React.useRef<number | null>(null);
-  const refreshPromiseRef = React.useRef<Promise<void> | null>(null);
+  const startPointRef = useRef<TouchPoint | null>(null);
+  const currentPointRef = useRef<TouchPoint | null>(null);
+  const isActiveRef = useRef(false);
+  const scrollElementRef = useRef<HTMLElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
   // State for component re-renders and animations
-  const [pullState, setPullState] = React.useState<PullState>({
+  const [pullState, setPullState] = useState<PullState>({
     isActive: false,
     isPulling: false,
     distance: 0,
@@ -112,13 +112,13 @@ export function usePullToRefresh(
   });
 
   // Check if element is at the top and can be pulled
-  const canPull = React.useCallback((element: Element): boolean => {
+  const canPull = useCallback((element: Element): boolean => {
     if (!element) return false;
     return element.scrollTop === 0;
   }, []);
 
   // Calculate pull distance with resistance
-  const calculatePullDistance = React.useCallback((rawDistance: number): number => {
+  const calculatePullDistance = useCallback((rawDistance: number): number => {
     if (rawDistance <= finalConfig.maxPullDistance) {
       return rawDistance;
     }
@@ -130,7 +130,7 @@ export function usePullToRefresh(
   }, [finalConfig.maxPullDistance, finalConfig.resistance]);
 
   // Update pull state with animation frame optimization
-  const updatePullState = React.useCallback((
+  const updatePullState = useCallback((
     distance: number,
     velocity: number,
     state: PullToRefreshState = 'pulling'
@@ -157,7 +157,7 @@ export function usePullToRefresh(
   }, [calculatePullDistance, finalConfig.threshold]);
 
   // Extract touch point from event
-  const getTouchPoint = React.useCallback((event: TouchEvent | PointerEvent): TouchPoint => {
+  const getTouchPoint = useCallback((event: TouchEvent | PointerEvent): TouchPoint => {
     const touch = 'touches' in event ? event.touches[0] || event.changedTouches[0] : event;
     return {
       x: touch.clientX,
@@ -167,7 +167,7 @@ export function usePullToRefresh(
   }, []);
 
   // Handle gesture start
-  const handleStart = React.useCallback((event: TouchEvent | PointerEvent) => {
+  const handleStart = useCallback((event: TouchEvent | PointerEvent) => {
     // Only handle single touch and when not already refreshing
     if (('touches' in event && event.touches.length > 1) || pullState.state === 'refreshing') {
       return;
@@ -192,7 +192,7 @@ export function usePullToRefresh(
   }, [getTouchPoint, canPull, pullState.state]);
 
   // Handle gesture move
-  const handleMove = React.useCallback((event: TouchEvent | PointerEvent) => {
+  const handleMove = useCallback((event: TouchEvent | PointerEvent) => {
     if (!startPointRef.current || !scrollElementRef.current || pullState.state === 'refreshing') {
       return;
     }
@@ -233,7 +233,7 @@ export function usePullToRefresh(
   }, [getTouchPoint, canPull, calculateVelocity, updatePullState, finalConfig.enableHapticFeedback, pullState.state]);
 
   // Handle gesture end
-  const handleEnd = React.useCallback(async (event: TouchEvent | PointerEvent) => {
+  const handleEnd = useCallback(async (event: TouchEvent | PointerEvent) => {
     if (!isActiveRef.current || !startPointRef.current || pullState.state === 'refreshing') {
       return;
     }
@@ -302,7 +302,7 @@ export function usePullToRefresh(
   }, [getTouchPoint, calculatePullDistance, finalConfig.threshold, finalConfig.enableHapticFeedback, finalConfig.completeDuration, onRefresh, updatePullState, pullState.state]);
 
   // Handle scroll events (for desktop)
-  const handleScroll = React.useCallback((event: Event) => {
+  const handleScroll = useCallback((event: Event) => {
     const element = event.currentTarget as HTMLElement;
     
     // If actively pulling, prevent scroll
@@ -318,7 +318,7 @@ export function usePullToRefresh(
   }, [canPull, pullState.isActive, updatePullState]);
 
   // Manual refresh function
-  const refresh = React.useCallback(async (): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
     if (pullState.state === 'refreshing' || refreshPromiseRef.current) {
       return refreshPromiseRef.current || Promise.resolve();
     }
@@ -366,7 +366,7 @@ export function usePullToRefresh(
   }, [onRefresh, pullState.state, finalConfig.completeDuration]);
 
   // Complete refresh manually
-  const completeRefresh = React.useCallback(() => {
+  const completeRefresh = useCallback(() => {
     if (pullState.state === 'refreshing') {
       setPullState(prev => ({ ...prev, state: 'completing' }));
       
@@ -385,7 +385,7 @@ export function usePullToRefresh(
   }, [pullState.state, finalConfig.completeDuration]);
 
   // Reset pull state
-  const reset = React.useCallback(() => {
+  const reset = useCallback(() => {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
     }
@@ -408,7 +408,7 @@ export function usePullToRefresh(
   }, []);
 
   // Get status text for current state
-  const getStatusText = React.useCallback((): string => {
+  const getStatusText = useCallback((): string => {
     switch (pullState.state) {
       case 'refreshing':
         return finalConfig.refreshingText;
@@ -424,7 +424,7 @@ export function usePullToRefresh(
   }, [pullState.state, pullState.progress, finalConfig]);
 
   // Event handlers - memoized to prevent recreating on every render
-  const handlers = React.useMemo(() => ({
+  const handlers = useMemo(() => ({
     onTouchStart: handleStart as (event: TouchEvent) => void,
     onTouchMove: handleMove as (event: TouchEvent) => void,
     onTouchEnd: handleEnd as (event: TouchEvent) => void,
@@ -435,10 +435,10 @@ export function usePullToRefresh(
   }), [handleStart, handleMove, handleEnd, handleScroll]);
 
   // Convenience method to bind all handlers
-  const bind = React.useCallback(() => handlers, [handlers]);
+  const bind = useCallback(() => handlers, [handlers]);
 
   // Cleanup on unmount
-  React.useEffect(() => {
+  useEffect(() => {
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);

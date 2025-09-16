@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { memo, useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import { VirtualScrollList, useVirtualScrollList } from './VirtualScrollList';
 import { EmailListItem, type EmailMessage } from './EmailListItem';
 import { performanceMonitor } from '@/lib/performanceMonitor';
@@ -20,7 +20,7 @@ interface OptimizedEmailListProps {
 }
 
 // Memoized email item component for virtual scrolling performance
-const MemoizedEmailItem = React.memo(function MemoizedEmailItem({
+const MemoizedEmailItem = memo(function MemoizedEmailItem({
   email,
   isSelected,
   onSelect,
@@ -59,7 +59,7 @@ const MemoizedEmailItem = React.memo(function MemoizedEmailItem({
 });
 
 // Skeleton loading component for better perceived performance - LAYOUT SHIFT FIX: Fixed dimensions
-const EmailListSkeleton = React.memo(function EmailListSkeleton({ count = 10 }: { count?: number }) {
+const EmailListSkeleton = memo(function EmailListSkeleton({ count = 10 }: { count?: number }) {
   return (
     <div className="space-y-1 p-4">
       {Array.from({ length: count }).map((_, index) => (
@@ -78,7 +78,7 @@ const EmailListSkeleton = React.memo(function EmailListSkeleton({ count = 10 }: 
   );
 });
 
-export const OptimizedEmailList = React.memo(function OptimizedEmailList({
+export const OptimizedEmailList = memo(function OptimizedEmailList({
   emails,
   selectedEmail,
   onEmailSelect,
@@ -92,14 +92,14 @@ export const OptimizedEmailList = React.memo(function OptimizedEmailList({
   enableSwipeGestures = true,
   isLoading = false
 }: OptimizedEmailListProps) {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [itemHeight] = React.useState(80); // Fixed height for consistent performance
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [itemHeight] = useState(80); // Fixed height for consistent performance
   
   // Use virtual scrolling hook for container size management
   const { containerHeight } = useVirtualScrollList(emails, containerRef, itemHeight);
 
   // Memoized email filtering for performance - CRITICAL FIX: Remove performance monitor to prevent render loop
-  const filteredEmails = React.useMemo(() => {
+  const filteredEmails = useMemo(() => {
     if (!searchQuery) return emails;
     
     const query = searchQuery.toLowerCase();
@@ -111,32 +111,32 @@ export const OptimizedEmailList = React.memo(function OptimizedEmailList({
   }, [emails, searchQuery]);
 
   // Memoized handlers for performance
-  const handleEmailSelect = React.useCallback((email: EmailMessage) => {
+  const handleEmailSelect = useCallback((email: EmailMessage) => {
     onEmailSelect?.(email);
   }, [onEmailSelect]);
 
-  const handleToggleRead = React.useCallback((id: string) => {
+  const handleToggleRead = useCallback((id: string) => {
     onToggleRead?.(id);
   }, [onToggleRead]);
 
-  const handleToggleFlagged = React.useCallback((id: string) => {
+  const handleToggleFlagged = useCallback((id: string) => {
     onToggleFlagged?.(id);
   }, [onToggleFlagged]);
 
-  const handleArchive = React.useCallback((id: string) => {
+  const handleArchive = useCallback((id: string) => {
     onArchive?.(id);
   }, [onArchive]);
 
-  const handleDelete = React.useCallback((id: string) => {
+  const handleDelete = useCallback((id: string) => {
     onDelete?.(id);
   }, [onDelete]);
 
-  const handleToggleStar = React.useCallback((id: string) => {
+  const handleToggleStar = useCallback((id: string) => {
     onToggleStar?.(id);
   }, [onToggleStar]);
 
   // Performance monitoring effect - Stable to prevent excessive re-runs
-  React.useEffect(() => {
+  useEffect(() => {
     let timeoutId: number;
     
     // Use setTimeout to measure after React's reconciliation is complete

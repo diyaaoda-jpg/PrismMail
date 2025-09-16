@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface VirtualKeyboardState {
   isVisible: boolean;
@@ -25,7 +25,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
     scrollActiveElementIntoView = true
   } = options;
 
-  const [keyboardState, setKeyboardState] = React.useState<VirtualKeyboardState>({
+  const [keyboardState, setKeyboardState] = useState<VirtualKeyboardState>({
     isVisible: false,
     height: 0,
     isSupported: false
@@ -35,7 +35,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   const isVisualViewportSupported = typeof window !== 'undefined' && 'visualViewport' in window;
 
   // Handle focus events to detect keyboard show
-  const handleFocusIn = React.useCallback((event: FocusEvent) => {
+  const handleFocusIn = useCallback((event: FocusEvent) => {
     const target = event.target as HTMLElement;
     const isInputElement = target.tagName === 'INPUT' || 
                           target.tagName === 'TEXTAREA' || 
@@ -53,7 +53,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, [scrollActiveElementIntoView]);
 
   // Handle blur events to detect keyboard hide
-  const handleFocusOut = React.useCallback(() => {
+  const handleFocusOut = useCallback(() => {
     // Delay to avoid false negatives when switching between inputs
     setTimeout(() => {
       const activeElement = document.activeElement as HTMLElement;
@@ -69,7 +69,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, [keyboardState.isVisible, onHide]);
 
   // Scroll element into view with keyboard accommodation
-  const scrollElementIntoView = React.useCallback((element: HTMLElement) => {
+  const scrollElementIntoView = useCallback((element: HTMLElement) => {
     if (!element) return;
 
     // Use smooth scrolling with offset for keyboard
@@ -87,7 +87,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, [keyboardState.height]);
 
   // Visual Viewport API handling (modern browsers)
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isVisualViewportSupported) return;
 
     const visualViewport = window.visualViewport!;
@@ -140,7 +140,7 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, [isVisualViewportSupported, onShow, onHide, adjustViewport]);
 
   // Fallback for older browsers using window resize
-  React.useEffect(() => {
+  useEffect(() => {
     if (isVisualViewportSupported) return; // Use Visual Viewport API if available
 
     let initialHeight = window.innerHeight;
@@ -195,25 +195,25 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, [isVisualViewportSupported, onShow, onHide, adjustViewport]);
 
   // Refs to avoid stale closures in focus/blur handlers
-  const keyboardStateRef = React.useRef(keyboardState);
-  const onHideRef = React.useRef(onHide);
-  const scrollActiveElementIntoViewRef = React.useRef(scrollActiveElementIntoView);
+  const keyboardStateRef = useRef(keyboardState);
+  const onHideRef = useRef(onHide);
+  const scrollActiveElementIntoViewRef = useRef(scrollActiveElementIntoView);
 
   // Update refs when values change
-  React.useEffect(() => {
+  useEffect(() => {
     keyboardStateRef.current = keyboardState;
   }, [keyboardState]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     onHideRef.current = onHide;
   }, [onHide]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     scrollActiveElementIntoViewRef.current = scrollActiveElementIntoView;
   }, [scrollActiveElementIntoView]);
 
   // Set up focus/blur listeners with refs to avoid stale closures
-  React.useEffect(() => {
+  useEffect(() => {
     const handleFocusInEvent = (event: FocusEvent) => {
       const target = event.target as HTMLElement;
       const isInputElement = target.tagName === 'INPUT' || 
@@ -274,11 +274,11 @@ export function useVirtualKeyboard(options: UseVirtualKeyboardOptions = {}) {
   }, []); // No dependencies needed since handlers use refs
 
   // Utility methods
-  const scrollToElement = React.useCallback((element: HTMLElement) => {
+  const scrollToElement = useCallback((element: HTMLElement) => {
     scrollElementIntoView(element);
   }, [scrollElementIntoView]);
 
-  const adjustForKeyboard = React.useCallback((offset = 20) => {
+  const adjustForKeyboard = useCallback((offset = 20) => {
     if (keyboardState.isVisible) {
       window.scrollBy({
         top: offset,

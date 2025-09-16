@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,12 +22,12 @@ interface PerformanceMetrics {
 }
 
 export function PerformanceDashboard() {
-  const [metrics, setMetrics] = React.useState<PerformanceMetrics>({});
-  const [isRunningTests, setIsRunningTests] = React.useState(false);
-  const [lastReport, setLastReport] = React.useState<string>('');
+  const [metrics, setMetrics] = useState<PerformanceMetrics>({});
+  const [isRunningTests, setIsRunningTests] = useState(false);
+  const [lastReport, setLastReport] = useState<string>('');
 
   // Subscribe to performance updates
-  React.useEffect(() => {
+  useEffect(() => {
     const unsubscribe = performanceMonitor.subscribe(setMetrics);
     
     // Get initial metrics
@@ -37,7 +37,7 @@ export function PerformanceDashboard() {
   }, []);
 
   // Initialize comprehensive performance measurement
-  const runComprehensiveTest = React.useCallback(async () => {
+  const runComprehensiveTest = useCallback(async () => {
     setIsRunningTests(true);
     
     try {

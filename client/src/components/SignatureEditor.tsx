@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -129,14 +129,14 @@ export function SignatureEditor({ signature, accounts, onSave, onCancel, isLoadi
   });
 
   // Update editor content when signature changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (editor && signature?.contentHtml) {
       editor.commands.setContent(signature.contentHtml);
     }
   }, [editor, signature]);
 
   // Update form when editor content changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (editor) {
       const handleUpdate = () => {
         const html = editor.getHTML();

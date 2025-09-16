@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useEffect, useCallback, RefObject } from 'react';
 
 interface UseAutoResizeOptions {
   minHeight?: number;
@@ -12,7 +12,7 @@ interface UseAutoResizeOptions {
  * Provides smooth, performant auto-resize functionality for mobile and desktop
  */
 export function useAutoResize(
-  textareaRef: React.RefObject<HTMLTextAreaElement>,
+  textareaRef: RefObject<HTMLTextAreaElement>,
   options: UseAutoResizeOptions = {}
 ) {
   const {
@@ -22,7 +22,7 @@ export function useAutoResize(
     debounceMs = 50
   } = options;
 
-  const adjustHeight = React.useCallback((textarea: HTMLTextAreaElement) => {
+  const adjustHeight = useCallback((textarea: HTMLTextAreaElement) => {
     if (!enabled) return;
 
     // Reset height to auto to get the correct scrollHeight
@@ -46,13 +46,13 @@ export function useAutoResize(
   }, [enabled, minHeight, maxHeight]);
 
   // Debounced resize function
-  const debouncedResize = React.useCallback(
+  const debouncedResize = useCallback(
     debounce((textarea: HTMLTextAreaElement) => adjustHeight(textarea), debounceMs),
     [adjustHeight, debounceMs]
   );
 
   // Set up resize observer for content changes with stable dependencies
-  React.useEffect(() => {
+  useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea || !enabled) return;
 
@@ -105,7 +105,7 @@ export function useAutoResize(
   }, [textareaRef, enabled, minHeight, maxHeight, debounceMs]); // Only stable dependencies
 
   // Return resize function for manual triggering
-  const triggerResize = React.useCallback(() => {
+  const triggerResize = useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
       adjustHeight(textarea);

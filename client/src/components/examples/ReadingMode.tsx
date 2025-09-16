@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useState } from 'react';
 import { ReadingMode } from '../ReadingMode';
 import type { EmailMessage } from '../EmailListItem';
 import { Button } from '@/components/ui/button';
@@ -44,8 +44,8 @@ const mockEmails: EmailMessage[] = [
 ];
 
 export default function ReadingModeExample() {
-  const [isReadingMode, setIsReadingMode] = React.useState(false);
-  const [selectedEmail, setSelectedEmail] = React.useState<EmailMessage | null>(null);
+  const [isReadingMode, setIsReadingMode] = useState(false);
+  const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
 
   const openReadingMode = () => {
     setSelectedEmail(mockEmails[0]);

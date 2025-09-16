@@ -3,7 +3,7 @@
  * Provides iOS/Android-style swipe-to-action functionality
  */
 
-import * as React from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import { 
   GESTURE_CONFIG, 
   analyzeGesture, 
@@ -84,14 +84,14 @@ const DEFAULT_CONFIG: SwipeConfig = {
 };
 
 export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipeGesturesReturn {
-  const startPointRef = React.useRef<TouchPoint | null>(null);
-  const currentPointRef = React.useRef<TouchPoint | null>(null);
-  const elementRef = React.useRef<HTMLElement | null>(null);
-  const isActiveRef = React.useRef(false);
-  const rafRef = React.useRef<number | null>(null);
+  const startPointRef = useRef<TouchPoint | null>(null);
+  const currentPointRef = useRef<TouchPoint | null>(null);
+  const elementRef = useRef<HTMLElement | null>(null);
+  const isActiveRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
   
   // State for component re-renders and animations
-  const [swipeState, setSwipeState] = React.useState<SwipeState>({
+  const [swipeState, setSwipeState] = useState<SwipeState>({
     isActive: false,
     direction: null,
     distance: 0,
@@ -103,7 +103,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   });
 
   // Reset swipe state
-  const resetSwipe = React.useCallback(() => {
+  const resetSwipe = useCallback(() => {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -127,7 +127,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, []);
 
   // Get the appropriate action based on distance and direction
-  const getActiveAction = React.useCallback((direction: 'left' | 'right', distance: number): SwipeAction | null => {
+  const getActiveAction = useCallback((direction: 'left' | 'right', distance: number): SwipeAction | null => {
     const actions = direction === 'left' ? config.leftActions : config.rightActions;
     
     // Find the action with the highest threshold that's been exceeded
@@ -142,7 +142,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [config.leftActions, config.rightActions]);
 
   // Update swipe state with animation frame optimization
-  const updateSwipeState = React.useCallback((
+  const updateSwipeState = useCallback((
     direction: 'left' | 'right' | null,
     distance: number,
     velocity: number,
@@ -171,7 +171,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [getActiveAction, config.longSwipeThreshold]);
 
   // Extract touch point from event
-  const getTouchPoint = React.useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent): TouchPoint => {
+  const getTouchPoint = useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent): TouchPoint => {
     const touch = 'touches' in event ? event.touches[0] || event.changedTouches[0] : event;
     return {
       x: touch.clientX,
@@ -181,7 +181,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, []);
 
   // Handle gesture start
-  const handleStart = React.useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
+  const handleStart = useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
     // Only handle single touch/pointer
     if ('touches' in event && event.touches.length > 1) return;
     
@@ -206,7 +206,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [getTouchPoint, config.preventScrolling]);
 
   // Handle gesture move
-  const handleMove = React.useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
+  const handleMove = useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
     if (!startPointRef.current || !elementRef.current) return;
     
     const point = getTouchPoint(event);
@@ -245,7 +245,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [getTouchPoint, config.preventScrolling, config.enableHapticFeedback, updateSwipeState, resetSwipe]);
 
   // Handle gesture end
-  const handleEnd = React.useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
+  const handleEnd = useCallback((event: React.TouchEvent | React.PointerEvent | TouchEvent | PointerEvent) => {
     if (!startPointRef.current || !isActiveRef.current) {
       resetSwipe();
       return;
@@ -281,7 +281,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [getTouchPoint, getActiveAction, config.enableHapticFeedback, resetSwipe]);
 
   // Trigger action manually
-  const triggerAction = React.useCallback((action: SwipeAction) => {
+  const triggerAction = useCallback((action: SwipeAction) => {
     if (config.enableHapticFeedback) {
       triggerHapticFeedback('medium');
     }
@@ -289,7 +289,7 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   }, [config.enableHapticFeedback]);
 
   // Get current action feedback for UI
-  const getActionFeedback = React.useCallback(() => {
+  const getActionFeedback = useCallback(() => {
     if (!swipeState.isActive || !swipeState.activeAction) return null;
     
     return {
@@ -310,10 +310,10 @@ export function useSwipeGestures(config: SwipeConfig = DEFAULT_CONFIG): UseSwipe
   };
 
   // Convenience method to bind all handlers
-  const bind = React.useCallback(() => handlers, [handlers]);
+  const bind = useCallback(() => handlers, [handlers]);
 
   // Cleanup on unmount
-  React.useEffect(() => {
+  useEffect(() => {
     return () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);

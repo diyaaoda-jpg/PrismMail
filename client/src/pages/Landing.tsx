@@ -5,11 +5,8 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Landing() {
   const handleLogin = () => {
-    // Use development quick login if available, otherwise normal login
-    const isDev = import.meta.env.DEV || window.location.hostname === 'localhost';
-    const loginUrl = isDev ? '/api/dev/quick-login' : '/api/login';
-    window.location.href = loginUrl;
-    console.log('Redirecting to login:', loginUrl);
+    window.location.href = '/api/login';
+    console.log('Redirecting to login');
   };
 
   const features = [

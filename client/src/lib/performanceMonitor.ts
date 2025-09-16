@@ -1,5 +1,5 @@
 // Performance monitoring and metrics collection for mobile optimization
-import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { onCLS, onINP, onFCP, onLCP, onTTFB } from 'web-vitals';
 
 interface PerformanceMetrics {
@@ -498,7 +498,7 @@ export const performanceMonitor = new PerformanceMonitor();
 export function usePerformanceMonitor() {
   const [metrics, setMetrics] = useState<PerformanceMetrics>({});
 
-  React.useEffect(() => {
+  useEffect(() => {
     const unsubscribe = performanceMonitor.subscribe(setMetrics);
     
     // Get initial metrics

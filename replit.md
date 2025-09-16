@@ -4,36 +4,6 @@
 
 PrismMail is a sophisticated dual-pane web email client designed for priority-based email management. The application connects to private mailboxes via Exchange Web Services (EWS) or IMAP protocols, featuring an intelligent priority system, immersive Reading Mode, and modern UI components. The system is built as a full-stack TypeScript application with React frontend and Express backend, supporting both IMAP and Exchange EWS email protocols with secure credential storage.
 
-## Recent Updates (September 2025)
-
-**✅ Authentication 404 Routing Issue Completely Resolved (September 16, 2025)**
-- **Problem**: Users experiencing "404 Page Not Found" after logout/login cycle, preventing access to application
-- **Root Cause**: Client-side router intercepting OIDC authentication callback URLs (e.g., `/auth/callback`) before server could process them
-- **Solution**: Implemented dynamic OIDC strategy registration and fixed client router to exclude authentication routes
-- **Technical Details**:
-  - Added dynamic Passport strategy registration with environment-based configuration
-  - Modified client router to prevent interception of `/auth/*` routes
-  - Improved error handling for OIDC callback processing
-  - Enhanced session management with proper redirect handling
-- **Result**: Authentication flow now works seamlessly with proper login/logout cycles
-
-**✅ Send Button Visibility Issue Completely Resolved (September 16, 2025)**
-- **Problem**: Send button was missing from Compose/Reply dialogs - users only saw "Save" option instead
-- **Root Cause**: JSX corruption around sendEmailMutation.onError and missing accountId handling caused Send button to be hidden
-- **Solution**: Fixed sendEmailMutation to use proper accountId from emailData, ensured Send button always renders with disabled state instead of hiding
-- **Technical Details**: 
-  - Send button now always visible with `data-testid="button-send"`
-  - Uses disabled state when form invalid (missing to/subject/currentAccount) instead of hiding
-  - Fixed account ID handling to prevent sending errors
-  - Consistent behavior between desktop Dialog and mobile Sheet variants
-- **Result**: Send button now always visible on both desktop ("Cancel"+"Send") and mobile ("Save Draft"+"Cancel"+"Send")
-
-**✅ Attachment Upload Functionality Restored (September 16, 2025)**  
-- **Problem**: File uploads failing with "No files provided" error due to FormData corruption
-- **Root Cause**: `apiRequest` function was applying `JSON.stringify()` to FormData and setting wrong Content-Type
-- **Solution**: Modified `apiRequest` to detect FormData and pass directly with proper multipart headers
-- **Result**: File attachments now upload successfully without data corruption
-
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

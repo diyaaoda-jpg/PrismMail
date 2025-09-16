@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,7 +69,7 @@ interface AttachmentFile {
 export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [formData, setFormData] = React.useState({
+  const [formData, setFormData] = useState({
     to: replyTo?.to || "",
     cc: replyTo?.cc || "",
     bcc: replyTo?.bcc || "",
@@ -78,18 +78,18 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   });
 
   // Draft management states
-  const [isDraftLoaded, setIsDraftLoaded] = React.useState(false);
-  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = React.useState(false);
-  const [pendingCloseAction, setPendingCloseAction] = React.useState<(() => void) | null>(null);
+  const [isDraftLoaded, setIsDraftLoaded] = useState(false);
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
+  const [pendingCloseAction, setPendingCloseAction] = useState<(() => void) | null>(null);
 
   // Signature management states
-  const [selectedSignatureId, setSelectedSignatureId] = React.useState<string | null>(null);
-  const [signatureInserted, setSignatureInserted] = React.useState(false);
+  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
+  const [signatureInserted, setSignatureInserted] = useState(false);
 
   // Attachment state
-  const [attachments, setAttachments] = React.useState<AttachmentFile[]>([]);
-  const [isDragOver, setIsDragOver] = React.useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Mobile compose optimization
   const mobileCompose = useMobileCompose({
@@ -233,7 +233,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   });
 
   // Enhanced signature insertion with race condition prevention
-  const insertSignature = React.useCallback((signature: Signature, preventAutoSave = false) => {
+  const insertSignature = useCallback((signature: Signature, preventAutoSave = false) => {
     if (!editor) return;
 
     const signatureHtml = signature.contentHtml || `<p>${signature.contentText || ''}</p>`;
@@ -278,7 +278,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [editor]);
 
   // Auto-insert default signature with improved race condition handling
-  React.useEffect(() => {
+  useEffect(() => {
     if (editor && defaultSignature && !signatureInserted && !replyTo && !draftId && isOpen && isDraftLoaded !== null) {
       // Use a timeout to ensure editor is fully initialized and draft loading is complete
       const signatureTimeout = setTimeout(() => {
@@ -302,7 +302,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [editor, defaultSignature, signatureInserted, replyTo, draftId, isOpen, isDraftLoaded, insertSignature]);
 
   // Reset signature state when dialog opens/closes
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       setSignatureInserted(false);
       setSelectedSignatureId(null);
@@ -310,7 +310,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [isOpen]);
 
   // Auto-save trigger function with signature state tracking
-  const triggerAutoSave = React.useCallback((data: typeof formData) => {
+  const triggerAutoSave = useCallback((data: typeof formData) => {
     if (!currentAccount?.id || (!draftId && !data.to && !data.subject && !data.body)) {
       return; // Don't save empty drafts
     }
@@ -335,7 +335,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [currentAccount?.id, draftId, attachments, isDraftLoaded, saveDraft]); // Include saveDraft function and full attachments array
 
   // Load draft when dialog opens with signature detection
-  React.useEffect(() => {
+  useEffect(() => {
     if (draftData?.draft && !isDraftLoaded) {
       const draft = draftData.draft;
       const draftBody = draft.bodyHtml || draft.body || '';
@@ -374,14 +374,14 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   }, [draftData?.draft, isDraftLoaded, editor, toast]); // Include toast function dependency
 
   // Update editor content when replyTo changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (editor && replyTo?.body && !isDraftLoaded) {
       editor.commands.setContent(replyTo.body);
     }
   }, [editor, replyTo, isDraftLoaded]);
 
   // Update form data when replyTo changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (replyTo && !isDraftLoaded) {
       setFormData({
         to: replyTo.to || "",
@@ -471,7 +471,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
     return null;
   };
 
-  const handleFileSelect = React.useCallback((files: FileList | File[]) => {
+  const handleFileSelect = useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files);
     
     for (const file of fileArray) {
@@ -528,19 +528,19 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   };
 
   // Drag and drop handlers
-  const handleDragOver = React.useCallback((e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(true);
   }, []);
 
-  const handleDragLeave = React.useCallback((e: React.DragEvent) => {
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
   }, []);
 
-  const handleDrop = React.useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(false);
@@ -554,13 +554,11 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   // TanStack Query mutation for sending emails
   const sendEmailMutation = useMutation({
     mutationFn: async (emailData: SendEmailRequest) => {
-      const sendingAccountId = emailData.accountId;
-      
-      if (!sendingAccountId) {
+      if (!accountId) {
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest('POST', `/api/accounts/${sendingAccountId}/send`, emailData);
+      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -576,10 +574,9 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
       });
       
       // Invalidate email queries to refresh the UI with the sent email
-      const sentAccountId = accountId || currentAccount?.id;
-      if (sentAccountId) {
-        queryClient.invalidateQueries({ queryKey: ['/api/mail', sentAccountId, 'sent'] });
-        queryClient.invalidateQueries({ queryKey: ['/api/mail', sentAccountId] });
+      if (accountId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/mail', accountId, 'sent'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/mail', accountId] });
       }
       
       onClose();
@@ -779,8 +776,8 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         </div>
       </div>
 
-      {/* Form Content - Scrollable Middle Section */}
-      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4 min-h-0`}>
+      {/* Form Content */}
+      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4`}>
         {/* Recipient Fields */}
         <div className="space-y-3">
             {/* From Field - Read-only */}
@@ -1090,8 +1087,8 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
           </div>
         </div>
 
-        {/* Mobile-Optimized Footer - Always Visible */}
-        <div className={`border-t bg-background flex-shrink-0 ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
+        {/* Mobile-Optimized Footer */}
+        <div className={`border-t bg-background ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
           <div className={`flex ${mobileCompose.isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
             {/* Character count and draft status */}
             <div className={`flex items-center space-x-4 ${mobileCompose.isMobile ? 'justify-between' : ''}`}>
@@ -1146,10 +1143,10 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
               
               <Button 
                 onClick={mobileCompose.handleMobileSend}
-                disabled={sendEmailMutation.isPending || !formData.to || !formData.subject || !currentAccount}
+                disabled={sendEmailMutation.isPending}
                 className={`${mobileCompose.isMobile ? 'flex-1 font-semibold' : ''}`}
                 style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().sendButton : undefined}
-                data-testid="button-send"
+                data-testid="button-send-compose"
               >
                 {sendEmailMutation.isPending ? (
                   <div className="flex items-center space-x-2">

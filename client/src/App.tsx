@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { LazyRouteWrapper, createLazyRoute } from "@/components/LazyRouteWrapper";
 import { performanceMonitor } from "@/lib/performanceMonitor";
-import * as React from "react";
+import { useEffect } from "react";
 
 // Lazy-loaded route components for optimal bundle splitting
 const LazyLanding = createLazyRoute(
@@ -27,10 +27,9 @@ const LazyNotFound = createLazyRoute(
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
-  const [location] = useLocation();
 
   // Preload routes based on authentication state for better UX
-  React.useEffect(() => {
+  useEffect(() => {
     if (isAuthenticated) {
       // Preload Home route when authenticated
       import("@/pages/Home").catch(console.warn);
@@ -42,24 +41,25 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/">
-        {isLoading || !isAuthenticated ? (
+      {isLoading || !isAuthenticated ? (
+        <Route path="/">
           <LazyRouteWrapper name="Landing">
             <LazyLanding />
           </LazyRouteWrapper>
-        ) : (
-          <LazyRouteWrapper name="Home">
-            <LazyHome />
-          </LazyRouteWrapper>
-        )}
-      </Route>
+        </Route>
+      ) : (
+        <>
+          <Route path="/">
+            <LazyRouteWrapper name="Home">
+              <LazyHome />
+            </LazyRouteWrapper>
+          </Route>
+        </>
+      )}
       <Route>
-        {/* Only show NotFound for non-API routes to prevent intercepting server routes */}
-        {location.startsWith('/api') ? null : (
-          <LazyRouteWrapper name="NotFound">
-            <LazyNotFound />
-          </LazyRouteWrapper>
-        )}
+        <LazyRouteWrapper name="NotFound">
+          <LazyNotFound />
+        </LazyRouteWrapper>
       </Route>
     </Switch>
   );
@@ -67,7 +67,7 @@ function Router() {
 
 function App() {
   // Initialize performance monitoring
-  React.useEffect(() => {
+  useEffect(() => {
     // Start performance monitoring
     console.log('[App] Performance monitoring initialized');
     

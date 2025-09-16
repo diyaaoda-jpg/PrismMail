@@ -1,16 +1,16 @@
-import * as React from 'react';
+import { Suspense, memo, lazy, ComponentType } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { performanceMonitor } from '@/lib/performanceMonitor';
 
 interface LazyRouteWrapperProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
-  errorFallback?: React.ComponentType<{ error: Error; resetErrorBoundary: () => void }>;
+  errorFallback?: ComponentType<{ error: Error; resetErrorBoundary: () => void }>;
   name?: string;
 }
 
 // Default loading skeleton for routes
-const DefaultRouteSkeleton = React.memo(() => (
+const DefaultRouteSkeleton = memo(() => (
   <div className="h-screen flex items-center justify-center bg-background">
     <div className="text-center space-y-4">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
@@ -21,7 +21,7 @@ const DefaultRouteSkeleton = React.memo(() => (
 ));
 
 // Default error fallback for routes
-const DefaultErrorFallback = React.memo(({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
+const DefaultErrorFallback = memo(({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
   <div className="h-screen flex items-center justify-center bg-background p-4">
     <div className="text-center space-y-4 max-w-md">
       <div className="text-destructive text-2xl">⚠️</div>
@@ -39,8 +39,8 @@ const DefaultErrorFallback = React.memo(({ error, resetErrorBoundary }: { error:
   </div>
 ));
 
-// Wrapper component for React.lazy-loaded routes with performance monitoring
-export const LazyRouteWrapper = React.memo(function LazyRouteWrapper({
+// Wrapper component for lazy-loaded routes with performance monitoring
+export const LazyRouteWrapper = memo(function LazyRouteWrapper({
   children,
   fallback,
   errorFallback,
@@ -61,19 +61,19 @@ export const LazyRouteWrapper = React.memo(function LazyRouteWrapper({
         }
       }}
     >
-      <React.Suspense fallback={fallback || <DefaultRouteSkeleton />}>
+      <Suspense fallback={fallback || <DefaultRouteSkeleton />}>
         {children}
-      </React.Suspense>
+      </Suspense>
     </ErrorBoundary>
   );
 });
 
-// Helper function to create React.lazy route components with performance monitoring
-export function createLazyRoute<T extends React.ComponentType<any>>(
+// Helper function to create lazy route components with performance monitoring
+export function createLazyRoute<T extends ComponentType<any>>(
   importFn: () => Promise<{ default: T }>,
   name: string
-): React.ComponentType<React.ComponentProps<T>> {
-  const LazyComponent = React.lazy(async () => {
+): ComponentType<React.ComponentProps<T>> {
+  const LazyComponent = lazy(async () => {
     const startTime = performance.now();
     
     try {
@@ -128,7 +128,7 @@ export function createLazyRoute<T extends React.ComponentType<any>>(
   return LazyComponent;
 }
 
-// Pre-built React.lazy route components for common patterns
+// Pre-built lazy route components for common patterns
 export const LazyHomeRoute = createLazyRoute(
   () => import('@/pages/Home'),
   'Home'
@@ -139,13 +139,13 @@ export const LazyLandingRoute = createLazyRoute(
   'Landing'
 );
 
-// HOC for React.lazy loading any component with performance monitoring
-export function withLazyLoading<T extends React.ComponentType<any>>(
+// HOC for lazy loading any component with performance monitoring
+export function withLazyLoading<T extends ComponentType<any>>(
   importFn: () => Promise<{ default: T }>,
   name: string,
   options: {
     fallback?: React.ReactNode;
-    errorFallback?: React.ComponentType<{ error: Error; resetErrorBoundary: () => void }>;
+    errorFallback?: ComponentType<{ error: Error; resetErrorBoundary: () => void }>;
   } = {}
 ) {
   const LazyComponent = createLazyRoute(importFn, name);

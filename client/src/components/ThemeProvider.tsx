@@ -1,4 +1,4 @@
-import * as React from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 type ThemeMode = "light" | "dark" | "system";
 type ThemePalette = "default" | "ocean" | "forest" | "amber" | "rose" | "grape";
@@ -34,7 +34,7 @@ const initialState: ThemeProviderState = {
   setTheme: () => null,
 };
 
-const ThemeProviderContext = React.createContext<ThemeProviderState>(initialState);
+const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 
 export function ThemeProvider({
   children,
@@ -44,18 +44,18 @@ export function ThemeProvider({
   paletteStorageKey = "prism-ui-palette",
   ...props
 }: ThemeProviderProps) {
-  const [mode, setModeState] = React.useState<ThemeMode>(
+  const [mode, setModeState] = useState<ThemeMode>(
     () => (localStorage.getItem(modeStorageKey) as ThemeMode) || defaultMode
   );
   
-  const [palette, setPaletteState] = React.useState<ThemePalette>(
+  const [palette, setPaletteState] = useState<ThemePalette>(
     () => (localStorage.getItem(paletteStorageKey) as ThemePalette) || defaultPalette
   );
 
   // Calculate effective mode (resolve "system" preference)
-  const [effectiveMode, setEffectiveMode] = React.useState<"light" | "dark">("light");
+  const [effectiveMode, setEffectiveMode] = useState<"light" | "dark">("light");
 
-  React.useEffect(() => {
+  useEffect(() => {
     const updateEffectiveMode = () => {
       if (mode === "system") {
         const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -79,7 +79,7 @@ export function ThemeProvider({
     }
   }, [mode]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const root = window.document.documentElement;
 
     // Remove all theme classes
@@ -125,7 +125,7 @@ export function ThemeProvider({
 }
 
 export const useTheme = () => {
-  const context = React.useContext(ThemeProviderContext);
+  const context = useContext(ThemeProviderContext);
 
   if (context === undefined)
     throw new Error("useTheme must be used within a ThemeProvider");

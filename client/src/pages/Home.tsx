@@ -1,8 +1,7 @@
 import { useAuth } from "@/hooks/useAuth";
 import { PrismMail } from "@/components/PrismMail";
 import { useToast } from "@/hooks/use-toast";
-import { Button } from "@/components/ui/button";
-import * as React from "react";
+import { useEffect } from "react";
 import type { User } from "@shared/schema";
 
 export default function Home() {
@@ -10,7 +9,7 @@ export default function Home() {
   const { toast } = useToast();
 
   // Handle unauthorized access
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       toast({
         title: "Unauthorized",
@@ -37,7 +36,7 @@ export default function Home() {
   }
 
   if (!isAuthenticated || !user) {
-    return null; // Will redirect via React.useEffect
+    return null; // Will redirect via useEffect
   }
 
   const handleLogout = () => {

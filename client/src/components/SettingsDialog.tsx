@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -181,9 +181,9 @@ interface SignaturesTabProps {
 }
 
 function SignaturesTab({ user }: SignaturesTabProps) {
-  const [showEditor, setShowEditor] = React.useState(false);
-  const [editingSignature, setEditingSignature] = React.useState<Signature | null>(null);
-  const [deleteSignatureId, setDeleteSignatureId] = React.useState<string | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editingSignature, setEditingSignature] = useState<Signature | null>(null);
+  const [deleteSignatureId, setDeleteSignatureId] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -502,19 +502,19 @@ function SignaturesTab({ user }: SignaturesTabProps) {
 export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = React.useState("account");
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [showAddAccount, setShowAddAccount] = React.useState(false);
-  const [editAccountId, setEditAccountId] = React.useState<string | null>(null);
-  const [deleteAccountId, setDeleteAccountId] = React.useState<string | null>(null);
-  const [syncingAccounts, setSyncingAccounts] = React.useState<Set<string>>(new Set());
-  const [isTestingConnection, setIsTestingConnection] = React.useState(false);
-  const [connectionTestResult, setConnectionTestResult] = React.useState<{
+  const [activeTab, setActiveTab] = useState("account");
+  const [isSaving, setIsSaving] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [editAccountId, setEditAccountId] = useState<string | null>(null);
+  const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
+  const [syncingAccounts, setSyncingAccounts] = useState<Set<string>>(new Set());
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
     success: boolean;
     message: string;
     details?: any;
   } | null>(null);
-  const [showConnectionHelp, setShowConnectionHelp] = React.useState(false);
+  const [showConnectionHelp, setShowConnectionHelp] = useState(false);
 
   // Manual sync mutation
   const manualSyncMutation = useMutation({
@@ -623,7 +623,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   });
   
   // Consolidated protocol configuration - single source of truth
-  React.useEffect(() => {
+  useEffect(() => {
     if (watchedProtocol === 'IMAP') {
       // IMAP defaults: SSL port 993, SSL enabled
       accountForm.setValue('port', 993);
@@ -649,7 +649,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   }, [watchedProtocol, watchedHost, watchedEnableCustomSmtp, accountForm]);
 
   // Account settings
-  const [accountData, setAccountData] = React.useState({
+  const [accountData, setAccountData] = useState({
     firstName: user.firstName || "",
     lastName: user.lastName || "",
     email: user.email || "",
@@ -657,7 +657,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   });
 
   // Email preferences for form handling
-  const [emailPrefs, setEmailPrefs] = React.useState({
+  const [emailPrefs, setEmailPrefs] = useState({
     autoMarkRead: true,
     showPreview: true,
     compactView: false,
@@ -668,7 +668,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   });
 
   // Update email preferences when userPrefs changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (userPrefs) {
       setEmailPrefs(prev => ({
         ...prev,
@@ -679,7 +679,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   }, [userPrefs]);
 
   // Notification settings
-  const [notifications, setNotifications] = React.useState({
+  const [notifications, setNotifications] = useState({
     desktopNotifications: true,
     soundNotifications: false,
     emailNotifications: true,
@@ -687,7 +687,7 @@ export function SettingsDialog({ isOpen, onClose, user }: SettingsDialogProps) {
   });
 
   // Appearance settings (non-theme)
-  const [appearanceSettings, setAppearanceSettings] = React.useState({
+  const [appearanceSettings, setAppearanceSettings] = useState({
     fontSize: "medium",
     readingModeBackground: "default"
   });

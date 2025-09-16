@@ -1,4 +1,4 @@
-import * as React from "react";
+import { useState } from "react";
 import { Inbox, Send, Archive, Star, Trash, Settings, Plus, Filter, Search, Zap, Mail, ChevronRight, ChevronDown, FileText, ShieldAlert, FolderOpen, Calendar, Rss, Clock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,6 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { useBreakpoint, useHasTouchInterface } from "@/hooks/use-breakpoint";
 
 interface MailFolder {
   id: string;
@@ -76,31 +75,13 @@ export function MailSidebar({
   accountFolderCounts = {},
   accounts = [],
 }: MailSidebarProps) {
-  // Responsive breakpoint detection
-  const { isMobile, isTablet, isDesktop, isXl, currentBreakpoint } = useBreakpoint();
-  const hasTouchInterface = useHasTouchInterface();
-  
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [allAccountsExpanded, setAllAccountsExpanded] = React.useState(true);
-  const [smartFoldersExpanded, setSmartFoldersExpanded] = React.useState(false);
-  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = React.useState(true);
-  const [individualAccountsExpanded, setIndividualAccountsExpanded] = React.useState<Record<string, boolean>>(
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allAccountsExpanded, setAllAccountsExpanded] = useState(true);
+  const [smartFoldersExpanded, setSmartFoldersExpanded] = useState(false);
+  const [organizationFoldersExpanded, setOrganizationFoldersExpanded] = useState(true);
+  const [individualAccountsExpanded, setIndividualAccountsExpanded] = useState<Record<string, boolean>>(
     accounts.reduce((acc, account) => ({ ...acc, [account.id]: true }), {})
   );
-
-  // Responsive button sizing and spacing
-  const getResponsiveButtonClass = () => {
-    if (hasTouchInterface) {
-      return "h-11 text-base"; // Minimum 44px touch target for mobile/tablet
-    }
-    return "h-9 text-sm"; // Standard desktop size
-  };
-
-  const getResponsiveSpacing = () => {
-    if (isTablet) return "p-4"; // More padding for tablet
-    if (isMobile) return "p-3"; // Compact mobile spacing
-    return "p-3"; // Standard desktop spacing
-  };
 
   const handleFolderClick = (folderId: string, accountId?: string) => {
     onFolderSelect?.(folderId, accountId);

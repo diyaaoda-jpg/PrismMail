@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 
 interface LazyImageProps {
@@ -18,7 +18,7 @@ interface LazyImageProps {
   blurDataURL?: string;
 }
 
-export const LazyImage = React.memo(function LazyImage({
+export const LazyImage = memo(function LazyImage({
   src,
   alt,
   className,
@@ -34,14 +34,14 @@ export const LazyImage = React.memo(function LazyImage({
   aspectRatio,
   blurDataURL
 }: LazyImageProps) {
-  const [isLoaded, setIsLoaded] = React.useState(false);
-  const [hasError, setHasError] = React.useState(false);
-  const [isInView, setIsInView] = React.useState(priority); // Load immediately if priority
-  const imgRef = React.useRef<HTMLImageElement>(null);
-  const [currentSrc, setCurrentSrc] = React.useState<string>('');
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [isInView, setIsInView] = useState(priority); // Load immediately if priority
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [currentSrc, setCurrentSrc] = useState<string>('');
 
   // Intersection Observer for lazy loading
-  React.useEffect(() => {
+  useEffect(() => {
     if (priority || isInView) return;
 
     const observer = new IntersectionObserver(
@@ -67,7 +67,7 @@ export const LazyImage = React.memo(function LazyImage({
   }, [priority, isInView]);
 
   // Determine best image source and quality
-  const getBestImageSrc = React.useCallback(() => {
+  const getBestImageSrc = useCallback(() => {
     if (!isInView && !priority) return placeholder || blurDataURL || '';
 
     // Check for WebP support
@@ -104,17 +104,17 @@ export const LazyImage = React.memo(function LazyImage({
   }, [src, webpSrc, quality, isInView, priority, placeholder, blurDataURL]);
 
   // Update current source when conditions change
-  React.useEffect(() => {
+  useEffect(() => {
     setCurrentSrc(getBestImageSrc());
   }, [getBestImageSrc]);
 
-  const handleLoad = React.useCallback(() => {
+  const handleLoad = useCallback(() => {
     setIsLoaded(true);
     setHasError(false);
     onLoad?.();
   }, [onLoad]);
 
-  const handleError = React.useCallback(() => {
+  const handleError = useCallback(() => {
     setHasError(true);
     if (fallback && currentSrc !== fallback) {
       setCurrentSrc(fallback);
@@ -260,9 +260,9 @@ export function preloadImage(src: string, webpSrc?: string): Promise<void> {
 
 // Hook for managing multiple image preloading
 export function useImagePreloader() {
-  const [loadingImages, setLoadingImages] = React.useState<Set<string>>(new Set());
+  const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
   
-  const preloadImages = React.useCallback(async (images: Array<{ src: string; webpSrc?: string; priority?: boolean }>) => {
+  const preloadImages = useCallback(async (images: Array<{ src: string; webpSrc?: string; priority?: boolean }>) => {
     // Sort by priority
     const sortedImages = images.sort((a, b) => {
       if (a.priority && !b.priority) return -1;

@@ -1,4 +1,4 @@
-import * as React from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -85,8 +85,8 @@ interface NotificationSettingsProps {
 }
 
 export function NotificationSettings({ className }: NotificationSettingsProps) {
-  const [activeTab, setActiveTab] = React.useState('overview');
-  const [selectedAccountId, setSelectedAccountId] = React.useState<string>('');
+  const [activeTab, setActiveTab] = useState('overview');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   
   const {
     permission,
@@ -147,7 +147,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
   });
 
   // Update forms when preferences load
-  React.useEffect(() => {
+  useEffect(() => {
     if (preferences?.preferences?.global) {
       const global = preferences.preferences.global;
       globalForm.reset({
@@ -170,7 +170,7 @@ export function NotificationSettings({ className }: NotificationSettingsProps) {
   }, [preferences, globalForm]);
 
   // Update account form when account is selected
-  React.useEffect(() => {
+  useEffect(() => {
     if (selectedAccountId && preferences?.preferences?.accounts) {
       const accountPref = preferences.preferences.accounts.find(
         acc => acc.accountId === selectedAccountId
