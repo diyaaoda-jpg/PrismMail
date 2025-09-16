@@ -6,6 +6,17 @@ PrismMail is a sophisticated dual-pane web email client designed for priority-ba
 
 ## Recent Updates (September 2025)
 
+**✅ Authentication 404 Routing Issue Completely Resolved (September 16, 2025)**
+- **Problem**: Users experiencing "404 Page Not Found" after logout/login cycle, preventing access to application
+- **Root Cause**: Client-side router intercepting OIDC authentication callback URLs (e.g., `/auth/callback`) before server could process them
+- **Solution**: Implemented dynamic OIDC strategy registration and fixed client router to exclude authentication routes
+- **Technical Details**:
+  - Added dynamic Passport strategy registration with environment-based configuration
+  - Modified client router to prevent interception of `/auth/*` routes
+  - Improved error handling for OIDC callback processing
+  - Enhanced session management with proper redirect handling
+- **Result**: Authentication flow now works seamlessly with proper login/logout cycles
+
 **✅ Send Button Visibility Issue Completely Resolved (September 16, 2025)**
 - **Problem**: Send button was missing from Compose/Reply dialogs - users only saw "Save" option instead
 - **Root Cause**: JSX corruption around sendEmailMutation.onError and missing accountId handling caused Send button to be hidden
