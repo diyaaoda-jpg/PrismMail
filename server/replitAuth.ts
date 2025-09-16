@@ -66,14 +66,28 @@ async function upsertUser(
   });
 }
 
-export async function setupAuth(app: Express) {
-  app.set("trust proxy", 1);
-  app.use(getSession());
-  app.use(passport.initialize());
-  app.use(passport.session());
-
+// Helper function to dynamically register OIDC strategy
+async function ensureStrategyRegistered(req: any): Promise<string> {
   const config = await getOidcConfig();
-
+  
+  // Build dynamic callback URL using actual request details
+  const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+  const host = req.get('host') || req.hostname;
+  const callbackURL = `${protocol}://${host}/api/callback`;
+  
+  const strategyName = `replitauth:${host}`;
+  
+  console.log('[AUTH] Dynamic strategy check for:', host);
+  console.log('[AUTH] Callback URL:', callbackURL);
+  
+  // Check if strategy already exists
+  if (passport._strategy(strategyName)) {
+    console.log('[AUTH] Strategy already registered:', strategyName);
+    return strategyName;
+  }
+  
+  console.log('[AUTH] Creating new dynamic strategy:', strategyName);
+  
   const verify: VerifyFunction = async (
     tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers,
     verified: passport.AuthenticateCallback
@@ -83,51 +97,216 @@ export async function setupAuth(app: Express) {
     await upsertUser(tokens.claims());
     verified(null, user);
   };
+  
+  const strategy = new Strategy(
+    {
+      name: strategyName,
+      config,
+      scope: "openid email profile offline_access",
+      callbackURL,
+    },
+    verify,
+  );
+  
+  passport.use(strategy);
+  console.log(`[AUTH] ✅ Registered dynamic strategy: ${strategyName}`);
+  console.log(`[AUTH] ✅ Callback URL: ${callbackURL}`);
+  
+  return strategyName;
+}
 
-  // Get all domains including localhost for development
-  const domains = process.env.REPLIT_DOMAINS!.split(",");
-  
-  // Add localhost for development if not already present
-  if (!domains.includes('localhost')) {
-    domains.push('localhost');
-  }
-  
-  for (const domain of domains) {
-    // Use http for localhost, https for others
-    const protocol = domain === 'localhost' ? 'http' : 'https';
-    const port = domain === 'localhost' ? ':5000' : '';
-    
-    const strategy = new Strategy(
-      {
-        name: `replitauth:${domain}`,
-        config,
-        scope: "openid email profile offline_access",
-        callbackURL: `${protocol}://${domain}${port}/api/callback`,
-      },
-      verify,
-    );
-    passport.use(strategy);
-    console.log(`[AUTH] Registered strategy for ${domain} with callback ${protocol}://${domain}${port}/api/callback`);
-  }
+export async function setupAuth(app: Express) {
+  app.set("trust proxy", 1);
+  app.use(getSession());
+  app.use(passport.initialize());
+  app.use(passport.session());
 
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
-    console.log('[AUTH] Login initiated for hostname:', req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
+  app.get("/api/login", async (req, res, next) => {
+    console.log('[AUTH] ===== LOGIN REQUEST DETAILS =====');
+    console.log('[AUTH] Hostname:', req.hostname);
+    console.log('[AUTH] Host header:', req.get('host'));
+    console.log('[AUTH] Protocol:', req.protocol);
+    console.log('[AUTH] X-Forwarded-Proto:', req.get('x-forwarded-proto'));
+    console.log('[AUTH] Original URL:', req.originalUrl);
+    
+    try {
+      // Dynamically ensure strategy is registered for this request
+      const strategyName = await ensureStrategyRegistered(req);
+      
+      console.log('[AUTH] Using strategy:', strategyName);
+      console.log('[AUTH] Available strategies:', Object.keys(passport._strategies || {}));
+      
+      passport.authenticate(strategyName, {
+        prompt: "login consent",
+        scope: ["openid", "email", "profile", "offline_access"],
+      })(req, res, next);
+    } catch (error) {
+      console.error('[AUTH] Error during dynamic strategy registration:', error);
+      return res.status(500).json({ 
+        error: 'Failed to initialize authentication strategy',
+        details: error.message 
+      });
+    }
   });
 
-  app.get("/api/callback", (req, res, next) => {
-    console.log('[AUTH] OIDC callback received for hostname:', req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      successReturnToOrRedirect: "/",
-      failureRedirect: "/api/login",
-    })(req, res, next);
+  // Add a debug route to test callback endpoint accessibility
+  app.get("/api/callback/test", (req, res) => {
+    console.log('[AUTH] Callback test endpoint hit successfully');
+    res.json({ 
+      message: 'Callback endpoint is reachable',
+      hostname: req.hostname,
+      timestamp: new Date().toISOString(),
+      headers: req.headers
+    });
   });
+  
+  // Add comprehensive OIDC callback debugging route to capture all callback attempts
+  app.all("/api/callback/debug", (req, res) => {
+    console.log('[OIDC-DEBUG] ===== COMPREHENSIVE CALLBACK DEBUG =====');
+    console.log('[OIDC-DEBUG] Method:', req.method);
+    console.log('[OIDC-DEBUG] Original URL:', req.originalUrl);
+    console.log('[OIDC-DEBUG] Hostname:', req.hostname);
+    console.log('[OIDC-DEBUG] Protocol:', req.protocol);
+    console.log('[OIDC-DEBUG] Secure:', req.secure);
+    console.log('[OIDC-DEBUG] IP:', req.ip);
+    console.log('[OIDC-DEBUG] Full URL:', `${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    console.log('[OIDC-DEBUG] Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('[OIDC-DEBUG] Query Parameters:', JSON.stringify(req.query, null, 2));
+    console.log('[OIDC-DEBUG] Body:', JSON.stringify(req.body, null, 2));
+    console.log('[OIDC-DEBUG] Cookies:', JSON.stringify(req.cookies, null, 2));
+    console.log('[OIDC-DEBUG] Session ID:', req.sessionID);
+    console.log('[OIDC-DEBUG] Session Data:', JSON.stringify(req.session, null, 2));
+    console.log('[OIDC-DEBUG] User:', JSON.stringify(req.user, null, 2));
+    console.log('[OIDC-DEBUG] Authenticated:', req.isAuthenticated ? req.isAuthenticated() : 'N/A');
+    console.log('[OIDC-DEBUG] Available Strategies:', Object.keys(passport._strategies || {}));
+    console.log('[OIDC-DEBUG] Timestamp:', new Date().toISOString());
+    console.log('[OIDC-DEBUG] ============================================');
+    
+    res.json({
+      success: true,
+      message: 'OIDC callback debug information captured',
+      data: {
+        method: req.method,
+        hostname: req.hostname,
+        originalUrl: req.originalUrl,
+        query: req.query,
+        body: req.body,
+        headers: req.headers,
+        sessionId: req.sessionID,
+        isAuthenticated: req.isAuthenticated ? req.isAuthenticated() : false,
+        timestamp: new Date().toISOString()
+      }
+    });
+  });
+  
+  app.get("/api/callback", async (req, res, next) => {
+    console.log('[AUTH] ===== CALLBACK REQUEST DETAILS =====');
+    console.log('[AUTH] Hostname:', req.hostname);
+    console.log('[AUTH] Host header:', req.get('host'));
+    console.log('[AUTH] Protocol:', req.protocol);
+    console.log('[AUTH] X-Forwarded-Proto:', req.get('x-forwarded-proto'));
+    console.log('[AUTH] Original URL:', req.originalUrl);
+    console.log('[AUTH] Query params:', req.query);
+    console.log('[AUTH] Method:', req.method);
+    
+    try {
+      // Dynamically ensure strategy is registered for this request
+      const strategyName = await ensureStrategyRegistered(req);
+      
+      console.log('[AUTH] Using strategy for callback:', strategyName);
+      console.log('[AUTH] Available strategies:', Object.keys(passport._strategies || {}));
+      console.log('[AUTH] Proceeding with callback authentication...');
+      
+      passport.authenticate(strategyName, {
+        successReturnToOrRedirect: "/",
+        failureRedirect: "/api/login",
+        failureFlash: false
+      })(req, res, next);
+    } catch (error) {
+      console.error('[AUTH] Error during callback strategy registration:', error);
+      return res.status(500).json({ 
+        error: 'Failed to initialize authentication callback strategy',
+        details: error.message,
+        query: req.query
+      });
+    }
+  });
+
+  // Development authentication bypass - only enable in development
+  if (process.env.DEV_AUTH_BYPASS === 'true' && app.get('env') === 'development') {
+    console.log('[AUTH] Development authentication bypass is ENABLED');
+    
+    app.post("/api/dev/login", async (req, res) => {
+      console.log('[AUTH] Development login attempt:', req.body);
+      
+      const { userId, email, firstName, lastName } = req.body;
+      
+      if (!userId || !email) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: userId and email are required' 
+        });
+      }
+      
+      try {
+        // Create/update user in our storage
+        await storage.upsertUser({
+          id: userId,
+          email: email,
+          firstName: firstName || 'Dev',
+          lastName: lastName || 'User',
+          profileImageUrl: null,
+        });
+        
+        // Create a mock user session object
+        const mockUser = {
+          claims: {
+            sub: userId,
+            email: email,
+            first_name: firstName || 'Dev',
+            last_name: lastName || 'User',
+            exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours from now
+          },
+          access_token: 'dev-access-token',
+          refresh_token: 'dev-refresh-token',
+          expires_at: Math.floor(Date.now() / 1000) + (24 * 60 * 60)
+        };
+        
+        // Use passport's req.login to establish session
+        req.login(mockUser, (err) => {
+          if (err) {
+            console.error('[AUTH] Development login failed:', err);
+            return res.status(500).json({ error: 'Failed to establish session' });
+          }
+          
+          console.log('[AUTH] Development login successful for:', email);
+          res.json({ 
+            success: true, 
+            message: 'Development authentication successful',
+            user: { id: userId, email: email }
+          });
+        });
+        
+      } catch (error) {
+        console.error('[AUTH] Development login error:', error);
+        res.status(500).json({ 
+          error: 'Internal server error during development login' 
+        });
+      }
+    });
+    
+    // Development logout route
+    app.post("/api/dev/logout", (req, res) => {
+      req.logout(() => {
+        console.log('[AUTH] Development logout successful');
+        res.json({ success: true, message: 'Development logout successful' });
+      });
+    });
+  } else {
+    console.log('[AUTH] Development authentication bypass is DISABLED');
+  }
 
   app.get("/api/logout", (req, res) => {
     req.logout(() => {

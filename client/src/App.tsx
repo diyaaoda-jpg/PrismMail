@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -27,6 +27,7 @@ const LazyNotFound = createLazyRoute(
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
+  const [location] = useLocation();
 
   // Preload routes based on authentication state for better UX
   React.useEffect(() => {
@@ -53,9 +54,12 @@ function Router() {
         )}
       </Route>
       <Route>
-        <LazyRouteWrapper name="NotFound">
-          <LazyNotFound />
-        </LazyRouteWrapper>
+        {/* Only show NotFound for non-API routes to prevent intercepting server routes */}
+        {location.startsWith('/api') ? null : (
+          <LazyRouteWrapper name="NotFound">
+            <LazyNotFound />
+          </LazyRouteWrapper>
+        )}
       </Route>
     </Switch>
   );

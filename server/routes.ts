@@ -303,11 +303,34 @@ function validateConnectionData(data: any): { isValid: boolean; errors: string[]
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Add explicit middleware to ensure API routes take precedence over catch-all routes
-  // This prevents Vite's catch-all from intercepting API requests
+  // Add comprehensive debugging middleware for API routes
   app.use('/api/*', (req, res, next) => {
+    console.log(`[ROUTES] ===== ${req.method} ${req.originalUrl} =====`);
+    console.log(`[ROUTES] Host: ${req.hostname}`);
+    console.log(`[ROUTES] IP: ${req.ip}`);
+    console.log(`[ROUTES] User-Agent: ${req.get('User-Agent')}`);
+    
+    if (Object.keys(req.query).length > 0) {
+      console.log(`[ROUTES] Query:`, req.query);
+    }
+    if (req.body && Object.keys(req.body).length > 0) {
+      console.log(`[ROUTES] Body:`, req.body);
+    }
+    
     // Mark that this is an API route to ensure it's handled by backend
     req.isApiRoute = true;
+    next();
+  });
+  
+  // Add specific debug middleware for callback routes
+  app.use('/api/callback*', (req, res, next) => {
+    console.log(`[CALLBACK-DEBUG] ===== CALLBACK ROUTE HIT =====`);
+    console.log(`[CALLBACK-DEBUG] ${req.method} ${req.originalUrl}`);
+    console.log(`[CALLBACK-DEBUG] Hostname: ${req.hostname}`);
+    console.log(`[CALLBACK-DEBUG] Full URL: ${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    console.log(`[CALLBACK-DEBUG] Referer: ${req.get('Referer')}`);
+    console.log(`[CALLBACK-DEBUG] Query params:`, req.query);
+    console.log(`[CALLBACK-DEBUG] Timestamp: ${new Date().toISOString()}`);
     next();
   });
 
