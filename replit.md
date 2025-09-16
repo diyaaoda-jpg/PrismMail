@@ -6,11 +6,16 @@ PrismMail is a sophisticated dual-pane web email client designed for priority-ba
 
 ## Recent Updates (September 2025)
 
-**✅ Send Button Visibility Issue Resolved (September 16, 2025)**
-- **Problem**: Send button was missing/hidden in Compose/Reply dialogs due to layout height constraints
-- **Root Cause**: Dialog content overflow was pushing footer below visible area in `max-h-[90vh]` constraint
-- **Solution**: Fixed layout distribution with `min-h-0` on scrollable content and `flex-shrink-0` on footer
-- **Result**: Send button now always visible at bottom of compose dialogs with proper space distribution
+**✅ Send Button Visibility Issue Completely Resolved (September 16, 2025)**
+- **Problem**: Send button was missing from Compose/Reply dialogs - users only saw "Save" option instead
+- **Root Cause**: JSX corruption around sendEmailMutation.onError and missing accountId handling caused Send button to be hidden
+- **Solution**: Fixed sendEmailMutation to use proper accountId from emailData, ensured Send button always renders with disabled state instead of hiding
+- **Technical Details**: 
+  - Send button now always visible with `data-testid="button-send"`
+  - Uses disabled state when form invalid (missing to/subject/currentAccount) instead of hiding
+  - Fixed account ID handling to prevent sending errors
+  - Consistent behavior between desktop Dialog and mobile Sheet variants
+- **Result**: Send button now always visible on both desktop ("Cancel"+"Send") and mobile ("Save Draft"+"Cancel"+"Send")
 
 **✅ Attachment Upload Functionality Restored (September 16, 2025)**  
 - **Problem**: File uploads failing with "No files provided" error due to FormData corruption
