@@ -85,7 +85,7 @@ app.use((req, res, next) => {
       console.log(`WebSocket authentication success: ${user.email} (${userId})`);
       return {
         userId: user.id,
-        userEmail: user.email
+        userEmail: user.email || undefined
       };
     } catch (error) {
       console.error('WebSocket authentication error:', error);
@@ -196,8 +196,9 @@ app.use((req, res, next) => {
       }
 
       // Get user's notification preferences
-      const userPrefs = await storage.getUserNotificationPreferences(account.userId);
-      const accountPrefs = await storage.getAccountNotificationPreferences(account.userId, data.accountId);
+      const userPrefs = await storage.getNotificationPreferences(account.userId);
+      const accountPrefsArray = await storage.getAccountNotificationPreferences(account.userId, data.accountId);
+      const accountPrefs = accountPrefsArray.length > 0 ? accountPrefsArray[0] : null;
       
       // Check if push notifications are enabled for this user and account
       if (!userPrefs?.enableNotifications || !userPrefs?.enableNewEmailNotifications) {
@@ -229,8 +230,8 @@ app.use((req, res, next) => {
           isVip: false // TODO: Add VIP detection logic
         },
         {
-          showSender: userPrefs?.showSenderInNotifications ?? true,
-          showSubject: userPrefs?.showSubjectInNotifications ?? true,
+          showSender: true, // Default to showing sender since the property doesn't exist yet
+          showSubject: true, // Default to showing subject since the property doesn't exist yet
           showPreview: false // Never show email body preview for privacy
         }
       );

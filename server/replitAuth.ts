@@ -233,7 +233,7 @@ export async function setupAuth(app: Express) {
       const strategyName = await ensureStrategyRegistered(req);
       
       console.log('[AUTH] Using strategy for callback:', strategyName);
-      console.log('[AUTH] Available strategies:', Object.keys(passport._strategies || {}));
+      console.log('[AUTH] Available strategies:', Object.keys((passport as any)._strategies || {}));
       console.log('[AUTH] Proceeding with callback authentication...');
       
       passport.authenticate(strategyName, {

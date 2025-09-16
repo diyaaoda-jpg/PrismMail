@@ -52,6 +52,7 @@ export interface IStorage {
   upsertUser(user: UpsertUser): Promise<User>;
   // Account connections
   getUserAccountConnections(userId: string): Promise<AccountConnection[]>;
+  getAccountConnection(id: string): Promise<AccountConnection | undefined>;
   getAllActiveEwsAccounts(): Promise<AccountConnection[]>;
   getAllActiveImapAccounts(): Promise<AccountConnection[]>;
   createAccountConnection(connection: InsertAccountConnection): Promise<AccountConnection>;
@@ -346,6 +347,11 @@ export class DatabaseStorage implements IStorage {
       ...result,
       settingsJson: JSON.stringify(decryptAccountSettings(result.settingsJson))
     };
+  }
+
+  async getAccountConnection(id: string): Promise<AccountConnection | undefined> {
+    const [account] = await db.select().from(accountConnections).where(eq(accountConnections.id, id));
+    return account;
   }
 
   async getAccountConnectionEncrypted(id: string): Promise<{ settingsJson: string } | undefined> {
@@ -1166,7 +1172,7 @@ export class DatabaseStorage implements IStorage {
     let whereCondition = eq(accountNotificationPreferences.userId, userId);
     
     if (accountId) {
-      whereCondition = and(whereCondition, eq(accountNotificationPreferences.accountId, accountId));
+      whereCondition = and(whereCondition, eq(accountNotificationPreferences.accountId, accountId)) || eq(accountNotificationPreferences.userId, userId);
     }
     
     return await db.select().from(accountNotificationPreferences)
