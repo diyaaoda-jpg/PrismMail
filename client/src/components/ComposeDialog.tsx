@@ -554,11 +554,13 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
   // TanStack Query mutation for sending emails
   const sendEmailMutation = useMutation({
     mutationFn: async (emailData: SendEmailRequest) => {
-      if (!accountId) {
+      const sendingAccountId = emailData.accountId;
+      
+      if (!sendingAccountId) {
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
+      const response = await apiRequest('POST', `/api/accounts/${sendingAccountId}/send`, emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -574,9 +576,10 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
       });
       
       // Invalidate email queries to refresh the UI with the sent email
-      if (accountId) {
-        queryClient.invalidateQueries({ queryKey: ['/api/mail', accountId, 'sent'] });
-        queryClient.invalidateQueries({ queryKey: ['/api/mail', accountId] });
+      const sentAccountId = accountId || currentAccount?.id;
+      if (sentAccountId) {
+        queryClient.invalidateQueries({ queryKey: ['/api/mail', sentAccountId, 'sent'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/mail', sentAccountId] });
       }
       
       onClose();
@@ -1143,10 +1146,10 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
               
               <Button 
                 onClick={mobileCompose.handleMobileSend}
-                disabled={sendEmailMutation.isPending}
+                disabled={sendEmailMutation.isPending || !formData.to || !formData.subject || !currentAccount}
                 className={`${mobileCompose.isMobile ? 'flex-1 font-semibold' : ''}`}
                 style={mobileCompose.isMobile ? mobileCompose.getMobileStyles().sendButton : undefined}
-                data-testid="button-send-compose"
+                data-testid="button-send"
               >
                 {sendEmailMutation.isPending ? (
                   <div className="flex items-center space-x-2">
