@@ -49,6 +49,9 @@ export const mailIndex = pgTable("mail_index", {
   subject: text("subject"),
   from: text("from"),
   to: text("to"),
+  cc: text("cc"), // Carbon copy recipients
+  bcc: text("bcc"), // Blind carbon copy recipients
+  replyTo: text("reply_to"), // Reply-To header for directing replies
   date: timestamp("date"),
   size: integer("size"),
   hasAttachments: boolean("has_attachments").default(false),
@@ -126,6 +129,19 @@ export const accountFolders = pgTable("account_folders", {
   unique("unique_folder_per_account").on(table.accountId, table.folderId),
 ]);
 
+// Email attachments
+export const attachments = pgTable("attachments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  emailId: varchar("email_id").notNull().references(() => mailIndex.id, { onDelete: "cascade" }),
+  fileName: varchar("file_name").notNull(), // Original filename as provided by user
+  fileSize: integer("file_size").notNull(), // Size in bytes
+  mimeType: varchar("mime_type").notNull(), // MIME type (e.g., image/jpeg, application/pdf)
+  filePath: varchar("file_path").notNull(), // Storage path/identifier for the file
+  isInline: boolean("is_inline").default(false), // Whether it's an inline attachment (embedded in email body)
+  contentId: varchar("content_id"), // Content-ID for inline attachments (optional)
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Insert and select schemas
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountConnectionSchema = createInsertSchema(accountConnections).omit({ id: true, createdAt: true, updatedAt: true });
@@ -134,6 +150,7 @@ export const insertPriorityRuleSchema = createInsertSchema(priorityRules).omit({
 export const insertVipContactSchema = createInsertSchema(vipContacts).omit({ id: true, createdAt: true });
 export const insertUserPrefsSchema = createInsertSchema(userPrefs).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertAccountFolderSchema = createInsertSchema(accountFolders).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertAttachmentSchema = createInsertSchema(attachments).omit({ id: true, createdAt: true });
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -151,6 +168,8 @@ export type UserPrefs = typeof userPrefs.$inferSelect;
 export type InsertUserPrefs = z.infer<typeof insertUserPrefsSchema>;
 export type AccountFolder = typeof accountFolders.$inferSelect;
 export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
+export type Attachment = typeof attachments.$inferSelect;
+export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
 
 // Enhanced validation schemas for account settings
 

@@ -67,7 +67,6 @@ const ErrorCodes = {
   // Authentication/Authorization errors
   AUTHENTICATION_FAILED: 'AUTHENTICATION_FAILED',
   AUTHORIZATION_FAILED: 'AUTHORIZATION_FAILED',
-  FORBIDDEN_ERROR: 'FORBIDDEN_ERROR',
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
   
   // Connection errors
@@ -990,7 +989,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const account = userAccounts.find(acc => acc.id === accountId);
         if (!account) {
           throw new ApiError(
-            ErrorCodes.FORBIDDEN_ERROR,
+            ErrorCodes.AUTHORIZATION_FAILED,
             'Account not found or not owned by user',
             403,
             `Account ${accountId} not found or not accessible`
