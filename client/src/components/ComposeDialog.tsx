@@ -129,12 +129,12 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
 
   // TanStack Query mutation for sending emails
   const sendEmailMutation = useMutation({
-    mutationFn: async (emailData: SendEmailRequest) => {
-      if (!accountId) {
+    mutationFn: async (emailData: SendEmailRequest & { sendingAccountId: string }) => {
+      if (!emailData.sendingAccountId) {
         throw new Error('No account selected for sending email');
       }
       
-      const response = await apiRequest('POST', `/api/accounts/${accountId}/send`, emailData);
+      const response = await apiRequest('POST', `/api/accounts/${emailData.sendingAccountId}/send`, emailData);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -212,8 +212,9 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     }
 
     // Prepare email data for API
-    const emailData: SendEmailRequest = {
+    const emailData: SendEmailRequest & { sendingAccountId: string } = {
       accountId: sendingAccountId,
+      sendingAccountId: sendingAccountId,
       to: formData.to,
       cc: formData.cc || undefined,
       bcc: formData.bcc || undefined,
