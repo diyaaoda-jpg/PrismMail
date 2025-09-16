@@ -93,9 +93,13 @@ async function ensureStrategyRegistered(req: any): Promise<string> {
   console.log('[AUTH] Callback URL:', callbackURL);
   
   // Check if strategy already exists
-  if (passport._strategy(strategyName)) {
+  try {
+    // Try to get the strategy - if it exists, it won't throw
+    (passport as any)._strategy(strategyName);
     console.log('[AUTH] Strategy already registered:', strategyName);
     return strategyName;
+  } catch (error) {
+    // Strategy doesn't exist, continue with registration
   }
   
   console.log('[AUTH] Creating new dynamic strategy:', strategyName);
@@ -149,17 +153,17 @@ export async function setupAuth(app: Express) {
       const strategyName = await ensureStrategyRegistered(req);
       
       console.log('[AUTH] Using strategy:', strategyName);
-      console.log('[AUTH] Available strategies:', Object.keys(passport._strategies || {}));
+      console.log('[AUTH] Available strategies:', Object.keys((passport as any)._strategies || {}));
       
       passport.authenticate(strategyName, {
         prompt: "login consent",
         scope: ["openid", "email", "profile", "offline_access"],
       })(req, res, next);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[AUTH] Error during dynamic strategy registration:', error);
       return res.status(500).json({ 
         error: 'Failed to initialize authentication strategy',
-        details: error.message 
+        details: error instanceof Error ? error.message : String(error) 
       });
     }
   });
@@ -193,7 +197,7 @@ export async function setupAuth(app: Express) {
     console.log('[OIDC-DEBUG] Session Data:', JSON.stringify(req.session, null, 2));
     console.log('[OIDC-DEBUG] User:', JSON.stringify(req.user, null, 2));
     console.log('[OIDC-DEBUG] Authenticated:', req.isAuthenticated ? req.isAuthenticated() : 'N/A');
-    console.log('[OIDC-DEBUG] Available Strategies:', Object.keys(passport._strategies || {}));
+    console.log('[OIDC-DEBUG] Available Strategies:', Object.keys((passport as any)._strategies || {}));
     console.log('[OIDC-DEBUG] Timestamp:', new Date().toISOString());
     console.log('[OIDC-DEBUG] ============================================');
     
@@ -237,11 +241,11 @@ export async function setupAuth(app: Express) {
         failureRedirect: "/api/login",
         failureFlash: false
       })(req, res, next);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[AUTH] Error during callback strategy registration:', error);
       return res.status(500).json({ 
         error: 'Failed to initialize authentication callback strategy',
-        details: error.message,
+        details: error instanceof Error ? error.message : String(error),
         query: req.query
       });
     }
@@ -371,8 +375,9 @@ export async function setupAuth(app: Express) {
     console.log('[AUTH] Development authentication bypass is DISABLED');
   }
 
-  app.get("/api/logout", (req, res) => {
-    req.logout(() => {
+  app.get("/api/logout", async (req, res) => {
+    req.logout(async () => {
+      const config = await getOidcConfig();
       res.redirect(
         client.buildEndSessionUrl(config, {
           client_id: process.env.REPL_ID!,
@@ -406,7 +411,7 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
     updateUserSession(user, tokenResponse);
     return next();
-  } catch (error) {
+  } catch (error: unknown) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
