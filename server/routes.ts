@@ -989,7 +989,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const account = userAccounts.find(acc => acc.id === accountId);
         if (!account) {
           throw new ApiError(
-            ErrorCodes.AUTHORIZATION_FAILED,
+            ErrorCodes.FORBIDDEN_ERROR,
             'Account not found or not owned by user',
             403,
             `Account ${accountId} not found or not accessible`
