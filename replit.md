@@ -4,6 +4,20 @@
 
 PrismMail is a sophisticated dual-pane web email client designed for priority-based email management. The application connects to private mailboxes via Exchange Web Services (EWS) or IMAP protocols, featuring an intelligent priority system, immersive Reading Mode, and modern UI components. The system is built as a full-stack TypeScript application with React frontend and Express backend, supporting both IMAP and Exchange EWS email protocols with secure credential storage.
 
+## Recent Updates (September 2025)
+
+**✅ Send Button Visibility Issue Resolved (September 16, 2025)**
+- **Problem**: Send button was missing/hidden in Compose/Reply dialogs due to layout height constraints
+- **Root Cause**: Dialog content overflow was pushing footer below visible area in `max-h-[90vh]` constraint
+- **Solution**: Fixed layout distribution with `min-h-0` on scrollable content and `flex-shrink-0` on footer
+- **Result**: Send button now always visible at bottom of compose dialogs with proper space distribution
+
+**✅ Attachment Upload Functionality Restored (September 16, 2025)**  
+- **Problem**: File uploads failing with "No files provided" error due to FormData corruption
+- **Root Cause**: `apiRequest` function was applying `JSON.stringify()` to FormData and setting wrong Content-Type
+- **Solution**: Modified `apiRequest` to detect FormData and pass directly with proper multipart headers
+- **Result**: File attachments now upload successfully without data corruption
+
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.

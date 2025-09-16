@@ -776,8 +776,8 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
         </div>
       </div>
 
-      {/* Form Content */}
-      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4`}>
+      {/* Form Content - Scrollable Middle Section */}
+      <div className={`flex-1 overflow-y-auto ${mobileCompose.isMobile ? 'px-4' : 'p-6'} space-y-4 min-h-0`}>
         {/* Recipient Fields */}
         <div className="space-y-3">
             {/* From Field - Read-only */}
@@ -1087,8 +1087,8 @@ export function ComposeDialog({ isOpen, onClose, accountId, draftId, replyTo }: 
           </div>
         </div>
 
-        {/* Mobile-Optimized Footer */}
-        <div className={`border-t bg-background ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
+        {/* Mobile-Optimized Footer - Always Visible */}
+        <div className={`border-t bg-background flex-shrink-0 ${mobileCompose.isMobile ? 'p-4 pb-safe' : 'p-6'}`}>
           <div className={`flex ${mobileCompose.isMobile ? 'flex-col space-y-3' : 'items-center justify-between'}`}>
             {/* Character count and draft status */}
             <div className={`flex items-center space-x-4 ${mobileCompose.isMobile ? 'justify-between' : ''}`}>
