@@ -272,7 +272,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       bcc: formData.bcc || undefined,
       subject: formData.subject,
       body: formData.body,
-      bodyHtml: formData.body.replace(/\n/g, '<br>'), // Convert newlines to HTML
+      bodyHtml: formData.body, // TipTap already provides proper HTML
       attachments: [] // TODO: Add attachment support in next task
     };
 
