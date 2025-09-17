@@ -1,4 +1,14 @@
 import { decryptAccountSettingsWithPassword } from '../crypto';
+import { AttachmentService } from './attachmentService';
+import path from 'path';
+import fs from 'fs';
+
+interface EwsSendAttachment {
+  filename: string;
+  content: string; // This will be the attachment ID for server-uploaded files
+  contentType: string;
+  size: number;
+}
 
 interface EwsSendOptions {
   to: string[];
@@ -7,7 +17,7 @@ interface EwsSendOptions {
   subject: string;
   bodyText: string;
   bodyHtml?: string;
-  attachments?: any[];
+  attachments?: EwsSendAttachment[];
 }
 
 interface EwsSendResult {
@@ -121,8 +131,46 @@ export class EwsSendService {
         }
       }
 
+      // Process attachments if any
+      if (options.attachments && options.attachments.length > 0) {
+        console.log(`[EwsSendService] Processing ${options.attachments.length} attachments`);
+        
+        for (const attachment of options.attachments) {
+          try {
+            // Get attachment details from our attachment service
+            const attachmentDetails = await AttachmentService.getAttachment(attachment.content);
+            
+            if (!attachmentDetails) {
+              console.warn(`[EwsSendService] Attachment not found: ${attachment.content}`);
+              continue;
+            }
+
+            // Read the file content
+            const filePath = attachmentDetails.filePath;
+            if (!fs.existsSync(filePath)) {
+              console.warn(`[EwsSendService] Attachment file not found: ${filePath}`);
+              continue;
+            }
+
+            const fileContent = fs.readFileSync(filePath);
+            
+            // Add attachment to EWS message
+            message.Attachments.AddFileAttachment(
+              attachmentDetails.fileName,
+              fileContent
+            );
+
+            console.log(`[EwsSendService] Added attachment: ${attachmentDetails.fileName} (${attachmentDetails.fileSize} bytes)`);
+          } catch (error) {
+            console.error(`[EwsSendService] Failed to attach file ${attachment.filename}:`, error);
+            // Continue with other attachments even if one fails
+          }
+        }
+      }
+
       console.log(`[EwsSendService] Sending email to ${options.to.join(', ')}`);
       console.log(`[EwsSendService] Subject: ${options.subject}`);
+      console.log(`[EwsSendService] Attachments: ${options.attachments?.length || 0}`);
 
       // Send the message
       await message.Send();

@@ -1,6 +1,9 @@
 import { IStorage } from './storage';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { InsertAccountFolder } from '../shared/schema';
+import { AttachmentService } from './services/attachmentService';
+import path from 'path';
+import fs from 'fs';
 
 export interface EwsSyncResult {
   success: boolean;
@@ -319,9 +322,74 @@ export async function syncEwsEmails(
           };
 
           // Save to database
-          await storage.createMailMessage(emailData);
-          messageCount++;
+          const savedEmail = await storage.createMailMessage(emailData);
           
+          // Process attachments if the email has them
+          if (emailData.hasAttachments && item.HasAttachments) {
+            try {
+              console.log(`Processing attachments for EWS message: ${emailData.subject}`);
+              
+              // Load attachments from EWS
+              const attachmentPropertySet = new PropertySet();
+              attachmentPropertySet.Add(ewsApi.AttachmentSchema.Name);
+              attachmentPropertySet.Add(ewsApi.AttachmentSchema.ContentType);
+              attachmentPropertySet.Add(ewsApi.AttachmentSchema.Size);
+              
+              // Load attachment details
+              await service.LoadPropertiesForItems([item], new PropertySet(BasePropertySet.FirstClassProperties));
+              
+              for (let i = 0; i < item.Attachments.Count; i++) {
+                try {
+                  const attachment = item.Attachments.__thisIndexer(i);
+                  
+                  // Load attachment content
+                  await attachment.Load();
+                  
+                  let attachmentData: Buffer | null = null;
+                  let fileName = attachment.Name || `attachment_${i}`;
+                  let mimeType = attachment.ContentType || 'application/octet-stream';
+                  
+                  // Handle different attachment types
+                  if ((attachment as any).Content && (attachment as any).Content.length > 0) {
+                    // File attachment with binary content
+                    attachmentData = Buffer.from((attachment as any).Content);
+                  } else if (attachment.ToString && typeof attachment.ToString === 'function') {
+                    // Text-based attachment
+                    const textContent = attachment.ToString();
+                    attachmentData = Buffer.from(textContent, 'utf8');
+                    if (!mimeType.includes('text')) {
+                      mimeType = 'text/plain';
+                    }
+                  }
+                  
+                  if (attachmentData && attachmentData.length > 0) {
+                    // Save attachment using AttachmentService
+                    const attachmentRecord = await AttachmentService.saveAttachment(
+                      fileName,
+                      attachmentData,
+                      mimeType
+                    );
+                    
+                    // Link attachment to email
+                    await storage.createEmailAttachment({
+                      emailId: savedEmail.id,
+                      attachmentId: attachmentRecord.id
+                    });
+                    
+                    console.log(`Saved EWS attachment: ${fileName} (${attachmentData.length} bytes)`);
+                  }
+                } catch (attachmentError) {
+                  console.error(`Failed to process EWS attachment ${i}:`, attachmentError);
+                  // Continue with other attachments
+                }
+              }
+            } catch (error) {
+              console.error(`Failed to process attachments for EWS message ${emailData.subject}:`, error);
+              // Don't fail the entire sync if attachment processing fails
+            }
+          }
+          
+          messageCount++;
           console.log(`Saved EWS message: ${emailData.subject}`);
           
         } catch (error) {

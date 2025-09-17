@@ -6,6 +6,7 @@ import {
   priorityRules,
   vipContacts,
   userPrefs,
+  attachments,
   type User,
   type UpsertUser,
   type AccountConnection,
@@ -20,6 +21,8 @@ import {
   type InsertVipContact,
   type UserPrefs,
   type InsertUserPrefs,
+  type Attachment,
+  type InsertAttachment,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, sql } from "drizzle-orm";
@@ -64,6 +67,16 @@ export interface IStorage {
   upsertAccountFolder(folder: InsertAccountFolder): Promise<AccountFolder>;
   deleteAccountFolder(id: string): Promise<void>;
   updateFolderCounts(accountId: string, folderId: string, unreadCount: number, totalCount: number): Promise<void>;
+  // Email operations
+  getEmailById(emailId: string): Promise<MailMessage | undefined>;
+  // Attachment operations
+  createAttachment(attachment: InsertAttachment): Promise<Attachment>;
+  getAttachment(attachmentId: string): Promise<Attachment | undefined>;
+  getEmailAttachments(emailId: string): Promise<Attachment[]>;
+  deleteAttachment(attachmentId: string): Promise<void>;
+  getAllAttachments(): Promise<Attachment[]>;
+  getAttachmentsByFilePath(filePath: string): Promise<Attachment[]>;
+  createEmailAttachment(data: { emailId: string; attachmentId: string }): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -407,6 +420,47 @@ export class DatabaseStorage implements IStorage {
         eq(accountFolders.accountId, accountId),
         eq(accountFolders.folderId, folderId)
       ));
+  }
+
+  // Email operations
+  async getEmailById(emailId: string): Promise<MailMessage | undefined> {
+    const [result] = await db.select().from(mailIndex).where(eq(mailIndex.id, emailId));
+    return result;
+  }
+
+  // Attachment operations
+  async createAttachment(attachment: InsertAttachment): Promise<Attachment> {
+    const [result] = await db.insert(attachments).values(attachment).returning();
+    return result;
+  }
+
+  async getAttachment(attachmentId: string): Promise<Attachment | undefined> {
+    const [result] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+    return result;
+  }
+
+  async getEmailAttachments(emailId: string): Promise<Attachment[]> {
+    return await db.select().from(attachments).where(eq(attachments.emailId, emailId));
+  }
+
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    await db.delete(attachments).where(eq(attachments.id, attachmentId));
+  }
+
+  async getAllAttachments(): Promise<Attachment[]> {
+    return await db.select().from(attachments);
+  }
+
+  async getAttachmentsByFilePath(filePath: string): Promise<Attachment[]> {
+    return await db.select().from(attachments).where(eq(attachments.filePath, filePath));
+  }
+
+  async createEmailAttachment(data: { emailId: string; attachmentId: string }): Promise<void> {
+    // This method links attachments to emails - for now we use the emailId field in attachments table
+    // If you need a separate junction table in the future, this method can be updated
+    await db.update(attachments)
+      .set({ emailId: data.emailId })
+      .where(eq(attachments.id, data.attachmentId));
   }
 }
 

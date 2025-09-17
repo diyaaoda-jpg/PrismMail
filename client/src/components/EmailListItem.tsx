@@ -147,7 +147,13 @@ export function EmailListItem({
             {email.subject}
           </span>
           {email.hasAttachments && (
-            <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+            <div className="flex items-center gap-1 shrink-0">
+              <Paperclip className="h-3 w-3 text-muted-foreground" />
+              <Badge variant="secondary" className="text-xs h-4 px-1 py-0">
+                <Paperclip className="h-2 w-2 mr-1" />
+                Attachments
+              </Badge>
+            </div>
           )}
         </div>
         

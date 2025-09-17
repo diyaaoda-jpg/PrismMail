@@ -2,12 +2,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertAccountConnectionSchema, sendEmailRequestSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
+import { insertAccountConnectionSchema, sendEmailRequestSchema, insertAttachmentSchema, type SendEmailRequest, type SendEmailResponse, type ImapSettings } from "@shared/schema";
 import { testConnection, type ConnectionTestResult } from "./connectionTest";
 import { discoverImapFolders, appendSentEmailToFolder, syncAllUserAccounts, syncImapEmails } from "./emailSync";
 import { discoverEwsFolders, syncEwsEmails } from "./ewsSync";
 import { getEwsPushService } from "./ewsPushNotifications";
 import { getImapIdleService } from "./imapIdle";
+import { attachmentService } from "./services/attachmentService";
 import { z } from "zod";
 import nodemailer from "nodemailer";
 import { decryptAccountSettingsWithPassword } from "./crypto";
@@ -1850,6 +1851,287 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       handleApiError(error, res, `POST /api/accounts/${req.params.accountId}/send`, requestId);
+    }
+  });
+
+  // Attachment routes
+  
+  /**
+   * Upload attachments for email composition
+   * POST /api/attachments/upload
+   */
+  app.post('/api/attachments/upload', isAuthenticated, attachmentService.getMulterConfig().array('files'), async (req: any, res) => {
+    const requestId = `attachment-upload-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      if (!userId) {
+        throw new ApiError(
+          ErrorCodes.AUTHENTICATION_FAILED,
+          'User ID not found in authentication token',
+          401
+        );
+      }
+
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'No files provided',
+          400,
+          'Please select at least one file to upload'
+        );
+      }
+
+      // Store files using attachment service
+      const storedFiles = await attachmentService.storeFiles(files, userId);
+      
+      // Store attachment metadata in database
+      const attachmentPromises = storedFiles.map(async (file) => {
+        const attachmentData = {
+          fileName: file.fileName,
+          fileSize: file.fileSize,
+          mimeType: file.mimeType,
+          filePath: file.filePath,
+          emailId: null, // Will be set when email is sent
+          isInline: false,
+          contentId: null
+        };
+
+        return await storage.createAttachment(attachmentData);
+      });
+
+      const attachments = await Promise.all(attachmentPromises);
+      
+      console.log(`[${requestId}] Successfully uploaded ${attachments.length} files for user ${userId}`);
+      res.json(createSuccessResponse({
+        attachments: attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          fileSize: att.fileSize,
+          mimeType: att.mimeType,
+          uploadedAt: att.createdAt
+        }))
+      }, 'Files uploaded successfully'));
+
+    } catch (error) {
+      handleApiError(error, res, 'POST /api/attachments/upload', requestId);
+    }
+  });
+
+  /**
+   * Download attachment by ID
+   * GET /api/attachments/download/:attachmentId
+   */
+  app.get('/api/attachments/download/:attachmentId', isAuthenticated, async (req: any, res) => {
+    const requestId = `attachment-download-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { attachmentId } = req.params;
+
+      if (!attachmentId) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Attachment ID is required',
+          400
+        );
+      }
+
+      // Get attachment metadata from database
+      const attachment = await storage.getAttachment(attachmentId);
+      if (!attachment) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Attachment not found',
+          404,
+          `Attachment with ID ${attachmentId} does not exist`
+        );
+      }
+
+      // SECURITY: Verify user has access to this attachment through email ownership
+      // This is a critical security check to ensure users can only download their own attachments
+      const emailData = await storage.getEmailById(attachment.emailId);
+      if (!emailData) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Email not found',
+          404,
+          'The email associated with this attachment no longer exists'
+        );
+      }
+
+      // Check if user owns the account that received this email
+      const userAccounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = userAccounts.some(acc => acc.id === emailData.accountId);
+      
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403,
+          'You do not have permission to access this attachment'
+        );
+      }
+
+      // Retrieve file from storage
+      const fileData = await attachmentService.retrieveFile(attachment.filePath);
+      
+      // SECURITY: Sanitize filename to prevent header injection attacks
+      const sanitizedFilename = attachment.fileName
+        .replace(/["\\]/g, '') // Remove quotes and backslashes
+        .replace(/[\r\n]/g, '') // Remove newlines
+        .replace(/[\x00-\x1f\x7f-\x9f]/g, '') // Remove control characters
+        .trim();
+      
+      // SECURITY: Force safe MIME type for download to prevent XSS
+      // Override user-provided MIME type with application/octet-stream for safety
+      const safeMimeType = 'application/octet-stream';
+      
+      // Set security headers - FORCE attachment download, never inline
+      res.set({
+        'Content-Type': safeMimeType,
+        'Content-Disposition': `attachment; filename="${sanitizedFilename}"`,
+        'Content-Length': attachment.fileSize.toString(),
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-Download-Options': 'noopen',
+        'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+
+      console.log(`[${requestId}] Serving attachment ${attachment.fileName} to user ${userId}`);
+      res.send(fileData.buffer);
+
+    } catch (error) {
+      handleApiError(error, res, `GET /api/attachments/download/${req.params.attachmentId}`, requestId);
+    }
+  });
+
+  /**
+   * Delete attachment by ID (for draft emails)
+   * DELETE /api/attachments/:attachmentId
+   */
+  app.delete('/api/attachments/:attachmentId', isAuthenticated, async (req: any, res) => {
+    const requestId = `attachment-delete-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { attachmentId } = req.params;
+
+      if (!attachmentId) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Attachment ID is required',
+          400
+        );
+      }
+
+      // Get attachment metadata
+      const attachment = await storage.getAttachment(attachmentId);
+      if (!attachment) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Attachment not found',
+          404
+        );
+      }
+
+      // SECURITY: Verify ownership - only allow deleting attachments from draft emails or unassociated uploads
+      if (attachment.emailId) {
+        const emailData = await storage.getEmailById(attachment.emailId);
+        if (!emailData) {
+          throw new ApiError(
+            ErrorCodes.RESOURCE_NOT_FOUND,
+            'Email not found',
+            404,
+            'The email associated with this attachment no longer exists'
+          );
+        }
+
+        // Check if user owns the account that owns this email
+        const userAccounts = await storage.getUserAccountConnections(userId);
+        const hasAccess = userAccounts.some(acc => acc.id === emailData.accountId);
+        
+        if (!hasAccess) {
+          throw new ApiError(
+            ErrorCodes.AUTHORIZATION_FAILED,
+            'Access denied',
+            403,
+            'You do not have permission to delete this attachment'
+          );
+        }
+      }
+
+      // Delete file from storage
+      await attachmentService.deleteFile(attachment.filePath);
+      
+      // Remove from database
+      await storage.deleteAttachment(attachmentId);
+      
+      console.log(`[${requestId}] Deleted attachment ${attachment.fileName} for user ${userId}`);
+      res.json(createSuccessResponse(null, 'Attachment deleted successfully'));
+
+    } catch (error) {
+      handleApiError(error, res, `DELETE /api/attachments/${req.params.attachmentId}`, requestId);
+    }
+  });
+
+  /**
+   * Get attachments for a specific email
+   * GET /api/mail/:emailId/attachments
+   */
+  app.get('/api/mail/:emailId/attachments', isAuthenticated, async (req: any, res) => {
+    const requestId = `email-attachments-${Date.now()}`;
+    try {
+      const userId = req.user.claims.sub;
+      const { emailId } = req.params;
+
+      if (!emailId) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Email ID is required',
+          400
+        );
+      }
+
+      // Verify user has access to this email
+      const emailData = await storage.getEmailById(emailId);
+      if (!emailData) {
+        throw new ApiError(
+          ErrorCodes.RESOURCE_NOT_FOUND,
+          'Email not found',
+          404
+        );
+      }
+
+      // Check account ownership
+      const userAccounts = await storage.getUserAccountConnections(userId);
+      const hasAccess = userAccounts.some(acc => acc.id === emailData.accountId);
+      
+      if (!hasAccess) {
+        throw new ApiError(
+          ErrorCodes.AUTHORIZATION_FAILED,
+          'Access denied',
+          403
+        );
+      }
+
+      // Get attachments for this email
+      const attachments = await storage.getEmailAttachments(emailId);
+      
+      console.log(`[${requestId}] Retrieved ${attachments.length} attachments for email ${emailId}`);
+      res.json(createSuccessResponse({
+        attachments: attachments.map(att => ({
+          id: att.id,
+          fileName: att.fileName,
+          fileSize: att.fileSize,
+          mimeType: att.mimeType,
+          isInline: att.isInline,
+          downloadUrl: `/api/attachments/download/${att.id}`
+        }))
+      }));
+
+    } catch (error) {
+      handleApiError(error, res, `GET /api/mail/${req.params.emailId}/attachments`, requestId);
     }
   });
 
