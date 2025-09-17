@@ -296,23 +296,26 @@ export async function syncEwsEmails(
           // Load additional properties for the email
           await service.LoadPropertiesForItems([item], new PropertySet(BasePropertySet.FirstClassProperties));
           
-          // Extract email content and metadata
+          // Extract email content and metadata - FIX: Map sender to from field for database compatibility
           const emailData = {
             accountId,
             folder,
             messageId: item.Id.UniqueId,
             subject: item.Subject || 'No Subject',
-            sender: extractSenderFromEws(item),
-            recipients: extractRecipientsFromEws(item),
+            from: extractSenderFromEws(item), // Fixed: Use 'from' field to match database schema
+            to: extractToRecipientsFromEws(item),
+            cc: extractCcRecipientsFromEws(item),
+            bcc: extractBccRecipientsFromEws(item),
+            replyTo: extractReplyToFromEws(item), // Enhanced: Extract reply-to header
             date: item.DateTimeReceived ? new Date(item.DateTimeReceived.toString()) : new Date(),
             isRead: (item as any).IsRead || false,
-            isImportant: (item as any).Importance?.toString() === 'High',
+            isFlagged: (item as any).Importance?.toString() === 'High' || (item as any).IsFlagged || false,
             hasAttachments: item.HasAttachments || false,
-            flags: extractFlagsFromEws(item),
             priority: calculatePriority((item as any).Importance, (item as any).From?.Name),
             snippet: item.Preview || extractSnippetFromBody(item.Body?.Text),
-            bodyContent: item.Body?.Text || '',
-            bodyType: (item as any).Body?.BodyType?.toString() === 'HTML' ? 'html' : 'text'
+            bodyHtml: (item as any).Body?.BodyType?.toString() === 'HTML' ? sanitizeHtmlContent(item.Body?.Text || '') : '',
+            bodyText: (item as any).Body?.BodyType?.toString() !== 'HTML' ? item.Body?.Text || '' : htmlToPlainText(item.Body?.Text || ''),
+            size: item.Size || 0
           };
 
           // Save to database
@@ -407,6 +410,197 @@ function extractSenderFromEws(item: any): string {
     return item.From.Name;
   }
   return 'Unknown Sender';
+}
+
+/**
+ * Extract To recipients from EWS item
+ */
+function extractToRecipientsFromEws(item: any): string {
+  const recipients: string[] = [];
+  
+  try {
+    if (item.ToRecipients && Array.isArray(item.ToRecipients)) {
+      for (const recipient of item.ToRecipients) {
+        if (recipient?.Name && recipient?.Address) {
+          recipients.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          recipients.push(recipient.Address);
+        }
+      }
+    } else if (item.ToRecipients && typeof item.ToRecipients === 'object' && item.ToRecipients.Address) {
+      if (item.ToRecipients.Name && item.ToRecipients.Address) {
+        recipients.push(`${item.ToRecipients.Name} <${item.ToRecipients.Address}>`);
+      } else if (item.ToRecipients.Address) {
+        recipients.push(item.ToRecipients.Address);
+      }
+    }
+  } catch (error) {
+    console.warn('Error extracting To recipients from EWS item:', error);
+  }
+  
+  return recipients.join(', ');
+}
+
+/**
+ * Extract Cc recipients from EWS item
+ */
+function extractCcRecipientsFromEws(item: any): string {
+  const recipients: string[] = [];
+  
+  try {
+    if (item.CcRecipients && Array.isArray(item.CcRecipients)) {
+      for (const recipient of item.CcRecipients) {
+        if (recipient?.Name && recipient?.Address) {
+          recipients.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          recipients.push(recipient.Address);
+        }
+      }
+    } else if (item.CcRecipients && typeof item.CcRecipients === 'object' && item.CcRecipients.Address) {
+      if (item.CcRecipients.Name && item.CcRecipients.Address) {
+        recipients.push(`${item.CcRecipients.Name} <${item.CcRecipients.Address}>`);
+      } else if (item.CcRecipients.Address) {
+        recipients.push(item.CcRecipients.Address);
+      }
+    }
+  } catch (error) {
+    console.warn('Error extracting Cc recipients from EWS item:', error);
+  }
+  
+  return recipients.join(', ');
+}
+
+/**
+ * Extract Bcc recipients from EWS item (typically not available for received messages)
+ */
+function extractBccRecipientsFromEws(item: any): string {
+  const recipients: string[] = [];
+  
+  try {
+    if (item.BccRecipients && Array.isArray(item.BccRecipients)) {
+      for (const recipient of item.BccRecipients) {
+        if (recipient?.Name && recipient?.Address) {
+          recipients.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          recipients.push(recipient.Address);
+        }
+      }
+    } else if (item.BccRecipients && typeof item.BccRecipients === 'object' && item.BccRecipients.Address) {
+      if (item.BccRecipients.Name && item.BccRecipients.Address) {
+        recipients.push(`${item.BccRecipients.Name} <${item.BccRecipients.Address}>`);
+      } else if (item.BccRecipients.Address) {
+        recipients.push(item.BccRecipients.Address);
+      }
+    }
+  } catch (error) {
+    console.warn('Error extracting Bcc recipients from EWS item:', error);
+  }
+  
+  return recipients.join(', ');
+}
+
+/**
+ * Extract Reply-To header from EWS item
+ */
+function extractReplyToFromEws(item: any): string {
+  try {
+    if (item.ReplyTo && Array.isArray(item.ReplyTo)) {
+      const replyToAddresses: string[] = [];
+      for (const recipient of item.ReplyTo) {
+        if (recipient?.Name && recipient?.Address) {
+          replyToAddresses.push(`${recipient.Name} <${recipient.Address}>`);
+        } else if (recipient?.Address) {
+          replyToAddresses.push(recipient.Address);
+        }
+      }
+      return replyToAddresses.join(', ');
+    } else if (item.ReplyTo && typeof item.ReplyTo === 'object' && item.ReplyTo.Address) {
+      if (item.ReplyTo.Name && item.ReplyTo.Address) {
+        return `${item.ReplyTo.Name} <${item.ReplyTo.Address}>`;
+      } else if (item.ReplyTo.Address) {
+        return item.ReplyTo.Address;
+      }
+    }
+  } catch (error) {
+    console.warn('Error extracting Reply-To from EWS item:', error);
+  }
+  
+  return ''; // Return empty string if no Reply-To header (will use From for replies)
+}
+
+/**
+ * Sanitize HTML content to prevent XSS and ensure valid HTML
+ */
+function sanitizeHtmlContent(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  
+  // Remove potentially dangerous elements and attributes
+  const dangerousTags = /<(script|iframe|object|embed|link|meta|style)[^>]*>.*?<\/\1>|<(script|iframe|object|embed|link|meta|style)[^>]*\/>/gi;
+  let sanitized = html.replace(dangerousTags, '');
+  
+  // Remove dangerous attributes
+  const dangerousAttrs = /(on\w+|javascript:|data:|vbscript:)/gi;
+  sanitized = sanitized.replace(dangerousAttrs, '');
+  
+  // Fix common HTML entity issues that cause "Character reference not valid" errors
+  sanitized = sanitized
+    .replace(/&(?![a-zA-Z0-9#][a-zA-Z0-9]*;)/g, '&amp;') // Fix unescaped ampersands
+    .replace(/&nbsp;/g, '&#160;') // Use numeric entity for non-breaking space
+    .replace(/&ldquo;/g, '&#8220;') // Left double quotation mark
+    .replace(/&rdquo;/g, '&#8221;') // Right double quotation mark
+    .replace(/&lsquo;/g, '&#8217;') // Left single quotation mark
+    .replace(/&rsquo;/g, '&#8217;') // Right single quotation mark
+    .replace(/&mdash;/g, '&#8212;') // Em dash
+    .replace(/&ndash;/g, '&#8211;') // En dash
+    .replace(/&hellip;/g, '&#8230;') // Horizontal ellipsis
+    .replace(/&trade;/g, '&#8482;'); // Trademark symbol
+  
+  // Ensure proper UTF-8 encoding
+  try {
+    sanitized = decodeURIComponent(escape(sanitized));
+  } catch {
+    // If encoding fails, keep original
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Convert HTML content to plain text
+ */
+function htmlToPlainText(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  
+  let text = html
+    // Replace common HTML elements with text equivalents
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/ul>|<\/ol>/gi, '\n')
+    // Remove all other HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Decode common HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#8220;/g, '"')
+    .replace(/&#8221;/g, '"')
+    .replace(/&#8217;/g, "'")
+    .replace(/&#8212;/g, '—')
+    .replace(/&#8211;/g, '–')
+    .replace(/&#160;/g, ' ')
+    // Clean up excess whitespace
+    .replace(/\n\s*\n\s*\n/g, '\n\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+  
+  return text;
 }
 
 /**
