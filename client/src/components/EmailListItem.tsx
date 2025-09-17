@@ -3,25 +3,7 @@ import { Star, Paperclip, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-export interface EmailMessage {
-  id: string;
-  from: string;
-  to?: string;
-  cc?: string;
-  bcc?: string;
-  replyTo?: string;
-  subject: string;
-  date: Date;
-  isRead: boolean;
-  isFlagged: boolean;
-  priority: number;
-  hasAttachments: boolean;
-  snippet: string;
-  bodyHtml?: string;
-  bodyText?: string;
-  folder: string;
-}
+import type { EmailMessage } from "@shared/schema";
 
 interface EmailListItemProps {
   email: EmailMessage;

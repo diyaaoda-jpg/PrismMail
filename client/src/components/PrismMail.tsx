@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ThemeMenu } from "./ThemeMenu";
 import { MailSidebar } from "./MailSidebar";
 import { EmailListItem, type EmailMessage } from "./EmailListItem";
+import { ConversationGroup } from "./ConversationGroup";
 import { EmailViewer } from "./EmailViewer";
 import { ReadingMode } from "./ReadingMode";
 import { ComposeDialog } from "./ComposeDialog";
@@ -19,6 +20,11 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { 
+  groupEmailsIntoConversations, 
+  toggleConversationExpansion,
+  type ConversationThread 
+} from "@/lib/conversationUtils";
 import type { UserPrefs } from "@shared/schema";
 
 interface PrismMailProps {
@@ -115,8 +121,11 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
   const [selectedFolder, setSelectedFolder] = useState('inbox');
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<ConversationThread | null>(null);
+  const [expandedConversations, setExpandedConversations] = useState<Set<string>>(new Set());
   const [isReadingMode, setIsReadingMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [enableConversationView, setEnableConversationView] = useState(true);
   const { toast } = useToast();
   
   // Dialog states
@@ -361,6 +370,13 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
   });
 
+  // Group emails into conversations if conversation view is enabled
+  const conversations = enableConversationView 
+    ? groupEmailsIntoConversations(filteredEmails, expandedConversations)
+    : [];
+
+  const displayItems = enableConversationView ? conversations : filteredEmails;
+
   const handleEmailSelect = useCallback((email: EmailMessage) => {
     setSelectedEmail(email);
     
@@ -370,6 +386,33 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
     }
     console.log('Selected email:', email.subject);
   }, [primaryAccount, emails.length]);
+
+  const handleConversationSelect = useCallback((conversation: ConversationThread) => {
+    setSelectedConversation(conversation);
+    // When selecting a conversation, also select the latest email
+    setSelectedEmail(conversation.latestEmail);
+    
+    // Mark latest unread email as read when conversation is selected
+    if (conversation.unreadCount > 0 && primaryAccount && emails.length > 0) {
+      const latestUnread = conversation.emails.find(email => !email.isRead);
+      if (latestUnread) {
+        handleToggleRead(latestUnread.id);
+      }
+    }
+    console.log('Selected conversation:', conversation.originalSubject);
+  }, [primaryAccount, emails.length]);
+
+  const handleToggleExpanded = useCallback((conversationId: string) => {
+    setExpandedConversations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(conversationId)) {
+        newSet.delete(conversationId);
+      } else {
+        newSet.add(conversationId);
+      }
+      return newSet;
+    });
+  }, []);
 
   const handleToggleRead = useCallback(async (emailId: string) => {
     if (!primaryAccount) return;
@@ -754,24 +797,59 @@ export function PrismMail({ user, onLogout }: PrismMailProps) {
             <div className="p-3 border-b bg-card">
               <div className="flex items-center justify-between">
                 <h2 className="font-medium capitalize">{selectedFolder}</h2>
-                <span className="text-sm text-muted-foreground">
-                  {filteredEmails.length} emails
-                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setEnableConversationView(!enableConversationView)}
+                    className={cn(
+                      "text-xs h-6 px-2",
+                      enableConversationView && "bg-accent"
+                    )}
+                    data-testid="button-toggle-conversation-view"
+                  >
+                    {enableConversationView ? "Conversations" : "Individual"}
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    {enableConversationView 
+                      ? `${conversations.length} conversations` 
+                      : `${filteredEmails.length} emails`
+                    }
+                  </span>
+                </div>
               </div>
             </div>
             
             <ScrollArea className="flex-1">
               <div className="divide-y">
-                {filteredEmails.map((email) => (
-                  <EmailListItem
-                    key={email.id}
-                    email={email}
-                    isSelected={selectedEmail?.id === email.id}
-                    onClick={() => handleEmailSelect(email)}
-                    onToggleRead={handleToggleRead}
-                    onToggleFlagged={handleToggleFlagged}
-                  />
-                ))}
+                {enableConversationView ? (
+                  // Conversation view
+                  conversations.map((conversation) => (
+                    <ConversationGroup
+                      key={conversation.id}
+                      conversation={conversation}
+                      isSelected={selectedConversation?.id === conversation.id}
+                      currentUserEmail={user?.email}
+                      onConversationClick={handleConversationSelect}
+                      onEmailClick={handleEmailSelect}
+                      onToggleExpanded={handleToggleExpanded}
+                      onToggleRead={handleToggleRead}
+                      onToggleFlagged={handleToggleFlagged}
+                    />
+                  ))
+                ) : (
+                  // Individual email view
+                  filteredEmails.map((email) => (
+                    <EmailListItem
+                      key={email.id}
+                      email={email}
+                      isSelected={selectedEmail?.id === email.id}
+                      onClick={() => handleEmailSelect(email)}
+                      onToggleRead={handleToggleRead}
+                      onToggleFlagged={handleToggleFlagged}
+                    />
+                  ))
+                )}
                 {filteredEmails.length === 0 && (
                   <div className="p-8 text-center text-muted-foreground">
                     <div className="text-lg font-medium mb-2">No emails found</div>

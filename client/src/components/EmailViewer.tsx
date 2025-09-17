@@ -1,15 +1,16 @@
 import { useState, useMemo } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, FileArchive, File } from "lucide-react";
-import DOMPurify from "dompurify";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, FileArchive, File, Info, Eye, EyeOff } from "lucide-react";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
-import type { EmailMessage } from './EmailListItem';
+import { EnhancedEmailContent } from "./EnhancedEmailContent";
+import { ExpandableEmailHeaders } from "./ExpandableEmailHeaders";
+import type { EmailMessage } from '@shared/schema';
 
 // Attachment interface based on API response
 interface EmailAttachment {
@@ -42,6 +43,9 @@ export function EmailViewer({
   onDelete,
   onToggleFlagged,
 }: EmailViewerProps) {
+  const [showHeaders, setShowHeaders] = useState(false);
+  const [emailView, setEmailView] = useState<'enhanced' | 'raw'>('enhanced');
+  
   // Fetch attachments for the current email
   // SECURITY: Use proper queryKey format for cache invalidation
   const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
@@ -68,15 +72,33 @@ export function EmailViewer({
     return File;
   };
 
-  const handleDownloadAttachment = (attachment: EmailAttachment) => {
-    // Create a temporary anchor element to trigger download
-    const link = document.createElement('a');
-    link.href = attachment.downloadUrl;
-    link.download = attachment.fileName;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleDownloadAttachment = async (attachment: EmailAttachment) => {
+    try {
+      // Show loading state for large downloads
+      const response = await fetch(attachment.downloadUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+      }
+      
+      // Create blob and download
+      const blob = await response.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = attachment.fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up blob URL
+      URL.revokeObjectURL(link.href);
+      
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Show user-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Download failed';
+      alert(`Failed to download ${attachment.fileName}: ${errorMessage}`);
+    }
   };
 
   if (!email) {
@@ -174,6 +196,16 @@ export function EmailViewer({
               )} />
             </Button>
             
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowHeaders(!showHeaders)}
+              data-testid="button-show-headers"
+              className={cn("hover-elevate active-elevate-2", showHeaders && "bg-accent")}
+            >
+              <Info className="h-4 w-4" />
+            </Button>
+            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" data-testid="button-email-more">
@@ -181,6 +213,23 @@ export function EmailViewer({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem 
+                  onClick={() => setEmailView(emailView === 'enhanced' ? 'raw' : 'enhanced')}
+                  data-testid="button-toggle-view"
+                >
+                  {emailView === 'enhanced' ? (
+                    <>
+                      <EyeOff className="h-4 w-4 mr-2" />
+                      Raw View
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-4 w-4 mr-2" />
+                      Enhanced View
+                    </>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleArchive} data-testid="button-archive">
                   <Archive className="h-4 w-4 mr-2" />
                   Archive
@@ -225,21 +274,52 @@ export function EmailViewer({
         </div>
       </div>
 
+      {/* Email Headers (Expandable) */}
+      {showHeaders && (
+        <>
+          <ExpandableEmailHeaders email={email} />
+          <Separator />
+        </>
+      )}
+
       {/* Content */}
       <div className="flex-1 flex flex-col">
         <ScrollArea className="flex-1">
-          <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
-            <div data-testid="text-email-content">
-              {email.bodyHtml ? (
-                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }} />
-              ) : email.bodyText ? (
-                <div style={{ whiteSpace: 'pre-wrap' }}>{email.bodyText}</div>
-              ) : (
-                <div>
-                  <p>{email.snippet}</p>
+          <div className="p-6">
+            {emailView === 'enhanced' ? (
+              <EnhancedEmailContent 
+                email={email} 
+                currentUserEmail={currentUserEmail}
+                showExpandedHeaders={false}
+              />
+            ) : (
+              // Raw view for debugging/technical users
+              <div className="space-y-4">
+                <div className="p-4 bg-muted rounded-md">
+                  <h4 className="text-sm font-semibold mb-2">Raw Content</h4>
+                  <div className="text-xs font-mono whitespace-pre-wrap break-all">
+                    {email.bodyHtml ? (
+                      <details>
+                        <summary className="cursor-pointer">HTML Body ({email.bodyHtml.length} chars)</summary>
+                        <div className="mt-2 p-2 bg-background rounded border">
+                          {email.bodyHtml}
+                        </div>
+                      </details>
+                    ) : email.bodyText ? (
+                      <div>
+                        <div className="font-semibold mb-1">Text Body:</div>
+                        {email.bodyText}
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="font-semibold mb-1">Snippet Only:</div>
+                        {email.snippet}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </ScrollArea>
         

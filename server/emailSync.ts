@@ -3,6 +3,7 @@ import { decryptAccountSettingsWithPassword } from './crypto';
 import { IStorage } from './storage';
 import { InsertMailMessage, InsertAccountFolder } from '../shared/schema';
 import { AttachmentService } from './services/attachmentService';
+import { generateThreadId } from './threadUtils';
 import fs from 'fs';
 import path from 'path';
 
@@ -603,15 +604,27 @@ export async function syncImapEmails(
             message.bodyStructure
           );
           
+          // Extract email addresses
+          const fromEmail = message.envelope?.from?.[0]?.address || 'unknown@unknown.com';
+          const toEmails = message.envelope?.to?.map((addr: any) => addr.address).join(', ') || '';
+          const ccEmails = message.envelope?.cc?.map((addr: any) => addr.address).join(', ') || '';
+          const replyToEmails = message.envelope?.replyTo?.map((addr: any) => addr.address).join(', ') || '';
+          const subject = message.envelope?.subject || '(No Subject)';
+          
+          // Generate proper threadId for conversation grouping
+          const threadId = generateThreadId(subject, fromEmail, toEmails, ccEmails, replyToEmails);
+          
           // Parse email data
           const emailData: InsertMailMessage = {
             accountId,
             folder,
             messageId,
-            threadId: message.envelope?.messageId || messageId,
-            subject: message.envelope?.subject || '(No Subject)',
-            from: message.envelope?.from?.[0]?.address || 'unknown@unknown.com',
-            to: message.envelope?.to?.map((addr: any) => addr.address).join(', ') || '',
+            threadId,
+            subject,
+            from: fromEmail,
+            to: toEmails,
+            cc: ccEmails,
+            replyTo: replyToEmails,
             date: message.envelope?.date || new Date(),
             size: message.size || 0,
             hasAttachments: hasAttachments(message.bodyStructure),

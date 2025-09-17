@@ -2,6 +2,7 @@ import { IStorage } from './storage';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { InsertAccountFolder } from '../shared/schema';
 import { AttachmentService } from './services/attachmentService';
+import { generateThreadId } from './threadUtils';
 import path from 'path';
 import fs from 'fs';
 
@@ -299,17 +300,28 @@ export async function syncEwsEmails(
           // Load additional properties for the email
           await service.LoadPropertiesForItems([item], new PropertySet(BasePropertySet.FirstClassProperties));
           
+          // Extract email addresses and subject
+          const subject = item.Subject || 'No Subject';
+          const fromEmail = extractSenderFromEws(item);
+          const toEmails = extractToRecipientsFromEws(item);
+          const ccEmails = extractCcRecipientsFromEws(item);
+          const replyToEmails = extractReplyToFromEws(item);
+          
+          // Generate proper threadId for conversation grouping
+          const threadId = generateThreadId(subject, fromEmail, toEmails, ccEmails, replyToEmails);
+          
           // Extract email content and metadata - FIX: Map sender to from field for database compatibility
           const emailData = {
             accountId,
             folder,
             messageId: item.Id.UniqueId,
-            subject: item.Subject || 'No Subject',
-            from: extractSenderFromEws(item), // Fixed: Use 'from' field to match database schema
-            to: extractToRecipientsFromEws(item),
-            cc: extractCcRecipientsFromEws(item),
+            threadId,
+            subject,
+            from: fromEmail, // Fixed: Use 'from' field to match database schema
+            to: toEmails,
+            cc: ccEmails,
             bcc: extractBccRecipientsFromEws(item),
-            replyTo: extractReplyToFromEws(item), // Enhanced: Extract reply-to header
+            replyTo: replyToEmails, // Enhanced: Extract reply-to header
             date: item.DateTimeReceived ? new Date(item.DateTimeReceived.toString()) : new Date(),
             isRead: (item as any).IsRead || false,
             isFlagged: (item as any).Importance?.toString() === 'High' || (item as any).IsFlagged || false,

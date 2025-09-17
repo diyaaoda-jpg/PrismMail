@@ -20,6 +20,12 @@ import { apiRequest } from "@/lib/queryClient";
 import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings } from "@shared/schema";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import TextStyle from '@tiptap/extension-text-style';
+import Color from '@tiptap/extension-color';
+import Highlight from '@tiptap/extension-highlight';
+import TextAlign from '@tiptap/extension-text-align';
+import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link';
 import { cn } from "@/lib/utils";
 
 interface ComposeDialogProps {
@@ -113,9 +119,36 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
   const accountEmail = getAccountEmail(currentAccount);
   const fromDisplay = currentAccount ? `${currentAccount.name} <${accountEmail}>` : '';
 
-  // Initialize TipTap editor
+  // Initialize TipTap editor with complete extensions
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit,
+      TextStyle,
+      Color,
+      Highlight.configure({
+        multicolor: true,
+        HTMLAttributes: {
+          class: 'highlight',
+        },
+      }),
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
+      }),
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: 'email-image',
+          style: 'max-width: 100%; height: auto;',
+        },
+      }),
+      Link.configure({
+        openOnClick: false,
+        HTMLAttributes: {
+          class: 'email-link',
+        },
+      }),
+    ],
     content: formData.body,
     editorProps: {
       attributes: {
