@@ -60,13 +60,13 @@ interface ComposeDialogProps {
 export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => ({
     to: replyTo?.to || "",
     cc: replyTo?.cc || "",
     bcc: replyTo?.bcc || "",
     subject: replyTo?.subject || "",
     body: replyTo?.body || ""
-  });
+  }));
 
   // Fetch account information for the From field
   const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
@@ -168,6 +168,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
   // Update form data when replyTo changes
   useEffect(() => {
     if (replyTo) {
+      console.log('ComposeDialog: Updating form data with replyTo:', replyTo);
       setFormData({
         to: replyTo.to || "",
         cc: replyTo.cc || "",
@@ -177,6 +178,19 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       });
     }
   }, [replyTo]);
+
+  // Reset form when dialog closes
+  useEffect(() => {
+    if (!isOpen) {
+      setFormData({
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        body: ""
+      });
+    }
+  }, [isOpen]);
 
   // TanStack Query mutation for sending emails
   const sendEmailMutation = useMutation({

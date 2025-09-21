@@ -241,11 +241,14 @@ export function makeReply(email: EmailMessage, currentUserEmail?: string): Reply
   
   // Determine reply recipient: Reply-To takes precedence over From
   const replyToAddress = email.replyTo?.trim() || email.from;
+  console.log('makeReply DEBUG - replyToAddress:', replyToAddress);
   const replyRecipients = parseEmailAddresses(replyToAddress);
+  console.log('makeReply DEBUG - replyRecipients:', replyRecipients);
 
   // For regular reply, we want to reply to the sender, not filter them out
   // Just use the reply recipients directly
   const finalRecipients = replyRecipients.length > 0 ? replyRecipients : parseEmailAddresses(email.from);
+  console.log('makeReply DEBUG - finalRecipients:', finalRecipients);
 
   return {
     to: formatEmailAddresses(finalRecipients),
