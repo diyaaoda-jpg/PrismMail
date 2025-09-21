@@ -242,12 +242,10 @@ export function makeReply(email: EmailMessage, currentUserEmail?: string): Reply
   // Determine reply recipient: Reply-To takes precedence over From
   const replyToAddress = email.replyTo?.trim() || email.from;
   const replyRecipients = parseEmailAddresses(replyToAddress);
-  
-  // Exclude current user from reply recipients
-  const filteredRecipients = excludeCurrentUser(replyRecipients, currentUserEmail);
-  
-  // If no recipients remain after filtering, fallback to original From address
-  const finalRecipients = filteredRecipients.length > 0 ? filteredRecipients : parseEmailAddresses(email.from);
+
+  // For regular reply, we want to reply to the sender, not filter them out
+  // Just use the reply recipients directly
+  const finalRecipients = replyRecipients.length > 0 ? replyRecipients : parseEmailAddresses(email.from);
 
   return {
     to: formatEmailAddresses(finalRecipients),

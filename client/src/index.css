@@ -328,74 +328,65 @@
     inset: -1px;
   }
 
-  /* TipTap Email Editor Styles */
-  .prose-email {
+  /* Email Composer Styles */
+  .email-composer {
     max-width: none !important;
-    min-height: 280px;
-    padding: 16px;
+    min-height: 350px;
   }
 
-  .prose-email .ProseMirror {
+  .email-composer .ProseMirror {
     outline: none !important;
     border: none !important;
-    font-family: inherit;
-    font-size: 14px;
-    line-height: 1.5;
-    color: hsl(var(--foreground));
-    min-height: 280px;
-    padding: 0;
+    min-height: 350px;
   }
 
-  .prose-email .ProseMirror:focus {
+  .email-composer .ProseMirror:focus {
     outline: none !important;
     box-shadow: none !important;
   }
 
-  .prose-email .ProseMirror p {
-    margin: 0.5em 0;
-  }
-
-  .prose-email .ProseMirror p.is-editor-empty:first-child::before {
-    content: "Write your email...";
+  .email-composer .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
     float: left;
     color: hsl(var(--muted-foreground));
     pointer-events: none;
     height: 0;
   }
 
-  .prose-email .ProseMirror strong {
-    font-weight: bold;
+  /* Email Content Viewer Styles */
+  .email-content {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    word-wrap: break-word;
+    word-break: break-word;
   }
 
-  .prose-email .ProseMirror em {
-    font-style: italic;
+  .email-content img {
+    max-width: 100%;
+    height: auto;
   }
 
-  .prose-email .ProseMirror s {
-    text-decoration: line-through;
-  }
-
-  .prose-email .ProseMirror ul {
-    list-style-type: disc;
-    margin-left: 1.5em;
-    padding-left: 0;
-  }
-
-  .prose-email .ProseMirror ol {
-    list-style-type: decimal;
-    margin-left: 1.5em;
-    padding-left: 0;
-  }
-
-  .prose-email .ProseMirror li {
-    margin: 0.25em 0;
-  }
-
-  .prose-email .ProseMirror blockquote {
-    border-left: 4px solid hsl(var(--border));
-    padding-left: 1em;
+  .email-content table {
+    border-collapse: collapse;
+    width: auto;
     margin: 1em 0;
-    font-style: italic;
-    color: hsl(var(--muted-foreground));
+  }
+
+  .email-content table td,
+  .email-content table th {
+    border: 1px solid hsl(var(--border));
+    padding: 0.5em;
+  }
+
+  .email-content blockquote {
+    margin: 0 0 0 0.8ex;
+    border-left: 1px solid #ccc;
+    padding-left: 1ex;
+  }
+
+  /* Gmail-style quote styling */
+  .email-content .gmail_quote {
+    margin: 0 0 0 0.8ex;
+    border-left: 1px solid #ccc;
+    padding-left: 1ex;
   }
 }
