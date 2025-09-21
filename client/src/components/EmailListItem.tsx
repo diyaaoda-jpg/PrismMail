@@ -152,7 +152,7 @@ export function EmailListItem({
         </div>
         
         <p
-          className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed"
+          className="text-xs text-gray-500 dark:text-gray-400 truncate leading-relaxed"
           data-testid={`text-snippet-${email.id}`}
         >
           {email.snippet}

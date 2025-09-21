@@ -90,13 +90,13 @@ export function EmailViewer({
   return (
     <div className="flex-1 flex flex-col bg-background">
       {/* Header */}
-      <div className="px-6 py-4 border-b bg-white dark:bg-gray-900">
+      <div className="p-4 border-b bg-card">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <h2
               className={cn(
-                "text-2xl font-normal text-gray-900 dark:text-gray-100 line-clamp-2 flex-1",
-                !email.isRead && "font-semibold"
+                "text-xl font-semibold truncate",
+                !email.isRead && "font-bold"
               )}
               data-testid="text-email-subject"
             >
@@ -146,73 +146,33 @@ export function EmailViewer({
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                  {email.from.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900 dark:text-gray-100 truncate" data-testid="text-email-from">
-                    {email.from.split('<')[0].trim() || email.from}
-                  </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                    {email.from.includes('<') ? email.from.match(/<([^>]+)>/)?.[1] : email.from}
-                  </div>
-                </div>
-              </div>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-medium">From: </span>
+              <span data-testid="text-email-from">{email.from}</span>
             </div>
-            <span className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap" data-testid="text-email-date">
+            <span className="text-muted-foreground" data-testid="text-email-date">
               {(() => {
                 const date = email.date instanceof Date ? email.date : new Date(email.date);
                 return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleString();
               })()}
             </span>
           </div>
-          {(email.to || email.cc) && (
-            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1 ml-13">
-              {email.to && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-500">To: </span>
-                  <span>{email.to}</span>
-                </div>
-              )}
-              {email.cc && (
-                <div>
-                  <span className="text-gray-500 dark:text-gray-500">Cc: </span>
-                  <span>{email.cc}</span>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 flex flex-col">
-        <ScrollArea className="flex-1 bg-white dark:bg-gray-900">
-          <div className="px-6 py-8 max-w-4xl mx-auto w-full">
-            <div data-testid="text-email-content" className="email-content">
+        <ScrollArea className="flex-1">
+          <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
+            <div data-testid="text-email-content">
               {email.bodyHtml ? (
-                <div
-                  className="prose prose-base max-w-none dark:prose-invert
-                    prose-headings:text-gray-900 dark:prose-headings:text-gray-100
-                    prose-p:text-gray-700 dark:prose-p:text-gray-300
-                    prose-a:text-blue-600 dark:prose-a:text-blue-400
-                    prose-strong:text-gray-900 dark:prose-strong:text-gray-100
-                    prose-blockquote:border-gray-300 dark:prose-blockquote:border-gray-600
-                    prose-blockquote:text-gray-600 dark:prose-blockquote:text-gray-400
-                    prose-code:text-gray-800 dark:prose-code:text-gray-200
-                    prose-pre:bg-gray-100 dark:prose-pre:bg-gray-800"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }}
-                />
+                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }} />
               ) : email.bodyText ? (
-                <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 text-base leading-relaxed font-sans">
-                  {email.bodyText}
-                </div>
+                <div className="whitespace-pre-wrap">{email.bodyText}</div>
               ) : (
-                <div className="text-gray-700 dark:text-gray-300 text-base leading-relaxed">
+                <div>
                   <p>{email.snippet}</p>
                 </div>
               )}
@@ -223,34 +183,19 @@ export function EmailViewer({
         <Separator />
         
         {/* Action buttons */}
-        <div className="px-6 py-4 bg-gray-50 dark:bg-gray-800/50 border-t">
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={handleReply}
-              data-testid="button-reply"
-              className="hover-elevate active-elevate-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-              variant="outline"
-            >
+        <div className="p-4 bg-card">
+          <div className="flex items-center gap-2">
+            <Button onClick={handleReply} data-testid="button-reply" className="hover-elevate active-elevate-2">
               <Reply className="h-4 w-4 mr-2" />
               {contextualLabels.reply}
             </Button>
             {showReplyAll && (
-              <Button
-                onClick={handleReplyAll}
-                data-testid="button-reply-all"
-                className="hover-elevate active-elevate-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-                variant="outline"
-              >
+              <Button variant="outline" onClick={handleReplyAll} data-testid="button-reply-all" className="hover-elevate active-elevate-2">
                 <ReplyAll className="h-4 w-4 mr-2" />
                 {contextualLabels.replyAll}
               </Button>
             )}
-            <Button
-              onClick={handleForward}
-              data-testid="button-forward"
-              className="hover-elevate active-elevate-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-              variant="outline"
-            >
+            <Button variant="outline" onClick={handleForward} data-testid="button-forward" className="hover-elevate active-elevate-2">
               <Forward className="h-4 w-4 mr-2" />
               {contextualLabels.forward}
             </Button>
