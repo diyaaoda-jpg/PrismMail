@@ -16,30 +16,6 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// SECURITY: Add Content-Security-Policy and security headers
-app.use((req, res, next) => {
-  // CSP to prevent XSS attacks
-  res.setHeader('Content-Security-Policy', [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'", // Allow inline scripts for React
-    "style-src 'self' 'unsafe-inline'", // Allow inline styles for CSS-in-JS
-    "img-src 'self' data: https:", // Allow images from self, data URIs, and HTTPS
-    "font-src 'self' data:",
-    "connect-src 'self' ws: wss:", // Allow WebSocket connections
-    "object-src 'none'", // Block plugins
-    "base-uri 'self'",
-    "frame-ancestors 'none'" // Prevent clickjacking
-  ].join('; '));
-  
-  // Additional security headers
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  
-  next();
-});
-
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -108,7 +84,7 @@ app.use((req, res, next) => {
       console.log(`WebSocket authentication success: ${user.email} (${userId})`);
       return {
         userId: user.id,
-        userEmail: user.email || undefined
+        userEmail: user.email
       };
     } catch (error) {
       console.error('WebSocket authentication error:', error);

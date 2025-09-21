@@ -2,10 +2,6 @@ import { ImapFlow } from 'imapflow';
 import { decryptAccountSettingsWithPassword } from './crypto';
 import { IStorage } from './storage';
 import { InsertMailMessage, InsertAccountFolder } from '../shared/schema';
-import { AttachmentService } from './services/attachmentService';
-import { generateThreadId } from './threadUtils';
-import fs from 'fs';
-import path from 'path';
 
 export interface SyncResult {
   success: boolean;
@@ -341,95 +337,12 @@ export async function appendSentEmailToFolder(
     headers.push(`Subject: ${subject}`);
     headers.push('MIME-Version: 1.0');
 
-    // Process attachments and create MIME structure
+    // Determine content type based on whether we have HTML
     const boundary = `boundary-${Date.now()}-${Math.random()}`;
-    const attachmentBoundary = `attachment-boundary-${Date.now()}-${Math.random()}`;
     let emailContent = headers.join('\r\n');
 
-    // Check if we have attachments to process
-    let processedAttachments: Array<{filename: string, content: string, contentType: string}> = [];
-    if (attachments && attachments.length > 0) {
-      console.log(`[IMAP Send] Processing ${attachments.length} attachments`);
-      
-      for (const attachment of attachments) {
-        try {
-          // Check if this is an attachment ID (our format) or already base64 content
-          if (attachment.content && !attachment.content.includes('/') && !attachment.content.includes('+')) {
-            // This looks like an attachment ID, fetch the actual file
-            const attachmentDetails = await AttachmentService.getAttachment(attachment.content);
-            
-            if (attachmentDetails && fs.existsSync(attachmentDetails.filePath)) {
-              const fileContent = fs.readFileSync(attachmentDetails.filePath);
-              const base64Content = fileContent.toString('base64');
-              
-              processedAttachments.push({
-                filename: attachmentDetails.fileName,
-                content: base64Content,
-                contentType: attachmentDetails.mimeType
-              });
-              
-              console.log(`[IMAP Send] Processed attachment: ${attachmentDetails.fileName}`);
-            } else {
-              console.warn(`[IMAP Send] Attachment not found: ${attachment.content}`);
-            }
-          } else {
-            // Already base64 encoded content
-            processedAttachments.push(attachment);
-          }
-        } catch (error) {
-          console.error(`[IMAP Send] Failed to process attachment:`, error);
-        }
-      }
-    }
-
-    const hasAttachments = processedAttachments.length > 0;
-
-    if (hasAttachments) {
-      // Multipart/mixed with attachments
-      emailContent += `\r\nContent-Type: multipart/mixed; boundary="${attachmentBoundary}"\r\n\r\n`;
-      
-      // Body content part
-      emailContent += `--${attachmentBoundary}\r\n`;
-      
-      if (bodyHtml && bodyHtml !== bodyText.replace(/\n/g, '<br>')) {
-        // Nested multipart/alternative for text and HTML
-        emailContent += `Content-Type: multipart/alternative; boundary="${boundary}"\r\n\r\n`;
-        
-        // Plain text part
-        emailContent += `--${boundary}\r\n`;
-        emailContent += 'Content-Type: text/plain; charset=utf-8\r\n';
-        emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
-        emailContent += bodyText + '\r\n\r\n';
-        
-        // HTML part
-        emailContent += `--${boundary}\r\n`;
-        emailContent += 'Content-Type: text/html; charset=utf-8\r\n';
-        emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
-        emailContent += bodyHtml + '\r\n\r\n';
-        
-        emailContent += `--${boundary}--\r\n\r\n`;
-      } else {
-        // Simple text body
-        emailContent += 'Content-Type: text/plain; charset=utf-8\r\n';
-        emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
-        emailContent += bodyText + '\r\n\r\n';
-      }
-
-      // Add attachments
-      for (const attachment of processedAttachments) {
-        emailContent += `--${attachmentBoundary}\r\n`;
-        emailContent += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
-        emailContent += `Content-Transfer-Encoding: base64\r\n`;
-        emailContent += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n\r\n`;
-        
-        // Split base64 content into 76-character lines (RFC requirement)
-        const lines = attachment.content.match(/.{1,76}/g) || [];
-        emailContent += lines.join('\r\n') + '\r\n\r\n';
-      }
-      
-      emailContent += `--${attachmentBoundary}--\r\n`;
-    } else if (bodyHtml && bodyHtml !== bodyText.replace(/\n/g, '<br>')) {
-      // Multipart message with both text and HTML (no attachments)
+    if (bodyHtml && bodyHtml !== bodyText.replace(/\n/g, '<br>')) {
+      // Multipart message with both text and HTML
       emailContent += `\r\nContent-Type: multipart/alternative; boundary="${boundary}"\r\n\r\n`;
       
       // Plain text part
@@ -446,7 +359,7 @@ export async function appendSentEmailToFolder(
       
       emailContent += `--${boundary}--\r\n`;
     } else {
-      // Simple text message (no HTML, no attachments)
+      // Simple text message
       emailContent += '\r\nContent-Type: text/plain; charset=utf-8\r\n';
       emailContent += 'Content-Transfer-Encoding: 8bit\r\n\r\n';
       emailContent += bodyText + '\r\n';
@@ -604,27 +517,15 @@ export async function syncImapEmails(
             message.bodyStructure
           );
           
-          // Extract email addresses
-          const fromEmail = message.envelope?.from?.[0]?.address || 'unknown@unknown.com';
-          const toEmails = message.envelope?.to?.map((addr: any) => addr.address).join(', ') || '';
-          const ccEmails = message.envelope?.cc?.map((addr: any) => addr.address).join(', ') || '';
-          const replyToEmails = message.envelope?.replyTo?.map((addr: any) => addr.address).join(', ') || '';
-          const subject = message.envelope?.subject || '(No Subject)';
-          
-          // Generate proper threadId for conversation grouping
-          const threadId = generateThreadId(subject, fromEmail, toEmails, ccEmails, replyToEmails);
-          
           // Parse email data
           const emailData: InsertMailMessage = {
             accountId,
             folder,
             messageId,
-            threadId,
-            subject,
-            from: fromEmail,
-            to: toEmails,
-            cc: ccEmails,
-            replyTo: replyToEmails,
+            threadId: message.envelope?.messageId || messageId,
+            subject: message.envelope?.subject || '(No Subject)',
+            from: message.envelope?.from?.[0]?.address || 'unknown@unknown.com',
+            to: message.envelope?.to?.map((addr: any) => addr.address).join(', ') || '',
             date: message.envelope?.date || new Date(),
             size: message.size || 0,
             hasAttachments: hasAttachments(message.bodyStructure),

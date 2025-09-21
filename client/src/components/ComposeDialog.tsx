@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,22 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { X, Send, Paperclip, Bold, Italic, Underline, FileText, Image, FileArchive, File, Trash2 } from "lucide-react";
+import { X, Send, Paperclip, Bold, Italic, Underline } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { SendEmailRequest, SendEmailResponse, AccountConnection, ImapSettings, EwsSettings } from "@shared/schema";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import TextStyle from '@tiptap/extension-text-style';
-import Color from '@tiptap/extension-color';
-import Highlight from '@tiptap/extension-highlight';
-import TextAlign from '@tiptap/extension-text-align';
-import Image from '@tiptap/extension-image';
-import Link from '@tiptap/extension-link';
-import { cn } from "@/lib/utils";
 
 interface ComposeDialogProps {
   isOpen: boolean;
@@ -41,15 +32,6 @@ interface ComposeDialogProps {
   };
 }
 
-// Attachment interface
-interface AttachmentFile {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  uploadedAt?: Date;
-}
-
 export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -60,12 +42,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     subject: replyTo?.subject || "",
     body: replyTo?.body || ""
   });
-
-  // Attachment state
-  const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch account information for the From field
   const { data: accountsData, isLoading: isLoadingAccounts } = useQuery({
@@ -119,36 +95,9 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
   const accountEmail = getAccountEmail(currentAccount);
   const fromDisplay = currentAccount ? `${currentAccount.name} <${accountEmail}>` : '';
 
-  // Initialize TipTap editor with complete extensions
+  // Initialize TipTap editor
   const editor = useEditor({
-    extensions: [
-      StarterKit,
-      TextStyle,
-      Color,
-      Highlight.configure({
-        multicolor: true,
-        HTMLAttributes: {
-          class: 'highlight',
-        },
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph'],
-      }),
-      Image.configure({
-        inline: true,
-        allowBase64: true,
-        HTMLAttributes: {
-          class: 'email-image',
-          style: 'max-width: 100%; height: auto;',
-        },
-      }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-          class: 'email-link',
-        },
-      }),
-    ],
+    extensions: [StarterKit],
     content: formData.body,
     editorProps: {
       attributes: {
@@ -242,150 +191,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     }
   });
 
-  // File upload mutation
-  const uploadFilesMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      files.forEach(file => {
-        formData.append('files', file);
-      });
-
-      setUploadProgress(0);
-      
-      const response = await fetch('/api/attachments/upload', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include', // Include cookies for authentication
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || errorData.message || 'Failed to upload files');
-      }
-
-      const result = await response.json();
-      setUploadProgress(null);
-      return result.data;
-    },
-    onSuccess: (data) => {
-      // Add uploaded files to attachments list
-      const newAttachments: AttachmentFile[] = data.attachments.map((att: any) => ({
-        id: att.id,
-        fileName: att.fileName,
-        fileSize: att.fileSize,
-        mimeType: att.mimeType,
-        uploadedAt: new Date(att.uploadedAt)
-      }));
-      
-      setAttachments(prev => [...prev, ...newAttachments]);
-      
-      toast({
-        title: "Files Uploaded",
-        description: `Successfully uploaded ${newAttachments.length} file(s)`,
-      });
-    },
-    onError: (error: Error) => {
-      setUploadProgress(null);
-      toast({
-        title: "Upload Failed",
-        description: error.message || "Failed to upload files. Please try again.",
-        variant: "destructive"
-      });
-    }
-  });
-
-  // File handling functions
-  const handleFileSelect = useCallback((files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    
-    // Filter for valid file types and sizes
-    const validFiles = fileArray.filter(file => {
-      // Check file size (25MB limit per file)
-      if (file.size > 25 * 1024 * 1024) {
-        toast({
-          title: "File Too Large",
-          description: `${file.name} is too large. Maximum file size is 25MB.`,
-          variant: "destructive"
-        });
-        return false;
-      }
-      return true;
-    });
-
-    // Check total attachment count (10 files max)
-    if (attachments.length + validFiles.length > 10) {
-      toast({
-        title: "Too Many Files",
-        description: `Maximum 10 files allowed. You have ${attachments.length} files already.`,
-        variant: "destructive"
-      });
-      return;
-    }
-
-    if (validFiles.length > 0) {
-      uploadFilesMutation.mutate(validFiles);
-    }
-  }, [attachments.length, uploadFilesMutation, toast]);
-
-  const handleFileInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files && files.length > 0) {
-      handleFileSelect(files);
-    }
-    // Reset input value to allow selecting the same file again
-    if (event.target) {
-      event.target.value = '';
-    }
-  }, [handleFileSelect]);
-
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setIsDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    setIsDragOver(false);
-    
-    const files = event.dataTransfer.files;
-    if (files && files.length > 0) {
-      handleFileSelect(files);
-    }
-  }, [handleFileSelect]);
-
-  const handleAttachButtonClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleRemoveAttachment = useCallback((attachmentId: string) => {
-    setAttachments(prev => prev.filter(att => att.id !== attachmentId));
-    toast({
-      title: "Attachment Removed",
-      description: "File removed from email",
-    });
-  }, [toast]);
-
-  const formatFileSize = useCallback((bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  }, []);
-
-  const getFileIcon = useCallback((mimeType: string) => {
-    if (mimeType.startsWith('image/')) return Image;
-    if (mimeType.includes('pdf')) return FileText;
-    if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('gzip')) return FileArchive;
-    if (mimeType.includes('document') || mimeType.includes('word') || mimeType.includes('text')) return FileText;
-    return File;
-  }, []);
-
   const handleSend = async () => {
     if (!formData.to || !formData.subject) {
       toast({
@@ -458,9 +263,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       return;
     }
 
-    // Prepare attachments data for email sending
-    const attachmentIds = attachments.map(att => att.id);
-
     // Prepare email data for API
     const emailData: SendEmailRequest & { sendingAccountId: string } = {
       accountId: sendingAccountId,
@@ -471,12 +273,7 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
       subject: formData.subject,
       body: formData.body,
       bodyHtml: formData.body, // TipTap already provides proper HTML
-      attachments: attachments.map(att => ({
-        filename: att.fileName,
-        content: att.id, // Use attachment ID instead of content for server-uploaded files
-        contentType: att.mimeType,
-        size: att.fileSize
-      }))
+      attachments: [] // TODO: Add attachment support in next task
     };
 
     // Send the email using the mutation
@@ -488,9 +285,6 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
     // Reset form after close
     setTimeout(() => {
       setFormData({ to: "", cc: "", bcc: "", subject: "", body: "" });
-      setAttachments([]);
-      setIsDragOver(false);
-      setUploadProgress(null);
     }, 300);
   };
 
@@ -628,101 +422,15 @@ export function ComposeDialog({ isOpen, onClose, accountId, replyTo }: ComposeDi
               <Underline className="h-4 w-4" />
             </Button>
             <Separator orientation="vertical" className="h-6 mx-2" />
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={handleAttachButtonClick}
-              disabled={uploadFilesMutation.isPending}
-              data-testid="button-attach"
-            >
+            <Button variant="ghost" size="sm" data-testid="button-attach">
               <Paperclip className="h-4 w-4" />
-              <span className="ml-1 text-sm">
-                {uploadFilesMutation.isPending ? 'Uploading...' : 'Attach'}
-              </span>
+              <span className="ml-1 text-sm">Attach</span>
             </Button>
-            
-            {/* Hidden file input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={handleFileInputChange}
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.tiff,.zip,.tar,.gz,.json,.xml,.html,.js,.css"
-            />
           </div>
 
-          {/* Attachment Preview Area */}
-          {attachments.length > 0 && (
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Attachments ({attachments.length})</Label>
-              <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-md border">
-                {attachments.map((attachment) => {
-                  const FileIcon = getFileIcon(attachment.mimeType);
-                  return (
-                    <div
-                      key={attachment.id}
-                      className="flex items-center gap-2 bg-background px-3 py-2 rounded-md border hover-elevate"
-                      data-testid={`attachment-preview-${attachment.id}`}
-                    >
-                      <FileIcon className="h-4 w-4 text-muted-foreground" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
-                          {attachment.fileName}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {formatFileSize(attachment.fileSize)}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleRemoveAttachment(attachment.id)}
-                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                        data-testid={`button-remove-attachment-${attachment.id}`}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Upload Progress */}
-          {uploadProgress !== null && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span>Uploading files...</span>
-                <span>{uploadProgress}%</span>
-              </div>
-              <Progress value={uploadProgress} className="h-2" />
-            </div>
-          )}
-
-          {/* Email Body - Rich Text Editor with Drag & Drop */}
+          {/* Email Body - Rich Text Editor */}
           <div className="flex-1">
-            <div 
-              className={cn(
-                "min-h-[300px] border rounded-md transition-colors",
-                isDragOver && "border-primary bg-primary/5 border-dashed"
-              )}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              {isDragOver && (
-                <div className="absolute inset-0 flex items-center justify-center bg-primary/5 rounded-md z-10">
-                  <div className="text-center">
-                    <Paperclip className="h-8 w-8 mx-auto mb-2 text-primary" />
-                    <div className="text-sm font-medium">Drop files here to attach</div>
-                    <div className="text-xs text-muted-foreground">
-                      Maximum 10 files, 25MB each
-                    </div>
-                  </div>
-                </div>
-              )}
+            <div className="min-h-[300px] border rounded-md">
               {editor ? (
                 <EditorContent 
                   editor={editor} 

@@ -3,7 +3,25 @@ import { Star, Paperclip, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { EmailMessage } from "@shared/schema";
+
+export interface EmailMessage {
+  id: string;
+  from: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  replyTo?: string;
+  subject: string;
+  date: Date;
+  isRead: boolean;
+  isFlagged: boolean;
+  priority: number;
+  hasAttachments: boolean;
+  snippet: string;
+  bodyHtml?: string;
+  bodyText?: string;
+  folder: string;
+}
 
 interface EmailListItemProps {
   email: EmailMessage;
@@ -129,13 +147,7 @@ export function EmailListItem({
             {email.subject}
           </span>
           {email.hasAttachments && (
-            <div className="flex items-center gap-1 shrink-0">
-              <Paperclip className="h-3 w-3 text-muted-foreground" />
-              <Badge variant="secondary" className="text-xs h-4 px-1 py-0">
-                <Paperclip className="h-2 w-2 mr-1" />
-                Attachments
-              </Badge>
-            </div>
+            <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
           )}
         </div>
         

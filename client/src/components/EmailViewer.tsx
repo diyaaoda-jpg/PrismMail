@@ -1,26 +1,14 @@
 import { useState, useMemo } from "react";
-import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal, Paperclip, Download, FileText, Image, FileArchive, File, Info, Eye, EyeOff } from "lucide-react";
+import { Reply, ReplyAll, Forward, Archive, Trash, Star, MoreHorizontal } from "lucide-react";
+import DOMPurify from "dompurify";
 import { getContextualLabels, shouldShowReplyAll } from "@/lib/emailUtils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { useQuery } from "@tanstack/react-query";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { EnhancedEmailContent } from "./EnhancedEmailContent";
-import { ExpandableEmailHeaders } from "./ExpandableEmailHeaders";
-import type { EmailMessage } from '@shared/schema';
-
-// Attachment interface based on API response
-interface EmailAttachment {
-  id: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
-  isInline: boolean;
-  downloadUrl: string;
-}
+import type { EmailMessage } from './EmailListItem';
 
 interface EmailViewerProps {
   email: EmailMessage | null;
@@ -43,64 +31,6 @@ export function EmailViewer({
   onDelete,
   onToggleFlagged,
 }: EmailViewerProps) {
-  const [showHeaders, setShowHeaders] = useState(false);
-  const [emailView, setEmailView] = useState<'enhanced' | 'raw'>('enhanced');
-  
-  // Fetch attachments for the current email
-  // SECURITY: Use proper queryKey format for cache invalidation
-  const { data: attachmentsData, isLoading: isLoadingAttachments } = useQuery({
-    queryKey: [`/api/mail/${email?.id}/attachments`],
-    enabled: !!email?.id && email.hasAttachments,
-  });
-
-  const attachments: EmailAttachment[] = attachmentsData?.data?.attachments || [];
-
-  // Utility functions
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
-  const getFileIcon = (mimeType: string) => {
-    if (mimeType.startsWith('image/')) return Image;
-    if (mimeType.includes('pdf')) return FileText;
-    if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('gzip')) return FileArchive;
-    if (mimeType.includes('document') || mimeType.includes('word') || mimeType.includes('text')) return FileText;
-    return File;
-  };
-
-  const handleDownloadAttachment = async (attachment: EmailAttachment) => {
-    try {
-      // Show loading state for large downloads
-      const response = await fetch(attachment.downloadUrl);
-      
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-      }
-      
-      // Create blob and download
-      const blob = await response.blob();
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = attachment.fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Clean up blob URL
-      URL.revokeObjectURL(link.href);
-      
-    } catch (error) {
-      console.error('Download failed:', error);
-      // Show user-friendly error message
-      const errorMessage = error instanceof Error ? error.message : 'Download failed';
-      alert(`Failed to download ${attachment.fileName}: ${errorMessage}`);
-    }
-  };
-
   if (!email) {
     return (
       <div className="flex-1 flex items-center justify-center bg-muted/30">
@@ -196,16 +126,6 @@ export function EmailViewer({
               )} />
             </Button>
             
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowHeaders(!showHeaders)}
-              data-testid="button-show-headers"
-              className={cn("hover-elevate active-elevate-2", showHeaders && "bg-accent")}
-            >
-              <Info className="h-4 w-4" />
-            </Button>
-            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" data-testid="button-email-more">
@@ -213,23 +133,6 @@ export function EmailViewer({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem 
-                  onClick={() => setEmailView(emailView === 'enhanced' ? 'raw' : 'enhanced')}
-                  data-testid="button-toggle-view"
-                >
-                  {emailView === 'enhanced' ? (
-                    <>
-                      <EyeOff className="h-4 w-4 mr-2" />
-                      Raw View
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="h-4 w-4 mr-2" />
-                      Enhanced View
-                    </>
-                  )}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleArchive} data-testid="button-archive">
                   <Archive className="h-4 w-4 mr-2" />
                   Archive
@@ -256,125 +159,26 @@ export function EmailViewer({
               })()}
             </span>
           </div>
-
-          {/* Attachment indicator */}
-          {email.hasAttachments && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Paperclip className="h-3 w-3" />
-              <span className="text-xs">
-                {isLoadingAttachments 
-                  ? "Loading attachments..." 
-                  : attachments.length > 0 
-                    ? `${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`
-                    : "Has attachments"
-                }
-              </span>
-            </div>
-          )}
         </div>
       </div>
-
-      {/* Email Headers (Expandable) */}
-      {showHeaders && (
-        <>
-          <ExpandableEmailHeaders email={email} />
-          <Separator />
-        </>
-      )}
 
       {/* Content */}
       <div className="flex-1 flex flex-col">
         <ScrollArea className="flex-1">
-          <div className="p-6">
-            {emailView === 'enhanced' ? (
-              <EnhancedEmailContent 
-                email={email} 
-                currentUserEmail={currentUserEmail}
-                showExpandedHeaders={false}
-              />
-            ) : (
-              // Raw view for debugging/technical users
-              <div className="space-y-4">
-                <div className="p-4 bg-muted rounded-md">
-                  <h4 className="text-sm font-semibold mb-2">Raw Content</h4>
-                  <div className="text-xs font-mono whitespace-pre-wrap break-all">
-                    {email.bodyHtml ? (
-                      <details>
-                        <summary className="cursor-pointer">HTML Body ({email.bodyHtml.length} chars)</summary>
-                        <div className="mt-2 p-2 bg-background rounded border">
-                          {email.bodyHtml}
-                        </div>
-                      </details>
-                    ) : email.bodyText ? (
-                      <div>
-                        <div className="font-semibold mb-1">Text Body:</div>
-                        {email.bodyText}
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="font-semibold mb-1">Snippet Only:</div>
-                        {email.snippet}
-                      </div>
-                    )}
-                  </div>
+          <div className="p-6 prose prose-sm max-w-none dark:prose-invert">
+            <div data-testid="text-email-content">
+              {email.bodyHtml ? (
+                <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }} />
+              ) : email.bodyText ? (
+                <div style={{ whiteSpace: 'pre-wrap' }}>{email.bodyText}</div>
+              ) : (
+                <div>
+                  <p>{email.snippet}</p>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </ScrollArea>
-        
-        {/* Attachments Section */}
-        {email.hasAttachments && attachments.length > 0 && (
-          <>
-            <Separator />
-            <div className="p-4 bg-muted/20 border-t">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">
-                    Attachments ({attachments.length})
-                  </span>
-                </div>
-                
-                <div className="grid gap-2">
-                  {attachments.map((attachment) => {
-                    const FileIcon = getFileIcon(attachment.mimeType);
-                    return (
-                      <div
-                        key={attachment.id}
-                        className="flex items-center justify-between p-3 bg-background rounded-md border hover-elevate transition-colors"
-                        data-testid={`attachment-${attachment.id}`}
-                      >
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <FileIcon className="h-5 w-5 text-muted-foreground shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate" title={attachment.fileName}>
-                              {attachment.fileName}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatFileSize(attachment.fileSize)} • {attachment.mimeType}
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDownloadAttachment(attachment)}
-                          className="shrink-0 hover-elevate active-elevate-2"
-                          data-testid={`button-download-${attachment.id}`}
-                        >
-                          <Download className="h-4 w-4 mr-1" />
-                          <span className="text-xs">Download</span>
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
         
         <Separator />
         

@@ -171,27 +171,6 @@ export type InsertAccountFolder = z.infer<typeof insertAccountFolderSchema>;
 export type Attachment = typeof attachments.$inferSelect;
 export type InsertAttachment = z.infer<typeof insertAttachmentSchema>;
 
-// Frontend email message interface (compatible with MailMessage)
-export interface EmailMessage {
-  id: string;
-  threadId?: string;
-  from: string;
-  to?: string;
-  cc?: string;
-  bcc?: string;
-  replyTo?: string;
-  subject: string;
-  date: Date;
-  isRead: boolean;
-  isFlagged: boolean;
-  priority: number;
-  hasAttachments: boolean;
-  snippet: string;
-  bodyHtml?: string;
-  bodyText?: string;
-  folder: string;
-}
-
 // Enhanced validation schemas for account settings
 
 // SMTP Settings validation schema
