@@ -7,7 +7,7 @@ import {
   ListOrdered, 
   Quote, 
   Link, 
-  Image,
+  Image as ImageIcon,
   Code,
   Minus,
   Palette,
@@ -386,7 +386,7 @@ export function RichTextToolbar({ editor, className }: RichTextToolbarProps) {
           className="h-8 w-8 p-0"
           data-testid="button-image"
         >
-          <Image className="h-4 w-4" />
+          <ImageIcon className="h-4 w-4" />
         </Button>
         <Button
           type="button"
